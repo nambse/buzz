@@ -6575,6 +6575,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "ortak-office"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "hex",
+ "nostr 0.44.7",
+ "ortak-control",
+ "ortak-domain",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "ortak-router"
 version = "0.1.0"
 dependencies = [
