@@ -1,0 +1,24 @@
+[package]
+name = "ortak-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Ortak run dispatch and supervision foundation: authoritative run_dispatch consumption, idempotent runtime starts, cursor-resumed event ingestion, and supervised cancellation over the RuntimeAdapter port"
+
+[dependencies]
+ortak-control.workspace = true
+ortak-domain.workspace = true
+chrono.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+serde_yaml.workspace = true
+sha2.workspace = true
+tokio.workspace = true
