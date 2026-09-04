@@ -21,6 +21,39 @@ pub enum ControlError {
     #[error(transparent)]
     Router(#[from] ortak_router::RouterError),
 
+    /// A runtime adapter failed.
+    #[error(transparent)]
+    Runtime(#[from] crate::runtime::RuntimeError),
+
+    /// A memory adapter failed.
+    #[error(transparent)]
+    Memory(#[from] crate::memory::MemoryError),
+
+    /// The Office identity adapter failed.
+    #[error(transparent)]
+    OfficeIdentity(#[from] crate::office_identity::OfficeIdentityError),
+
+    /// The credential manager failed.
+    #[error(transparent)]
+    Credential(#[from] crate::credentials::CredentialError),
+
+    /// A run event violates the persistence contract.
+    #[error(transparent)]
+    RunEvent(#[from] crate::run_event::RunEventError),
+
+    /// A provisioning operation cannot proceed.
+    #[error(transparent)]
+    Provisioning(crate::provisioning::ProvisioningError),
+
+    /// A run-event append targeted an unknown or finished run, or replayed a cursor.
+    #[error("run {run_id} cannot accept events: {detail}")]
+    RunEventRejected {
+        /// Run.
+        run_id: Uuid,
+        /// Stable detail.
+        detail: &'static str,
+    },
+
     /// A durable row is malformed or inconsistent with the schema contract.
     #[error("invalid data: {0}")]
     InvalidData(String),
