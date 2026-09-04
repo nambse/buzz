@@ -452,11 +452,26 @@ mod postgres_tests {
             .collect()
     }
 
-    fn table_has_not_null_community_id(definitions: &[String]) -> bool {
-        definitions.iter().any(|definition| {
-            column_definition_name(definition).as_deref() == Some("community_id")
-                && normalize_sql(definition).contains("not null")
-        })
+    /// Tenant key columns recognized by the isolation lints. Inherited Buzz
+    /// relations are scoped by `community_id`; Ortak control-plane relations
+    /// (migration 0045) are scoped by `company_id` and bridge to a community
+    /// only through `office_company_bindings`, which carries both.
+    const TENANT_KEY_COLUMNS: [&str; 2] = ["community_id", "company_id"];
+
+    fn table_tenant_key_columns(definitions: &[String]) -> Vec<String> {
+        definitions
+            .iter()
+            .filter_map(|definition| {
+                let column = column_definition_name(definition)?;
+                (TENANT_KEY_COLUMNS.contains(&column.as_str())
+                    && normalize_sql(definition).contains("not null"))
+                .then_some(column)
+            })
+            .collect()
+    }
+
+    fn table_has_not_null_tenant_key(definitions: &[String]) -> bool {
+        !table_tenant_key_columns(definitions).is_empty()
     }
 
     fn operator_global_tables(sql: &str) -> BTreeSet<String> {
@@ -489,6 +504,7 @@ mod postgres_tests {
             "relay_admin_actions",
             "relay_admin_outbox",
             "relay_operator_audit",
+            "companies",
         ] {
             if normalized[insert_pos..].contains(&format!("'{value}'")) {
                 globals.insert(value.to_owned());
@@ -645,13 +661,27 @@ mod postgres_tests {
 
     fn scoped_constraint_violations(sql: &str) -> Vec<ConstraintLint> {
         let scoped_tables = scoped_tables(sql);
+        let tenant_keys: std::collections::BTreeMap<String, Vec<String>> =
+            create_table_definitions(sql)
+                .into_iter()
+                .map(|(table, definitions)| (table, table_tenant_key_columns(&definitions)))
+                .collect();
         scoped_constraint_lints(sql, &scoped_tables)
             .into_iter()
             .filter(|constraint| {
                 if is_allowed_partition_primary_key_exception(constraint) {
                     return false;
                 }
-                constraint.columns.first().map(String::as_str) != Some("community_id")
+                let leading = constraint.columns.first().map(String::as_str);
+                match tenant_keys
+                    .get(&constraint.table)
+                    .filter(|keys| !keys.is_empty())
+                {
+                    Some(keys) => {
+                        !leading.is_some_and(|column| keys.iter().any(|key| key == column))
+                    }
+                    None => leading != Some("community_id"),
+                }
             })
             .collect()
     }
@@ -702,7 +732,7 @@ mod postgres_tests {
         let mut migrations: Vec<_> = MIGRATOR.iter().collect();
         migrations.sort_by_key(|migration| migration.version);
 
-        assert_eq!(migrations.len(), 44);
+        assert_eq!(migrations.len(), 45);
         assert_eq!(migrations[0].version, 1);
         assert_eq!(&*migrations[0].description, "initial schema");
         assert!(migrations[0]
@@ -1287,6 +1317,61 @@ mod postgres_tests {
             desired_schema.contains("'rate_limit_violations'\n    ]::TEXT[])"),
             "schema.sql exclusion list must match the pre-0041 body after ledger removal"
         );
+
+        // Ortak Milestone 1 durable control plane (0045). Additive only:
+        // company-scoped relations keyed by company_id, one dispatching
+        // routing decision per company/message, one employee visit per
+        // company/root chain, immutable revisions, and the dispatch outbox.
+        // schema.sql must carry the same relations for desired-state installs.
+        assert_eq!(migrations[44].version, 45);
+        let control_plane = migrations[44].sql.as_str();
+        for table in [
+            "companies",
+            "office_company_bindings",
+            "employees",
+            "employee_revisions",
+            "employee_runtime_bindings",
+            "employee_memory_bindings",
+            "employee_office_bindings",
+            "employee_aliases",
+            "office_inbox",
+            "delivery_chains",
+            "routing_decisions",
+            "routing_recipients",
+            "routing_re_evaluations",
+            "delivery_chain_visits",
+            "runs",
+            "run_events",
+            "provisioning_operations",
+            "provisioning_operation_steps",
+            "outbox",
+        ] {
+            assert!(
+                control_plane.contains(&format!("CREATE TABLE {table} (")),
+                "migration 45 must create {table}"
+            );
+            assert!(
+                desired_schema.contains(&format!("CREATE TABLE {table} (")),
+                "schema.sql must define {table}"
+            );
+            assert!(
+                !migrations[0]
+                    .sql
+                    .as_str()
+                    .contains(&format!("CREATE TABLE {table} (")),
+                "{table} is additive and must not be folded into 0001"
+            );
+        }
+        assert!(control_plane.contains("UNIQUE (company_id, message_id)"));
+        assert!(control_plane.contains("PRIMARY KEY (company_id, root_message_id, employee_id)"));
+        assert!(control_plane.contains("UNIQUE (company_id, employee_id, revision_number)"));
+        assert!(control_plane.contains("PRIMARY KEY (company_id, run_id, sequence)"));
+        assert!(control_plane.contains("CHECK (dispatching = false)"));
+        assert!(control_plane.contains("attach_community_write_fence('office_company_bindings')"));
+        assert!(
+            control_plane.contains("('companies',"),
+            "migration 45 must register companies in _operator_global_tables"
+        );
     }
 
     #[test]
@@ -1400,7 +1485,7 @@ mod postgres_tests {
         let missing = definitions
             .into_iter()
             .filter(|(table, _)| scoped.contains(table))
-            .filter(|(_, definitions)| !table_has_not_null_community_id(definitions))
+            .filter(|(_, definitions)| !table_has_not_null_tenant_key(definitions))
             .map(|(table, _)| table)
             .collect::<Vec<_>>();
 
@@ -1471,6 +1556,69 @@ mod postgres_tests {
     }
 
     #[test]
+    fn migration_lint_accepts_company_scoped_keys_and_rejects_unscoped_ones() {
+        let sql = r#"
+            CREATE TABLE companies (id UUID PRIMARY KEY);
+            CREATE TABLE widgets (
+                company_id UUID NOT NULL REFERENCES companies(id),
+                id UUID NOT NULL,
+                slug TEXT NOT NULL,
+                PRIMARY KEY (company_id, id),
+                UNIQUE (company_id, slug)
+            );
+            CREATE UNIQUE INDEX idx_widgets_slug ON widgets (company_id, slug);
+            CREATE TABLE gadgets (
+                company_id UUID NOT NULL REFERENCES companies(id),
+                id UUID PRIMARY KEY,
+                widget_id UUID NOT NULL,
+                FOREIGN KEY (widget_id) REFERENCES widgets(id)
+            );
+            CREATE TABLE _operator_global_tables (table_name TEXT PRIMARY KEY, reason TEXT NOT NULL);
+            INSERT INTO _operator_global_tables (table_name, reason) VALUES
+                ('companies', 'registry'),
+                ('_operator_global_tables', 'registry');
+        "#;
+
+        let scoped = scoped_tables(sql);
+        assert!(scoped.contains("widgets"));
+        assert!(scoped.contains("gadgets"));
+        assert!(!scoped.contains("companies"));
+
+        let missing = create_table_definitions(sql)
+            .into_iter()
+            .filter(|(table, _)| scoped.contains(table))
+            .filter(|(_, definitions)| !table_has_not_null_tenant_key(definitions))
+            .map(|(table, _)| table)
+            .collect::<Vec<_>>();
+        assert!(
+            missing.is_empty(),
+            "company_id is a tenant key: {missing:?}"
+        );
+
+        let violations = scoped_constraint_violations(sql);
+        assert!(
+            violations
+                .iter()
+                .all(|violation| violation.table == "gadgets"),
+            "company-led keys on widgets must pass: {violations:?}"
+        );
+        assert_eq!(
+            violations
+                .iter()
+                .filter(|violation| violation.kind == ConstraintKind::PrimaryKey)
+                .count(),
+            1
+        );
+        assert_eq!(
+            violations
+                .iter()
+                .filter(|violation| violation.kind == ConstraintKind::ForeignKey)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
     fn all_non_operator_global_tables_have_not_null_community_id() {
         let sql = migration_sql();
         let sql = sql.as_str();
@@ -1478,13 +1626,13 @@ mod postgres_tests {
         let missing = create_table_definitions(sql)
             .into_iter()
             .filter(|(table, _)| scoped.contains(table))
-            .filter(|(_, definitions)| !table_has_not_null_community_id(definitions))
+            .filter(|(_, definitions)| !table_has_not_null_tenant_key(definitions))
             .map(|(table, _)| table)
             .collect::<Vec<_>>();
 
         assert!(
             missing.is_empty(),
-            "every table not listed in _operator_global_tables must carry NOT NULL community_id; missing: {}",
+            "every table not listed in _operator_global_tables must carry NOT NULL community_id (Buzz) or company_id (Ortak); missing: {}",
             missing.join(", ")
         );
     }
@@ -1497,7 +1645,7 @@ mod postgres_tests {
             .into_iter()
             .map(|constraint| {
                 format!(
-                    "{}. {:?} constraint must lead with community_id: {}",
+                    "{}. {:?} constraint must lead with the table's tenant key: {}",
                     constraint.table, constraint.kind, constraint.description
                 )
             })
@@ -1505,7 +1653,7 @@ mod postgres_tests {
 
         assert!(
             violations.is_empty(),
-            "tenant-scoped tables are all tables not listed in _operator_global_tables; primary key, unique/FK constraints, and unique indexes on those tables must lead with community_id:\n{}",
+            "tenant-scoped tables are all tables not listed in _operator_global_tables; primary key, unique/FK constraints, and unique indexes on those tables must lead with the table's tenant key (community_id, or company_id for Ortak relations):\n{}",
             violations.join("\n")
         );
     }
@@ -2752,7 +2900,14 @@ mod postgres_tests {
             "all NIP-FI tables must be absent after migration 0044: {present:?}"
         );
 
-        // The deletion catalog must validate with ledger relations gone.
+        // The deletion catalog must validate with ledger relations gone. The
+        // catalog is pinned to the head migration set (0045 adds the
+        // company-scoped office_company_bindings bridge), so bring the
+        // database to head before validating.
+        MIGRATOR
+            .run(&pool)
+            .await
+            .expect("remaining migrations apply after ledger removal");
         crate::deletion::DeletionStore::new(pool.clone())
             .validate_catalog()
             .await
