@@ -1797,6 +1797,10 @@ CREATE INDEX idx_runs_employee_status
 CREATE INDEX idx_runs_active
     ON runs (company_id, updated_at)
     WHERE status IN ('queued', 'running', 'waiting');
+-- Company-scoped Activity run list, newest first with a keyset on
+-- (queued_at, id) (migration 0046).
+CREATE INDEX idx_runs_company_queued
+    ON runs (company_id, queued_at DESC, id DESC);
 
 -- Ordered, normalized, append-only activity. (company_id, run_id, sequence)
 -- is the replay cursor; sequences are dense so a reader can detect gaps.

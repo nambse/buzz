@@ -34,8 +34,6 @@ use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
-
 const DEFAULT_DATABASE_URL: &str = "postgres://buzz:buzz_dev@localhost:5432/buzz"; // sadscan:disable np.postgres.1 -- local test-only credentials
 
 fn database_url() -> String {
@@ -50,7 +48,9 @@ async fn setup_pool() -> PgPool {
     let pool = PgPool::connect(&database_url())
         .await
         .expect("connect to test database");
-    MIGRATOR.run(&pool).await.expect("apply migrations");
+    buzz_db::migration::run_migrations(&pool)
+        .await
+        .expect("apply migrations");
     pool
 }
 

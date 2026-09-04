@@ -1,25 +1,24 @@
 [package]
-name = "ortak-control"
+name = "ortak-observability"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Ortak control plane: repository ports, authoritative routing transaction, and PostgreSQL adapters"
+description = "Ortak Activity read foundation: bounded, company-scoped run list, run detail, typed run-event timeline, and sequence-based incremental event paging over the durable runs and run_events relations"
 
 [dependencies]
+ortak-control.workspace = true
 ortak-domain.workspace = true
-ortak-router.workspace = true
+ortak-runtime.workspace = true
 chrono.workspace = true
-hex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
-tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
 buzz-db.workspace = true
 serde_yaml.workspace = true
+sha2.workspace = true
 tokio.workspace = true

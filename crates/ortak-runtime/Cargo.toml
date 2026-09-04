@@ -19,6 +19,7 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+buzz-db.workspace = true
 serde_yaml.workspace = true
 sha2.workspace = true
 tokio.workspace = true

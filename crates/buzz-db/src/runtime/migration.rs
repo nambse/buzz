@@ -732,7 +732,7 @@ mod postgres_tests {
         let mut migrations: Vec<_> = MIGRATOR.iter().collect();
         migrations.sort_by_key(|migration| migration.version);
 
-        assert_eq!(migrations.len(), 45);
+        assert_eq!(migrations.len(), 46);
         assert_eq!(migrations[0].version, 1);
         assert_eq!(&*migrations[0].description, "initial schema");
         assert!(migrations[0]
@@ -1371,6 +1371,19 @@ mod postgres_tests {
         assert!(
             control_plane.contains("('companies',"),
             "migration 45 must register companies in _operator_global_tables"
+        );
+
+        // Ortak Milestone 4 Activity run-list index (0046). Index-only and
+        // additive; the leading company_id keeps the keyset scan inside one
+        // tenant. schema.sql must carry it for desired-state installs.
+        assert_eq!(migrations[45].version, 46);
+        let run_list_index = migrations[45].sql.as_str();
+        assert!(run_list_index.contains("CREATE INDEX idx_runs_company_queued"));
+        assert!(run_list_index.contains("ON runs (company_id, queued_at DESC, id DESC)"));
+        assert!(!run_list_index.contains("CREATE TABLE"));
+        assert!(
+            desired_schema.contains("CREATE INDEX idx_runs_company_queued"),
+            "schema.sql must define idx_runs_company_queued"
         );
     }
 

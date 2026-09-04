@@ -6546,6 +6546,7 @@ checksum = "d7b497d21a8b6fbb4b5a544f8fadb77e801a09ae0add9e411d31c6f89e3c1e90"
 name = "ortak-control"
 version = "0.1.0"
 dependencies = [
+ "buzz-db",
  "chrono",
  "hex",
  "ortak-domain",
@@ -6575,9 +6576,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "ortak-observability"
+version = "0.1.0"
+dependencies = [
+ "buzz-db",
+ "chrono",
+ "ortak-control",
+ "ortak-domain",
+ "ortak-runtime",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.11.0",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "ortak-office"
 version = "0.1.0"
 dependencies = [
+ "buzz-db",
  "chrono",
  "hex",
  "nostr 0.44.7",
@@ -6606,6 +6627,7 @@ dependencies = [
 name = "ortak-runtime"
 version = "0.1.0"
 dependencies = [
+ "buzz-db",
  "chrono",
  "hex",
  "ortak-control",
