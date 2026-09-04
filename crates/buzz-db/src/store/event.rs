@@ -1527,6 +1527,85 @@ pub async fn insert_event_with_thread_metadata(
     Ok(result)
 }
 
+/// Facts about the `events` row write, handed to an [`EventInsertTxHook`].
+#[derive(Clone, Copy, Debug)]
+pub struct EventInsertReceipt {
+    /// `true` when this transaction inserted the row; `false` when the event
+    /// id was already stored and `ON CONFLICT DO NOTHING` skipped the write.
+    pub was_inserted: bool,
+    /// `events.created_at` exactly as bound in the insert statement (the
+    /// partition key consumers need to join back to the signed row).
+    pub created_at: DateTime<Utc>,
+}
+
+/// Work that commits or rolls back together with the signed event insert.
+///
+/// The hook receives the open transaction after the `events` row and thread
+/// metadata statements ran and before `COMMIT`. It must hand the transaction
+/// back on success; returning an error drops it, which rolls back the event,
+/// the thread metadata, and every statement the hook ran. `T` is the hook's
+/// typed result, returned to the caller next to the stored event.
+///
+/// This is the Ortak Office-ingress transaction seam
+/// (docs/ortak/ARCHITECTURE_V0.md §4.7, invariant 8): the relay composes the
+/// `office_inbox` handoff here so the sender is acknowledged only after both
+/// rows are durable, and never sees an acknowledgement for an event whose
+/// handoff was lost.
+pub type EventInsertTxHook<'a, T> = Box<
+    dyn FnOnce(
+            Transaction<'static, Postgres>,
+            EventInsertReceipt,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<(Transaction<'static, Postgres>, T)>>
+                    + Send
+                    + 'a,
+            >,
+        > + Send
+        + 'a,
+>;
+
+/// [`insert_event_with_thread_metadata`] with caller-composed work in the
+/// same transaction.
+///
+/// The event insert, thread metadata, and the hook's statements commit
+/// atomically. The inherited hook-free function is left untouched; callers
+/// that do not need the seam keep the exact pre-existing behavior.
+///
+/// Returns `(StoredEvent, was_inserted, hook_result)`.
+pub async fn insert_event_with_thread_metadata_and_hook<T>(
+    pool: &PgPool,
+    community_id: CommunityId,
+    event: &Event,
+    channel_id: Option<Uuid>,
+    thread_meta: Option<ThreadMetadataParams<'_>>,
+    hook: EventInsertTxHook<'_, T>,
+) -> Result<(StoredEvent, bool, T)> {
+    let connection = crate::observability::acquire_writer(
+        pool,
+        crate::observability::WriterOperation::EventWrite,
+    )
+    .await?;
+    // Same conversion `insert_event_with_thread_metadata_tx` binds as
+    // `events.created_at`; computed up front so the receipt matches the row.
+    let created_at_secs = event.created_at.as_secs() as i64;
+    let created_at = DateTime::from_timestamp(created_at_secs, 0)
+        .ok_or(DbError::InvalidTimestamp(created_at_secs))?;
+    let mut tx = sqlx::Transaction::begin(connection, None).await?;
+    let (stored_event, was_inserted) =
+        insert_event_with_thread_metadata_tx(&mut tx, community_id, event, channel_id, thread_meta)
+            .await?;
+    let receipt = EventInsertReceipt {
+        was_inserted,
+        created_at,
+    };
+    // On `Err` the transaction is dropped inside the hook, so nothing above
+    // reaches the database.
+    let (tx, hook_result) = hook(tx, receipt).await?;
+    tx.commit().await?;
+    Ok((stored_event, was_inserted, hook_result))
+}
+
 impl Db {
     /// Inserts an event. Returns `(StoredEvent, was_inserted)` — `false` on duplicate.
     #[datastore_span(name = "insert_event", system = "postgresql")]
@@ -2050,6 +2129,43 @@ impl Db {
             event,
             channel_id,
             thread_meta,
+        )
+        .await?;
+        if result.1 {
+            if let Err(e) =
+                crate::insert_mentions(&self.pool, community_id, event, channel_id).await
+            {
+                tracing::warn!(event_id = %event.id, "Failed to insert mentions: {e}");
+            }
+        }
+        Ok(result)
+    }
+
+    /// [`Db::insert_event_with_thread_metadata`] with caller-composed work in
+    /// the same transaction (see [`crate::event::EventInsertTxHook`]).
+    ///
+    /// Mirrors the inherited wrapper exactly, including the best-effort
+    /// mention indexing after commit, so the Ortak Office-ingress path keeps
+    /// every Buzz side effect of a stored message.
+    #[datastore_span(
+        name = "insert_event_with_thread_metadata_and_hook",
+        system = "postgresql"
+    )]
+    pub async fn insert_event_with_thread_metadata_and_hook<T>(
+        &self,
+        community_id: CommunityId,
+        event: &nostr::Event,
+        channel_id: Option<Uuid>,
+        thread_meta: Option<crate::event::ThreadMetadataParams<'_>>,
+        hook: crate::event::EventInsertTxHook<'_, T>,
+    ) -> Result<(StoredEvent, bool, T)> {
+        let result = crate::event::insert_event_with_thread_metadata_and_hook(
+            &self.pool,
+            community_id,
+            event,
+            channel_id,
+            thread_meta,
+            hook,
         )
         .await?;
         if result.1 {

@@ -44,6 +44,7 @@ use nostr::Event;
 use crate::state::AppState;
 
 use super::event::dispatch_persistent_event;
+use super::office_ingress;
 
 use crate::conformance::{
     self as conf, channel_label, claimed_community_from_event, emit, msg_id_label,
@@ -3169,16 +3170,53 @@ async fn ingest_event_inner(
             .map_err(|e| IngestError::Internal(format!("error: {e}")))?
     } else {
         let thread_params = thread_meta.as_ref().map(|m| m.as_params());
-        match state
-            .db
-            .insert_event_with_thread_metadata(
+        // Ortak Milestone 2 Office-ingress seam. With central routing
+        // enabled, routable Office events commit together with their
+        // `office_inbox` handoff row before this function returns, and the
+        // OK acknowledgement is sent only after that (handlers/event.rs).
+        // With the flag off (the default) this is the untouched inherited
+        // call. See handlers/office_ingress.rs.
+        let persisted = if office_ingress::central_routing_applies(&state.config, kind_u32) {
+            match office_ingress::persist_with_office_inbox(
+                &state.db,
                 tenant.community(),
                 &event,
                 channel_id,
                 thread_params,
             )
             .await
-        {
+            {
+                Ok(outcome) => {
+                    debug!(
+                        event_id = %event_id_hex,
+                        inbox = ?outcome.inbox,
+                        "Office event and inbox handoff committed"
+                    );
+                    Ok((outcome.stored_event, outcome.was_inserted))
+                }
+                Err(e) => {
+                    error!(event_id = %event_id_hex, kind = kind_u32, "Office ingress failed closed: {e}");
+                    Err(e.into_ingest_error())
+                }
+            }
+        } else {
+            state
+                .db
+                .insert_event_with_thread_metadata(
+                    tenant.community(),
+                    &event,
+                    channel_id,
+                    thread_params,
+                )
+                .await
+                .map_err(|e| match e {
+                    buzz_db::DbError::AuthEventRejected => {
+                        IngestError::Rejected("invalid: AUTH events cannot be stored".into())
+                    }
+                    other => IngestError::Internal(format!("error: database error: {other}")),
+                })
+        };
+        match persisted {
             Ok(result) => result,
             Err(e) => {
                 // Compensate: if we pre-created a channel for kind:9007,
@@ -3193,12 +3231,7 @@ async fn ingest_event_inner(
                     }
                     state.invalidate_channel_deleted(tenant);
                 }
-                return Err(match e {
-                    buzz_db::DbError::AuthEventRejected => {
-                        IngestError::Rejected("invalid: AUTH events cannot be stored".into())
-                    }
-                    other => IngestError::Internal(format!("error: database error: {other}")),
-                });
+                return Err(e);
             }
         }
     };

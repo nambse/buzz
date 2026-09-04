@@ -24,6 +24,8 @@ pub mod moderation_authz;
 pub mod moderation_commands;
 /// Relay-signed moderation notice DMs.
 pub mod moderation_notices;
+/// Ortak Office-ingress adapter: signed event + `office_inbox` in one transaction.
+pub mod office_ingress;
 /// Product-feedback validation + deployment sidecar persistence.
 pub mod product_feedback;
 #[allow(dead_code, missing_docs)]
