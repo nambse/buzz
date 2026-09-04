@@ -304,6 +304,18 @@ pub struct Config {
     /// Set `BUZZ_AUDIT_ENABLED=false` for deployments that do not require it.
     pub audit_enabled: bool,
 
+    /// Ortak central-routing cutover flag (Implementation Plan v0, Milestone 2).
+    ///
+    /// When true, routable Office events (channel messages and DM wraps) are
+    /// persisted together with their `office_inbox` handoff row in one
+    /// PostgreSQL transaction before the sender is acknowledged, and an
+    /// authenticated community without an `office_company_bindings` row is
+    /// rejected (fail closed). Defaults to false, which leaves the inherited
+    /// Buzz persistence path exactly as it was. The per-profile ACP gateway
+    /// path is not affected by this flag either way.
+    /// Set `ORTAK_CENTRAL_ROUTING_ENABLED=true` to enable.
+    pub ortak_central_routing_enabled: bool,
+
     /// Optional override for ephemeral channel TTL (in seconds).
     /// When set, any channel created with a TTL tag will use this value instead
     /// of the client-provided one. Useful for testing ephemeral expiry quickly.
@@ -1017,6 +1029,7 @@ impl Config {
         let privacy_markdown = read_policy_markdown("BUZZ_PRIVACY_POLICY_MARKDOWN")?;
         let age_attestation_required = parse_optional_bool("BUZZ_AGE_ATTESTATION_REQUIRED")?;
         let audit_enabled = parse_bool("BUZZ_AUDIT_ENABLED", true)?;
+        let ortak_central_routing_enabled = parse_bool("ORTAK_CENTRAL_ROUTING_ENABLED", false)?;
         let join_policy = if terms_markdown.is_none()
             && privacy_markdown.is_none()
             && !age_attestation_required
@@ -1239,6 +1252,7 @@ impl Config {
             media_max_concurrent_uploads_per_pubkey,
             media_uploads_per_minute,
             audit_enabled,
+            ortak_central_routing_enabled,
             ephemeral_ttl_override,
             git_repo_path,
             git_pack_cache_path,
@@ -2024,6 +2038,24 @@ mod tests {
             std::env::set_var("BUZZ_AUDIT_ENABLED", value);
         } else {
             std::env::remove_var("BUZZ_AUDIT_ENABLED");
+        }
+    }
+
+    #[test]
+    fn ortak_central_routing_defaults_off_and_accepts_explicit_on() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let previous = std::env::var_os("ORTAK_CENTRAL_ROUTING_ENABLED");
+        std::env::remove_var("ORTAK_CENTRAL_ROUTING_ENABLED");
+        assert!(
+            !parse_bool("ORTAK_CENTRAL_ROUTING_ENABLED", false).unwrap(),
+            "central routing must stay disabled unless explicitly enabled"
+        );
+        std::env::set_var("ORTAK_CENTRAL_ROUTING_ENABLED", "true");
+        assert!(parse_bool("ORTAK_CENTRAL_ROUTING_ENABLED", false).unwrap());
+        if let Some(value) = previous {
+            std::env::set_var("ORTAK_CENTRAL_ROUTING_ENABLED", value);
+        } else {
+            std::env::remove_var("ORTAK_CENTRAL_ROUTING_ENABLED");
         }
     }
 

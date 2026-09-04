@@ -45,6 +45,17 @@ pub enum DbError {
     #[error("invalid data: {0}")]
     InvalidData(String),
 
+    /// Caller-composed work inside an event-insert transaction failed.
+    ///
+    /// Raised by [`crate::event::insert_event_with_thread_metadata_and_hook`]
+    /// when the [`crate::event::EventInsertTxHook`] returns an error. The
+    /// transaction has been rolled back: neither the signed event nor the
+    /// hook's own writes were committed. The boxed source is the hook's typed
+    /// error so the caller can downcast it (the Ortak Office-ingress seam
+    /// carries an `ortak_control::ControlError` here).
+    #[error("transaction hook error: {0}")]
+    TransactionHook(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
+
     /// A serving write admitted before the lifecycle transition is still live.
     /// This is an ordinary retryable drain condition, not a safety violation.
     #[error(

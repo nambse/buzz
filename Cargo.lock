@@ -1302,6 +1302,7 @@ dependencies = [
  "opentelemetry 0.32.0",
  "opentelemetry-otlp 0.32.0",
  "opentelemetry_sdk 0.32.1",
+ "ortak-control",
  "postcard",
  "pulldown-cmark",
  "rand 0.10.1",
