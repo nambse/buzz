@@ -6,6 +6,7 @@ members = [
     "crates/ortak-office",
     "crates/ortak-runtime",
     "crates/ortak-observability",
+    "crates/ortak-work",
     "crates/buzz-relay",
     "crates/buzz-core",
     "crates/buzz-conformance",
@@ -166,6 +167,7 @@ ortak-control = { path = "crates/ortak-control" }
 ortak-office = { path = "crates/ortak-office" }
 ortak-runtime = { path = "crates/ortak-runtime" }
 ortak-observability = { path = "crates/ortak-observability" }
+ortak-work = { path = "crates/ortak-work" }
 
 # CI profile — builds the relay for desktop e2e. Dependencies keep full
 # release optimization (warm from main's cache; they carry the runtime hot

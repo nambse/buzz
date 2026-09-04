@@ -71,4 +71,63 @@ pub enum DomainError {
     /// A delivery chain counter cannot be advanced without overflowing.
     #[error("delivery chain counter overflow")]
     DeliveryChainOverflow,
+    /// A project slug is empty or contains unsupported characters.
+    #[error("project slug must match ^[a-z0-9][a-z0-9_-]{{0,63}}$")]
+    InvalidProjectSlug,
+    /// The project is archived and accepts no mutation.
+    #[error("project is archived")]
+    ProjectArchived,
+    /// The work state machine does not allow this transition.
+    #[error("work item cannot move from {from} to {to}")]
+    InvalidWorkTransition {
+        /// Current state.
+        from: crate::WorkState,
+        /// Requested state.
+        to: crate::WorkState,
+    },
+    /// The work item is in a terminal state and accepts no mutation.
+    #[error("work item is {state} and cannot change")]
+    WorkItemTerminal {
+        /// Terminal state.
+        state: crate::WorkState,
+    },
+    /// Completion gates are not all satisfied.
+    #[error("work item cannot complete: {} gate(s) block it", blockers.len())]
+    CompletionBlocked {
+        /// Every unsatisfied criterion and unapproved required gate.
+        blockers: Vec<crate::CompletionBlocker>,
+    },
+    /// Work cannot start while a dependency is unfinished.
+    #[error("work item is blocked by {count} unfinished dependency(ies)")]
+    DependenciesUnresolved {
+        /// Number of blocking dependencies.
+        count: usize,
+    },
+    /// A work item cannot depend on itself.
+    #[error("work item cannot depend on itself")]
+    SelfDependency,
+    /// The dependency would close a cycle in the project graph.
+    #[error("dependency would create a cycle")]
+    DependencyCycle,
+    /// The dependency already exists.
+    #[error("dependency already exists")]
+    DuplicateWorkDependency,
+    /// The criterion does not belong to the work item.
+    #[error("unknown acceptance criterion")]
+    UnknownCriterion,
+    /// The criterion was already satisfied.
+    #[error("acceptance criterion is already satisfied")]
+    CriterionAlreadySatisfied,
+    /// The approval gate does not belong to the work item.
+    #[error("unknown approval gate")]
+    UnknownApproval,
+    /// The approval gate was already resolved.
+    #[error("approval gate is already resolved")]
+    ApprovalAlreadyResolved,
+    /// The employee already holds an active assignment on the item.
+    #[error("employee is already assigned")]
+    DuplicateAssignment,
+    /// The record is already attached.
+    #[error("record is already attached")]
+    DuplicateAttachment,
 }
