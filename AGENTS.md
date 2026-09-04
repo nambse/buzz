@@ -1,3 +1,35 @@
+# AGENTS.md — Ortak Contributor Guide
+
+This repository is the independent Ortak product. It began from a pinned Buzz
+source snapshot but does not preserve or track Buzz upstream compatibility.
+
+## Ortak product contract
+
+Before planning or implementing a non-trivial change:
+
+1. Read `docs/ortak/ARCHITECTURE_V0.md`.
+2. Read `docs/ortak/IMPLEMENTATION_PLAN_V0.md` and work within its current
+   dependency boundary.
+3. Consult `docs/ortak/BUZZ_BASELINE.md` before retaining, rewriting, or deleting
+   inherited Buzz code.
+4. Keep Employee identity independent from runtime/model/session state.
+5. Preserve central, deterministic-first routing. Do not add a path where each
+   employee runtime independently subscribes to Office and decides to wake.
+6. Never commit private keys, OAuth material, provider tokens, `auth.json`, or
+   secret values. Employee manifests contain opaque credential references only.
+7. Existing Cem and Zeynep resources are adopted external resources. Tests and
+   provisioning code must not activate, delete, or recreate them before all
+   runtime, memory, Office membership, and signer health checks pass.
+8. Pure delivery-chain values are snapshots, not concurrency authority. Durable
+   per-root counters and unique employee reservations must be committed with the
+   routing decision and dispatch outbox.
+
+The inherited Buzz guidance below remains useful for retained legacy modules,
+testing, Rust/Tauri conventions, and safety. If it conflicts with the Ortak
+architecture documents, the Ortak product contract above wins.
+
+---
+
 # AGENTS.md — AI Agent Contributor Guide
 
 This guide is for AI agents contributing to the Buzz codebase. It covers

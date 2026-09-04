@@ -1,3 +1,46 @@
+<h1 align="center">Ortak</h1>
+
+<p align="center">
+  <strong>An operating workspace for an AI-native company.</strong>
+</p>
+
+Ortak is an independent product built from a pinned Apache-2.0 Buzz source
+snapshot. It does not track Buzz upstream compatibility. The inherited Buzz
+application remains below as a runnable migration baseline while Ortak replaces
+its product model by dependency boundary.
+
+Current implementation status:
+
+- Architecture v0 and the dependency-ordered implementation plan are accepted.
+- `ortak-domain` defines runtime-independent employees and secret-free adoption
+  manifests.
+- `ortak-router` implements deterministic-first routing, bounded semantic
+  scoring, silence, recipient/hop budgets, and employee-loop prevention.
+- Cem and Zeynep are retained as non-destructive, non-routable `draft`/`adopt`
+  fixtures; health-checked provisioning must activate them. Their private keys
+  and provider credentials are not stored in this repository.
+
+Start here:
+
+- [Buzz baseline assessment](docs/ortak/BUZZ_BASELINE.md)
+- [Ortak Architecture v0](docs/ortak/ARCHITECTURE_V0.md)
+- [Implementation Plan v0](docs/ortak/IMPLEMENTATION_PLAN_V0.md)
+
+Focused verification:
+
+```bash
+. ./bin/activate-hermit
+cargo test -p ortak-domain -p ortak-router
+cargo clippy -p ortak-domain -p ortak-router --all-targets -- -D warnings
+```
+
+---
+
+## Inherited Buzz baseline
+
+The remainder of this README documents the pinned Buzz baseline and will shrink
+as its retained infrastructure moves behind Ortak-owned ports.
+
 <h1 align="center">Buzz 🐝</h1>
 
 <p align="center">

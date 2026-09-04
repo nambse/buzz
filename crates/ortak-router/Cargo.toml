@@ -1,0 +1,13 @@
+[package]
+name = "ortak-router"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+ortak-domain.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_yaml.workspace = true

@@ -6542,6 +6542,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7b497d21a8b6fbb4b5a544f8fadb77e801a09ae0add9e411d31c6f89e3c1e90"
 
 [[package]]
+name = "ortak-domain"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.11.0",
+ "thiserror 2.0.18",
+ "unicode-normalization",
+]
+
+[[package]]
+name = "ortak-router"
+version = "0.1.0"
+dependencies = [
+ "ortak-domain",
+ "serde_yaml",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "os_str_bytes"
 version = "6.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

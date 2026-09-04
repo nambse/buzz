@@ -1,0 +1,64 @@
+schema_version: ortak.employee/v0
+provisioning: adopt
+employee:
+  id: cem
+  name: Cem
+  title: Co-Founder
+  biography: Company strategy, product direction, and founder-level decisions.
+  status: draft
+  aliases:
+    - co-founder
+  responsibilities:
+    - Shape company and product strategy
+    - Challenge important product assumptions
+    - Turn ambiguous ideas into executable decisions
+  domains:
+    - company_strategy
+    - product_strategy
+    - business_model
+  runtime:
+    adapter: hermes
+    profile_ref: /opt/data/profiles/cem
+    model: gpt-5.6-sol
+    workspace_ref: /opt/data/workspace/company
+    credential_refs:
+      - credential://ortak-runtime/cem/codex-oauth
+    options:
+      reasoning_effort: medium
+      reasoning_effort_cap: high
+      session_scope: per_session
+  memory:
+    adapter: honcho
+    endpoint_ref: service://honcho-api
+    workspace: ortak
+    user_peer: sefa
+    employee_peer: cem
+    options:
+      host: hermes_cem
+      mode: directional
+      writes: async
+      recall: hybrid
+      context_tokens: "4000"
+      cadence: "2"
+  office:
+    public_key: 345fe1a23fc0cc492f78b8c90535414e46536eb58b38d6170dabbd949969f1a6
+    signer_ref: credential://ortak-runtime/cem/office-signing-key
+    home_channel_ref: office-channel://founders
+  permissions:
+    allowed_tools:
+      - office
+      - web
+      - files
+      - terminal
+    allowed_workspaces:
+      - /opt/data/workspace/company
+      - /opt/data/workspace/projects
+    allowed_networks:
+      - service://honcho-api
+    approval_required:
+      - external_publish
+      - credential_change
+      - destructive_file_operation
+  routing:
+    enabled: true
+    semantic_min_score: 0.72

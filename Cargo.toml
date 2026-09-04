@@ -1,5 +1,7 @@
 [workspace]
 members = [
+    "crates/ortak-domain",
+    "crates/ortak-router",
     "crates/buzz-relay",
     "crates/buzz-core",
     "crates/buzz-conformance",
@@ -40,7 +42,10 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.88.0"
 license = "Apache-2.0"
-repository = "https://github.com/block/sprout"
+# Retained buzz-* packages inherit their verified source repository until the
+# user chooses and configures an Ortak destination remote. New ortak-* crates do
+# not inherit this field.
+repository = "https://github.com/block/buzz"
 
 [workspace.dependencies]
 # Runtime
@@ -79,6 +84,7 @@ postcard    = { version = "1", default-features = false, features = ["use-std"] 
 iroh = { version = "1.0.0-rc.0", default-features = false, features = ["tls-ring"] }
 serde_json  = { version = "1", features = ["raw_value"] }
 serde_yaml  = "0.9"
+unicode-normalization = "0.1"
 evalexpr    = "11"
 cron        = "0.16"
 # Observability
@@ -150,6 +156,7 @@ buzz-sdk = { path = "crates/buzz-sdk" }
 buzz-ws-client = { path = "crates/buzz-ws-client" }
 buzz-relay-mesh = { path = "crates/buzz-relay-mesh" }
 buzz-datastore-tracing = { path = "crates/buzz-datastore-tracing" }
+ortak-domain = { path = "crates/ortak-domain" }
 
 # CI profile — builds the relay for desktop e2e. Dependencies keep full
 # release optimization (warm from main's cache; they carry the runtime hot
