@@ -17,10 +17,15 @@ use crate::error::Result;
 use crate::ids::{ClaimGeneration, CompanyScope, MessageId};
 use crate::inbox::{InboxClaim, InboxEvent, InboxInsertOutcome, InboxReleaseOutcome, InboxRow};
 use crate::outbox::{OutboxFailOutcome, OutboxKind, OutboxLease};
+use crate::provisioning::{
+    IdentityReservation, OperationUpdate, ProvisioningOperation, ProvisioningRequest,
+    RevisionActivation, StepRecord,
+};
 use crate::routing::{
     ChainState, EmployeeRecord, RoutingCommitOutcome, RoutingProposal, ScorerMetadata,
     StoredDecision,
 };
+use crate::run_event::RunEvent;
 
 /// Server-owned company resolution.
 #[allow(async_fn_in_trait)]
@@ -226,4 +231,116 @@ pub trait MessageNormalizer {
         scope: &CompanyScope,
         inbox: &InboxRow,
     ) -> Result<Option<NormalizedMessage>>;
+}
+
+/// Durable provisioning saga state (Architecture v0 §6).
+#[allow(async_fn_in_trait)]
+pub trait ProvisioningRepository {
+    /// Creates the operation with every step `pending`, or returns the
+    /// existing operation for the idempotency key when its manifest
+    /// fingerprint, mode, and dry-run flag all match; any difference is a
+    /// conflict.
+    async fn begin_operation(
+        &self,
+        scope: &CompanyScope,
+        request: &ProvisioningRequest,
+    ) -> Result<ProvisioningOperation>;
+
+    /// Reads an operation with its steps in execution order.
+    async fn load_operation(
+        &self,
+        scope: &CompanyScope,
+        operation_id: Uuid,
+    ) -> Result<Option<ProvisioningOperation>>;
+
+    /// Updates status, current step, error, and finish time.
+    ///
+    /// Fenced by [`OperationStatus::can_transition_to`] and by
+    /// `result_revision_id`: a write that would regress a terminal or
+    /// activated operation, or turn compensation back into a run, is refused
+    /// with [`ProvisioningError::Superseded`] and leaves the row unchanged.
+    ///
+    /// [`OperationStatus::can_transition_to`]: crate::provisioning::OperationStatus::can_transition_to
+    /// [`ProvisioningError::Superseded`]: crate::provisioning::ProvisioningError::Superseded
+    async fn update_operation(
+        &self,
+        scope: &CompanyScope,
+        operation_id: Uuid,
+        update: &OperationUpdate,
+    ) -> Result<()>;
+
+    /// Upserts one step record by `(operation, step)`.
+    ///
+    /// Fenced by [`StepState::can_transition_to`] and by the operation row:
+    /// once the operation is terminal or has a `result_revision_id`, or when
+    /// the stored step state does not allow the new state, the write is
+    /// refused with [`ProvisioningError::Superseded`] and nothing changes.
+    ///
+    /// [`StepState::can_transition_to`]: crate::provisioning::StepState::can_transition_to
+    /// [`ProvisioningError::Superseded`]: crate::provisioning::ProvisioningError::Superseded
+    async fn record_step(
+        &self,
+        scope: &CompanyScope,
+        operation_id: Uuid,
+        step: &StepRecord,
+    ) -> Result<()>;
+
+    /// Inserts the employee row as `draft` if absent; reports the existing
+    /// status otherwise. Never changes an existing row.
+    async fn reserve_employee_identity(
+        &self,
+        scope: &CompanyScope,
+        employee_id: &EmployeeId,
+    ) -> Result<IdentityReservation>;
+
+    /// In one transaction: inserts the immutable revision, its runtime,
+    /// memory, and Office bindings with validation timestamps, replaces the
+    /// employee's aliases, sets the employee active on that revision, records
+    /// the activation step, and marks the operation `succeeded` with the
+    /// revision id. Returns the new revision id.
+    ///
+    /// Replaying an operation whose `result_revision_id` is already set
+    /// returns that id without writing. Dry-run, terminal, and
+    /// `compensating` operations are refused with
+    /// [`ProvisioningError::InvalidTransition`].
+    ///
+    /// [`ProvisioningError::InvalidTransition`]: crate::provisioning::ProvisioningError::InvalidTransition
+    async fn activate_revision(
+        &self,
+        scope: &CompanyScope,
+        operation_id: Uuid,
+        activation: &RevisionActivation,
+    ) -> Result<Uuid>;
+}
+
+/// Result of appending normalized events to a run.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunEventAppend {
+    /// Sequences assigned to the appended events, in input order.
+    pub sequences: Vec<i64>,
+    /// Events skipped because their runtime cursor was already stored.
+    pub duplicate_cursors: Vec<String>,
+}
+
+/// Ordered, append-only run activity (Architecture v0 §4.6).
+#[allow(async_fn_in_trait)]
+pub trait RunEventRepository {
+    /// Appends already-normalized events with dense sequences under the run
+    /// row lock. Events whose `runtime_cursor` already exists are skipped, not
+    /// duplicated. Events must pass [`RunEvent::validate`].
+    async fn append_run_events(
+        &self,
+        scope: &CompanyScope,
+        run_id: Uuid,
+        events: &[RunEvent],
+    ) -> Result<RunEventAppend>;
+
+    /// Reads up to `limit` events with `sequence > after` in order.
+    async fn run_events_after(
+        &self,
+        scope: &CompanyScope,
+        run_id: Uuid,
+        after: i64,
+        limit: i64,
+    ) -> Result<Vec<RunEvent>>;
 }
