@@ -331,3 +331,55 @@ pub trait RuntimeAdapter {
         reason: &str,
     ) -> Result<CancelOutcome, RuntimeError>;
 }
+
+impl<T: RuntimeAdapter + ?Sized> RuntimeAdapter for &T {
+    fn adapter_name(&self) -> &str {
+        (**self).adapter_name()
+    }
+
+    async fn probe_capabilities(&self) -> Result<RuntimeCapabilities, RuntimeError> {
+        (**self).probe_capabilities().await
+    }
+
+    async fn health(&self, binding: &RuntimeBinding) -> Result<HealthReport, RuntimeError> {
+        (**self).health(binding).await
+    }
+
+    async fn ensure_profile(
+        &self,
+        request: &RuntimeResourceRequest,
+    ) -> Result<ResourceOutcome, RuntimeError> {
+        (**self).ensure_profile(request).await
+    }
+
+    async fn delete_created_profile(
+        &self,
+        resource_ref: &str,
+        idempotency_key: &str,
+    ) -> Result<(), RuntimeError> {
+        (**self)
+            .delete_created_profile(resource_ref, idempotency_key)
+            .await
+    }
+
+    async fn start_run(&self, spec: &RunSpec) -> Result<RunStartReceipt, RuntimeError> {
+        (**self).start_run(spec).await
+    }
+
+    async fn next_events(
+        &self,
+        runtime_run_ref: &RuntimeRunRef,
+        after: Option<&RuntimeCursor>,
+        limit: usize,
+    ) -> Result<RuntimeEventBatch, RuntimeError> {
+        (**self).next_events(runtime_run_ref, after, limit).await
+    }
+
+    async fn cancel_run(
+        &self,
+        runtime_run_ref: &RuntimeRunRef,
+        reason: &str,
+    ) -> Result<CancelOutcome, RuntimeError> {
+        (**self).cancel_run(runtime_run_ref, reason).await
+    }
+}

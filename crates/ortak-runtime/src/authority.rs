@@ -1,0 +1,488 @@
+//! Dispatch authority derived from durable rows, and the pure validation
+//! that turns a pinned revision into a runtime binding and bounded input.
+//!
+//! A leased `run_dispatch` outbox row carries a JSON payload written by the
+//! routing commit. That payload is only a hint. Everything that reaches the
+//! runtime is derived again from company-scoped rows and sealed into
+//! [`DispatchAuthority`], which has no public constructor.
+
+use std::collections::BTreeMap;
+use std::fmt;
+
+use ortak_control::run_event::strip_control_characters;
+use ortak_control::runtime::{RunContext, RunSpec, RuntimeError, MAX_RUN_INPUT_BYTES};
+use ortak_control::MessageId;
+use ortak_domain::{CredentialRef, Employee, EmployeeId, EmployeeStatus, RuntimeBinding};
+use uuid::Uuid;
+
+/// Why a leased dispatch cannot start a run. Every variant is bounded and
+/// carries identifiers or closed-vocabulary values only.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DispatchRefusal {
+    /// The outbox row names no routing decision.
+    DecisionMissing,
+    /// The decision has no recipient row for the employee.
+    RecipientMissing,
+    /// The recipient row is not a `wake`.
+    RecipientNotWake {
+        /// Recipient action found.
+        action: String,
+    },
+    /// The recipient row pins no employee revision.
+    RecipientRevisionUnpinned,
+    /// No delivery-chain visit reservation exists for the recipient.
+    VisitMissing,
+    /// The inbox row is missing or not `decided`.
+    InboxNotDecided {
+        /// Inbox state found, if any.
+        state: Option<String>,
+    },
+    /// The employee row is missing.
+    EmployeeMissing,
+    /// The employee lifecycle status does not accept work.
+    EmployeeNotActive {
+        /// Durable status.
+        status: EmployeeStatus,
+    },
+    /// The pinned revision row does not exist for this employee.
+    RevisionMissing,
+    /// The pinned revision manifest cannot be read as an employee definition
+    /// for this employee.
+    ManifestUnreadable,
+    /// The pinned revision has no `employee_runtime_bindings` row.
+    RuntimeBindingMissing,
+    /// The runtime binding row was never validated by its adapter.
+    RuntimeBindingUnvalidated,
+    /// The runtime binding row disagrees with the manifest.
+    RuntimeBindingMismatch {
+        /// Field that differs.
+        field: &'static str,
+    },
+    /// The binding names a different adapter than the one dispatching.
+    AdapterMismatch {
+        /// Adapter the binding names.
+        expected: String,
+        /// Adapter available.
+        found: String,
+    },
+    /// The signed Office event behind the inbox row is not readable.
+    MessageUnavailable,
+    /// The signed Office event was deleted.
+    MessageDeleted,
+    /// The message has no routable text after bounding.
+    EmptyMessage,
+}
+
+impl fmt::Display for DispatchRefusal {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DecisionMissing => formatter.write_str("routing decision missing"),
+            Self::RecipientMissing => formatter.write_str("routing recipient missing"),
+            Self::RecipientNotWake { action } => {
+                write!(formatter, "routing recipient action is {action}, not wake")
+            }
+            Self::RecipientRevisionUnpinned => {
+                formatter.write_str("routing recipient pins no employee revision")
+            }
+            Self::VisitMissing => formatter.write_str("delivery chain visit missing"),
+            Self::InboxNotDecided { state } => {
+                write!(formatter, "inbox row is {state:?}, not decided")
+            }
+            Self::EmployeeMissing => formatter.write_str("employee row missing"),
+            Self::EmployeeNotActive { status } => {
+                write!(formatter, "employee status is {status:?}, not active")
+            }
+            Self::RevisionMissing => formatter.write_str("pinned employee revision missing"),
+            Self::ManifestUnreadable => formatter.write_str("pinned revision manifest unreadable"),
+            Self::RuntimeBindingMissing => formatter.write_str("runtime binding row missing"),
+            Self::RuntimeBindingUnvalidated => formatter.write_str("runtime binding not validated"),
+            Self::RuntimeBindingMismatch { field } => {
+                write!(
+                    formatter,
+                    "runtime binding {field} differs from the manifest"
+                )
+            }
+            Self::AdapterMismatch { expected, found } => {
+                write!(formatter, "binding adapter {expected} is not {found}")
+            }
+            Self::MessageUnavailable => formatter.write_str("office message unavailable"),
+            Self::MessageDeleted => formatter.write_str("office message deleted"),
+            Self::EmptyMessage => formatter.write_str("office message has no text"),
+        }
+    }
+}
+
+/// Bounded run input derived from the canonical Office event.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunInput {
+    /// Message text, control-stripped and bounded to [`MAX_RUN_INPUT_BYTES`].
+    pub body: String,
+    /// True when the original text exceeded the ceiling.
+    pub truncated: bool,
+    /// Office channel the message was posted to, when channel-scoped.
+    pub channel_id: Option<Uuid>,
+    /// Nostr event kind of the message.
+    pub event_kind: i32,
+}
+
+/// `employee_runtime_bindings` row as read for the pinned revision.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StoredRuntimeBinding {
+    /// Adapter column.
+    pub adapter: String,
+    /// External profile reference.
+    pub profile_ref: Option<String>,
+    /// Model column.
+    pub model: String,
+    /// Workspace column.
+    pub workspace_ref: String,
+    /// Credential reference strings.
+    pub credential_refs: Vec<String>,
+    /// Non-secret options.
+    pub options: BTreeMap<String, String>,
+    /// Whether the adapter validated the binding at activation.
+    pub validated: bool,
+}
+
+/// Validates the pinned revision against its lifecycle and binding rows and
+/// returns the runtime binding the run must use.
+///
+/// The manifest is parsed as a full [`Employee`], must describe
+/// `employee_id`, and must pass definition validation; the stored binding row
+/// must exist, be validated, and match the manifest field by field. The
+/// revision does not have to be the employee's active one: the routing
+/// decision's pinned revision is authoritative.
+pub fn validate_pinned_revision(
+    employee_id: &EmployeeId,
+    status: EmployeeStatus,
+    manifest: &serde_json::Value,
+    stored: Option<&StoredRuntimeBinding>,
+) -> std::result::Result<RuntimeBinding, DispatchRefusal> {
+    if status != EmployeeStatus::Active {
+        return Err(DispatchRefusal::EmployeeNotActive { status });
+    }
+    let employee: Employee = serde_json::from_value(manifest.clone())
+        .map_err(|_| DispatchRefusal::ManifestUnreadable)?;
+    if &employee.id != employee_id || employee.validate_definition().is_err() {
+        return Err(DispatchRefusal::ManifestUnreadable);
+    }
+    let stored = stored.ok_or(DispatchRefusal::RuntimeBindingMissing)?;
+    if !stored.validated {
+        return Err(DispatchRefusal::RuntimeBindingUnvalidated);
+    }
+    let binding = employee.runtime;
+    let mismatch = |field| DispatchRefusal::RuntimeBindingMismatch { field };
+    if stored.adapter != binding.adapter {
+        return Err(mismatch("adapter"));
+    }
+    if stored.profile_ref != binding.profile_ref {
+        return Err(mismatch("profile_ref"));
+    }
+    if stored.model != binding.model {
+        return Err(mismatch("model"));
+    }
+    if stored.workspace_ref != binding.workspace_ref {
+        return Err(mismatch("workspace_ref"));
+    }
+    let manifest_refs = binding
+        .credential_refs
+        .iter()
+        .map(CredentialRef::as_str)
+        .collect::<Vec<_>>();
+    if stored.credential_refs != manifest_refs {
+        return Err(mismatch("credential_refs"));
+    }
+    if stored.options != binding.options {
+        return Err(mismatch("options"));
+    }
+    Ok(binding)
+}
+
+/// Bounds the canonical message text for the runtime: control characters
+/// (other than newline, carriage return, and tab) are stripped, the text is
+/// cut at [`MAX_RUN_INPUT_BYTES`] on a character boundary, and an empty
+/// result is refused.
+pub fn bound_message_text(content: &str) -> std::result::Result<(String, bool), DispatchRefusal> {
+    let cleaned = strip_control_characters(content);
+    let truncated = cleaned.len() > MAX_RUN_INPUT_BYTES;
+    let body =
+        ortak_control::adapter::truncate_at_char_boundary(&cleaned, MAX_RUN_INPUT_BYTES).to_owned();
+    if body.trim().is_empty() {
+        return Err(DispatchRefusal::EmptyMessage);
+    }
+    Ok((body, truncated))
+}
+
+/// Stable runtime idempotency key for one durable run. A retried start in a
+/// fresh process derives the same key, so the runtime returns the same run.
+pub fn run_idempotency_key(company_id: Uuid, run_id: Uuid) -> String {
+    format!("ortak-run:{company_id}:{run_id}")
+}
+
+/// Everything a dispatch needs, derived solely from company-scoped durable
+/// rows by [`RunDispatchRepository`](crate::repository::RunDispatchRepository).
+///
+/// There is no public constructor and every field is read-only, so a caller
+/// cannot present identity, revision, message, or binding values of its own
+/// to run creation, runtime start, or correlation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DispatchAuthority {
+    company_id: Uuid,
+    outbox_id: Uuid,
+    lease_token: Uuid,
+    routing_decision_id: Uuid,
+    employee_id: EmployeeId,
+    employee_revision_id: Uuid,
+    message_id: MessageId,
+    root_message_id: MessageId,
+    binding: RuntimeBinding,
+    input: RunInput,
+}
+
+impl DispatchAuthority {
+    /// Crate-private constructor for the repository seam.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
+        company_id: Uuid,
+        outbox_id: Uuid,
+        lease_token: Uuid,
+        routing_decision_id: Uuid,
+        employee_id: EmployeeId,
+        employee_revision_id: Uuid,
+        message_id: MessageId,
+        root_message_id: MessageId,
+        binding: RuntimeBinding,
+        input: RunInput,
+    ) -> Self {
+        Self {
+            company_id,
+            outbox_id,
+            lease_token,
+            routing_decision_id,
+            employee_id,
+            employee_revision_id,
+            message_id,
+            root_message_id,
+            binding,
+            input,
+        }
+    }
+
+    /// Company boundary.
+    pub fn company_id(&self) -> Uuid {
+        self.company_id
+    }
+
+    /// Outbox row the lease was verified against.
+    pub fn outbox_id(&self) -> Uuid {
+        self.outbox_id
+    }
+
+    /// Lease token observed on the row; every later write is fenced by it.
+    pub fn lease_token(&self) -> Uuid {
+        self.lease_token
+    }
+
+    /// Routing decision that woke the employee.
+    pub fn routing_decision_id(&self) -> Uuid {
+        self.routing_decision_id
+    }
+
+    /// Recipient employee, from the outbox and recipient rows.
+    pub fn employee_id(&self) -> &EmployeeId {
+        &self.employee_id
+    }
+
+    /// Revision pinned by the routing recipient row.
+    pub fn employee_revision_id(&self) -> Uuid {
+        self.employee_revision_id
+    }
+
+    /// Triggering message, from the decision row.
+    pub fn message_id(&self) -> MessageId {
+        self.message_id
+    }
+
+    /// Delivery-chain root, from the decision row.
+    pub fn root_message_id(&self) -> MessageId {
+        self.root_message_id
+    }
+
+    /// Runtime binding from the validated revision manifest.
+    pub fn binding(&self) -> &RuntimeBinding {
+        &self.binding
+    }
+
+    /// Bounded input derived from the canonical Office event.
+    pub fn input(&self) -> &RunInput {
+        &self.input
+    }
+
+    /// Builds the validated runtime spec for the durable run `run_id`.
+    pub fn run_spec(&self, run_id: Uuid) -> std::result::Result<RunSpec, RuntimeError> {
+        let spec = RunSpec {
+            run_id,
+            employee_id: self.employee_id.clone(),
+            revision_id: self.employee_revision_id,
+            binding: self.binding.clone(),
+            input: self.input.body.clone(),
+            context: RunContext {
+                conversation_ref: self.input.channel_id.map(|channel| channel.to_string()),
+                reply_to_message_id: Some(self.message_id.to_hex()),
+                work_item_id: None,
+                memory_context: Vec::new(),
+            },
+            idempotency_key: run_idempotency_key(self.company_id, run_id),
+        };
+        spec.validate()?;
+        Ok(spec)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use ortak_domain::{EmployeeId, EmployeeManifest, EmployeeStatus};
+    use uuid::Uuid;
+
+    use super::{
+        bound_message_text, run_idempotency_key, validate_pinned_revision, DispatchRefusal,
+        StoredRuntimeBinding,
+    };
+
+    fn manifest() -> (EmployeeId, serde_json::Value, StoredRuntimeBinding) {
+        let yaml = std::fs::read_to_string(format!(
+            "{}/../../config/employees/cem.yaml",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("read fixture");
+        let manifest: EmployeeManifest = serde_yaml::from_str(&yaml).expect("parse fixture");
+        let mut employee = manifest.employee;
+        employee.status = EmployeeStatus::Active;
+        let stored = StoredRuntimeBinding {
+            adapter: employee.runtime.adapter.clone(),
+            profile_ref: employee.runtime.profile_ref.clone(),
+            model: employee.runtime.model.clone(),
+            workspace_ref: employee.runtime.workspace_ref.clone(),
+            credential_refs: employee
+                .runtime
+                .credential_refs
+                .iter()
+                .map(|reference| reference.as_str().to_owned())
+                .collect(),
+            options: employee.runtime.options.clone(),
+            validated: true,
+        };
+        let id = employee.id.clone();
+        (
+            id,
+            serde_json::to_value(&employee).expect("manifest json"),
+            stored,
+        )
+    }
+
+    #[test]
+    fn matching_manifest_and_validated_binding_yield_the_manifest_binding() {
+        let (id, manifest, stored) = manifest();
+        let binding =
+            validate_pinned_revision(&id, EmployeeStatus::Active, &manifest, Some(&stored))
+                .expect("valid");
+        assert_eq!(binding.adapter, "hermes");
+        assert_eq!(
+            binding.profile_ref.as_deref(),
+            Some("/opt/data/profiles/cem")
+        );
+    }
+
+    #[test]
+    fn lifecycle_binding_and_identity_mismatches_are_refused() {
+        let (id, manifest, stored) = manifest();
+        assert_eq!(
+            validate_pinned_revision(&id, EmployeeStatus::Disabled, &manifest, Some(&stored)),
+            Err(DispatchRefusal::EmployeeNotActive {
+                status: EmployeeStatus::Disabled
+            })
+        );
+        assert_eq!(
+            validate_pinned_revision(&id, EmployeeStatus::Paused, &manifest, Some(&stored)),
+            Err(DispatchRefusal::EmployeeNotActive {
+                status: EmployeeStatus::Paused
+            })
+        );
+        assert_eq!(
+            validate_pinned_revision(&id, EmployeeStatus::Active, &manifest, None),
+            Err(DispatchRefusal::RuntimeBindingMissing)
+        );
+        let unvalidated = StoredRuntimeBinding {
+            validated: false,
+            ..stored.clone()
+        };
+        assert_eq!(
+            validate_pinned_revision(&id, EmployeeStatus::Active, &manifest, Some(&unvalidated)),
+            Err(DispatchRefusal::RuntimeBindingUnvalidated)
+        );
+        let drifted = StoredRuntimeBinding {
+            model: "other-model".to_owned(),
+            ..stored.clone()
+        };
+        assert_eq!(
+            validate_pinned_revision(&id, EmployeeStatus::Active, &manifest, Some(&drifted)),
+            Err(DispatchRefusal::RuntimeBindingMismatch { field: "model" })
+        );
+        let mut foreign_options = stored.clone();
+        foreign_options.options = BTreeMap::new();
+        assert_eq!(
+            validate_pinned_revision(
+                &id,
+                EmployeeStatus::Active,
+                &manifest,
+                Some(&foreign_options)
+            ),
+            Err(DispatchRefusal::RuntimeBindingMismatch { field: "options" })
+        );
+        let other = EmployeeId::parse("zeynep").expect("id");
+        assert_eq!(
+            validate_pinned_revision(&other, EmployeeStatus::Active, &manifest, Some(&stored)),
+            Err(DispatchRefusal::ManifestUnreadable)
+        );
+        assert_eq!(
+            validate_pinned_revision(
+                &id,
+                EmployeeStatus::Active,
+                &serde_json::json!({"id": "cem"}),
+                Some(&stored)
+            ),
+            Err(DispatchRefusal::ManifestUnreadable)
+        );
+    }
+
+    #[test]
+    fn message_text_is_bounded_and_control_free() {
+        let (body, truncated) = bound_message_text("Cem,\u{0} selam\tnasılsın?\n").expect("text");
+        assert_eq!(body, "Cem, selam\tnasılsın?\n");
+        assert!(!truncated);
+        let long = "é".repeat(40 * 1024);
+        let (body, truncated) = bound_message_text(&long).expect("text");
+        assert!(truncated);
+        assert!(body.len() <= ortak_control::runtime::MAX_RUN_INPUT_BYTES);
+        assert_eq!(
+            bound_message_text(" \u{1} \n"),
+            Err(DispatchRefusal::EmptyMessage)
+        );
+    }
+
+    #[test]
+    fn idempotency_key_is_stable_per_run() {
+        let company = Uuid::new_v4();
+        let run = Uuid::new_v4();
+        assert_eq!(
+            run_idempotency_key(company, run),
+            run_idempotency_key(company, run)
+        );
+        assert_ne!(
+            run_idempotency_key(company, run),
+            run_idempotency_key(company, Uuid::new_v4())
+        );
+    }
+}

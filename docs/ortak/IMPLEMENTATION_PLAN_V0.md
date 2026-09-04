@@ -149,6 +149,20 @@ Exit gate:
 
 Outcome: selected decisions become supervised Hermes runs.
 
+Implementation state: the runtime-independent dispatch and supervision
+foundation exists in `crates/ortak-runtime` over the `RuntimeAdapter` port and
+the fake adapter. A leased `run_dispatch` row is treated as a hint; the
+authority is re-derived from company-scoped durable rows into a sealed
+`DispatchAuthority`, one `queued` run is created per decision recipient under
+the lease fence, `start_run` runs outside any transaction with the stable
+per-run idempotency key, correlation is a compare-and-set that completes the
+lease in the same commit, events resume from the last durable cursor and move
+the run through its states only from typed events, and cancellation is
+supervised and idempotent by run id. Next boundary: persist the run's
+server-derived delivery target (thread root, channel, reply parent) so a
+completed `reply`/`channel` run can enqueue `office_publish` authoritatively;
+then the Hermes adapter itself.
+
 - Capability-probe the deployed Hermes version and record supported API/schema.
 - Implement `RuntimeAdapter` validation, start, events, cancel, and health.
 - Map EmployeeRevision to external profile ref, workspace, model, tool policy,
