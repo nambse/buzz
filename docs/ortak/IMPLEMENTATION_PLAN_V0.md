@@ -1,8 +1,16 @@
 # Ortak Implementation Plan v0
 
-Status: Active  
+Status: Active; superseded as the working plan by `REMAINING_WORK_V1.md` (2026-09-05)
+
 Date: 2026-09-04  
 Planning style: dependency-ordered milestones; no calendar estimates
+
+Status note (2026-09-05): the milestone "Implementation state" paragraphs below
+are accurate for what exists as library code, but the audited shipped-versus-
+port-only table and the dependency-ordered slices now live in
+`REMAINING_WORK_V1.md`. Selective upstream imports taken on 2026-09-05 are
+recorded in `BUZZ_IMPORT_2026-09-05.md`; they changed no Ortak crate, migration,
+or fixture.
 
 ## Delivery strategy
 

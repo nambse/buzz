@@ -89,6 +89,12 @@ The labels describe ownership, not upstream compatibility.
    disposition in this document. Unowned modules are candidates for deletion.
 6. Deletion happens after the replacement path is exercised, not as a cosmetic
    mass rename. The build graph, not directory names, determines the cutover.
+7. Individual upstream commits may be cherry-picked when the user approves
+   them, preserving author and source SHA. Each import is recorded in a dated
+   `BUZZ_IMPORT_<date>.md` with accepted and deferred lists. The pinned
+   snapshot above does not move. First record: `BUZZ_IMPORT_2026-09-05.md`
+   (8 accepted, 5 deferred, from upstream `f038cbbb`); see that record for
+   the import scope and the verification actually run.
 
 ## Important gaps that Ortak must not inherit
 
