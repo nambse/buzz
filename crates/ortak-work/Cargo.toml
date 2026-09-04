@@ -1,0 +1,23 @@
+[package]
+name = "ortak-work"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Ortak Work and Projects foundation: company-scoped project and work item repository, idempotent promotion from decided Office messages, active-employee assignment, transactional dependency cycle checks, version-fenced state transitions, completion gates, and append-only history over migration 0047"
+
+[dependencies]
+ortak-control.workspace = true
+ortak-domain.workspace = true
+chrono.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+buzz-db.workspace = true
+sha2.workspace = true
+tokio.workspace = true

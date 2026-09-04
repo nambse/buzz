@@ -244,6 +244,53 @@ Exit gate:
 
 Outcome: conversations can become durable, assignable company work.
 
+Implementation state: the Work/Projects foundation exists as pure aggregates
+in `ortak-domain` (`work` module), migration 0047 with `schema/schema.sql`
+parity, and the `crates/ortak-work` control slice behind the `WorkRepository`
+port on `PgControlPlane` plus the thin `WorkService`. Delivered: `Project`
+(`active`/`archived`, company-unique immutable slug, idempotent creation by
+slug) and `WorkItem` (`proposed`, `ready`, `in_progress`, `blocked`, `review`,
+`completed`, `cancelled`; closed transition table; `completed` reachable only
+from `review` and only when every acceptance criterion is satisfied and every
+required approval gate is approved; `in_progress` refused while a same-project
+`blocked_by` dependency is unfinished; terminal items frozen); bounded titles,
+descriptions, criteria, reasons, labels, and child counts with key-material
+rejection; `WorkActor` (human/employee/system) on every event; promotion from
+a `decided` Office inbox message that is idempotent by `(company, message)`
+(a replay with the same project and creation definition returns the existing
+item even after its project was archived; a different project or definition
+is a typed `PromotionConflict`) and attaches the message from authoritative
+rows plus its routing decision only when that decision woke at least one
+employee (a silent decision leaves dispatch provenance absent); assignment of
+`active` employees only; dependency insertion with a cycle check over the
+project graph under the project row lock and structural
+self-dependency/cross-project/cross-company refusal; `expected_version`
+compare-and-set under the item row lock, taken in one fixed order (unlocked
+read of the item's immutable `project_id`, then the project row `FOR SHARE`
+for ordinary mutations or `FOR UPDATE` for graph mutations, then the item row
+`FOR UPDATE`) so graph and item mutations cannot deadlock, with a database
+guard that refuses any version step other than `+1`, any change of
+`project_id`, and any state change on a terminal item;
+criterion satisfaction and approval resolution that resolve once; attachments
+to `office_inbox`, `routing_decisions`, and `runs` rows that exist in the
+company; a dense, immutable `work_item_history` (`sequence = version - 1`)
+appended in the same commit as every mutation; one-aggregate reads with
+bounded history; and a project work list with `(created_at DESC, id DESC)`
+keyset paging. Migration 0047 also adds the `runs.work_item_id` foreign key
+that 0045 reserved. Company scope is a separate argument on every method;
+unknown and cross-company ids fail closed as the same not-found error.
+
+Not yet delivered: Work and Projects APIs (HTTP/WebSocket) and realtime
+projections; Work/Projects desktop surfaces and employee work queues (the
+`work_assignments` active index exists, the query does not); dispatch-from-
+work (creating a run for an assignment and linking it through
+`runs.work_item_id`); artifact attachments and artifact storage (no
+`artifacts` relation yet); assignment release, dependency removal, parent/child
+decomposition, and editing of titles/descriptions/criteria after creation;
+project-level policy and Office conversation linkage beyond the promoted
+message; and the end-to-end exit-gate flow below, which still needs the run
+dispatch and artifact pieces.
+
 - Implement Project and WorkItem aggregates, histories, dependencies, and
   assignments.
 - Add Work and Projects APIs and realtime projections.

@@ -6573,6 +6573,7 @@ dependencies = [
  "sha2 0.11.0",
  "thiserror 2.0.18",
  "unicode-normalization",
+ "uuid",
 ]
 
 [[package]]
@@ -6640,6 +6641,24 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "ortak-work"
+version = "0.1.0"
+dependencies = [
+ "buzz-db",
+ "chrono",
+ "hex",
+ "ortak-control",
+ "ortak-domain",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tokio",
  "uuid",
 ]
 

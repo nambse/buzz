@@ -514,7 +514,7 @@ fn require_text(field: &'static str, value: &str) -> Result<(), DomainError> {
     }
 }
 
-fn require_bounded_text(
+pub(crate) fn require_bounded_text(
     field: &'static str,
     value: &str,
     max_bytes: usize,
@@ -524,6 +524,27 @@ fn require_bounded_text(
         Err(DomainError::InvalidField { field })
     } else {
         Ok(())
+    }
+}
+
+/// A single bounded stable code: `^[a-z][a-z0-9_]*$`.
+pub(crate) fn require_stable_code(
+    field: &'static str,
+    value: &str,
+    max_bytes: usize,
+) -> Result<(), DomainError> {
+    require_bounded_text(field, value, max_bytes)?;
+    let valid = value
+        .chars()
+        .next()
+        .is_some_and(|character| character.is_ascii_lowercase())
+        && value.chars().all(|character| {
+            character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
+        });
+    if valid {
+        Ok(())
+    } else {
+        Err(DomainError::InvalidField { field })
     }
 }
 

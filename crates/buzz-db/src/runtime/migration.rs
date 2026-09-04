@@ -732,7 +732,7 @@ mod postgres_tests {
         let mut migrations: Vec<_> = MIGRATOR.iter().collect();
         migrations.sort_by_key(|migration| migration.version);
 
-        assert_eq!(migrations.len(), 46);
+        assert_eq!(migrations.len(), 47);
         assert_eq!(migrations[0].version, 1);
         assert_eq!(&*migrations[0].description, "initial schema");
         assert!(migrations[0]
@@ -1385,6 +1385,62 @@ mod postgres_tests {
             desired_schema.contains("CREATE INDEX idx_runs_company_queued"),
             "schema.sql must define idx_runs_company_queued"
         );
+
+        // Ortak Milestone 6 Work and Projects (0047). Additive only:
+        // company-scoped projects and work items with optimistic versions,
+        // dense append-only histories, same-project dependencies that cannot
+        // self-reference, criteria/approval gates that resolve once,
+        // attachments to canonical records, and the runs → work_items foreign
+        // key 0045 reserved. schema.sql must carry the same relations.
+        assert_eq!(migrations[46].version, 47);
+        let work_projects = migrations[46].sql.as_str();
+        for table in [
+            "projects",
+            "project_history",
+            "work_items",
+            "work_item_history",
+            "work_assignments",
+            "work_dependencies",
+            "work_acceptance_criteria",
+            "work_approvals",
+            "work_attachments",
+        ] {
+            assert!(
+                work_projects.contains(&format!("CREATE TABLE {table} (")),
+                "migration 47 must create {table}"
+            );
+            assert!(
+                desired_schema.contains(&format!("CREATE TABLE {table} (")),
+                "schema.sql must define {table}"
+            );
+            assert!(
+                !migrations[0]
+                    .sql
+                    .as_str()
+                    .contains(&format!("CREATE TABLE {table} (")),
+                "{table} is additive and must not be folded into 0001"
+            );
+        }
+        for invariant in [
+            "UNIQUE (company_id, slug)",
+            "OR NEW.version <> OLD.version + 1",
+            "CHECK (version = sequence + 1)",
+            "CHECK (work_item_id <> depends_on_work_item_id)",
+            "REFERENCES work_items (company_id, project_id, id)",
+            "ON work_items (company_id, source_message_id)",
+            "ADD CONSTRAINT runs_work_item_fk",
+            "CREATE FUNCTION work_item_history_require_predecessor()",
+            "BEFORE UPDATE OR DELETE ON work_item_history",
+        ] {
+            assert!(
+                work_projects.contains(invariant),
+                "migration 47 must contain {invariant:?}"
+            );
+            assert!(
+                desired_schema.contains(invariant),
+                "schema.sql must contain {invariant:?}"
+            );
+        }
     }
 
     #[test]
