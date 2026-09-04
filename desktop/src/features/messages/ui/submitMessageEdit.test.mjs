@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { snapshotDraftMentionRefs } from "../lib/draftMentionRefs.ts";
+import { AgentMentionAuthorizationError } from "../lib/agentMentionRevalidation.ts";
 import { submitMessageEdit } from "./submitMessageEdit.ts";
 
 const UNRESOLVED_USER = "b".repeat(64);
@@ -98,13 +99,16 @@ test("edit save revalidates added mentions immediately before save", async () =>
       content.includes("@Agent") ? [agent] : [],
     revalidateMentionPubkeys: async (pubkeys) => {
       calls.push(["revalidate", pubkeys]);
-      return [];
+      throw new AgentMentionAuthorizationError();
     },
+    restoreComposer: () => calls.push(["restore"]),
+    setUploadError: (error) => calls.push(["error", error]),
   });
 
   assert.deepEqual(calls, [
     ["revalidate", [agent]],
-    ["save", []],
+    ["restore"],
+    ["error", new AgentMentionAuthorizationError().message],
   ]);
 });
 
@@ -133,15 +137,59 @@ test("edit upload pause revalidates revoked mentions only after upload completes
     },
     revalidateMentionPubkeys: async (pubkeys) => {
       calls.push(["revalidate", pubkeys]);
-      return [];
+      throw new AgentMentionAuthorizationError();
     },
+    restoreComposer: () => calls.push(["restore"]),
+    setUploadError: (error) => calls.push(["error", error]),
   });
 
   assert.deepEqual(calls, []);
   await completeUpload();
   assert.deepEqual(calls, [
     ["revalidate", [agent]],
-    ["save", []],
+    ["restore"],
+    ["error", new AgentMentionAuthorizationError().message],
+  ]);
+});
+
+test("edit revalidates exact selected agents before snapshotting newly typed recipients", async () => {
+  const selectedAgent = "c".repeat(64);
+  const typedUser = "d".repeat(64);
+  const label = `Scout (${selectedAgent})`;
+  const calls = [];
+  await submitMessageEdit({
+    ...baseOptions(async (_content, tags, notifying) => {
+      calls.push(["save", tags, notifying]);
+    }),
+    originalContent: "hello",
+    content: `hello @${label} @Alice`,
+    editTarget: { mentionRefs: [], unresolvedMentionPubkeys: [] },
+    getMentionRefs: () => [
+      { displayName: label, pubkey: selectedAgent, isAgent: true },
+    ],
+    extractMentionPubkeys: () => [selectedAgent, typedUser],
+    revalidateMentionPubkeys: async (pubkeys, channelId, options) => {
+      calls.push(["revalidate", pubkeys, channelId, options]);
+      return pubkeys;
+    },
+  });
+  assert.deepEqual(calls, [
+    [
+      "revalidate",
+      [selectedAgent, typedUser],
+      undefined,
+      {
+        intendedAgentPubkeys: [selectedAgent],
+      },
+    ],
+    [
+      "save",
+      [
+        ["mention", selectedAgent],
+        ["mention", typedUser],
+      ],
+      [selectedAgent, typedUser],
+    ],
   ]);
 });
 
