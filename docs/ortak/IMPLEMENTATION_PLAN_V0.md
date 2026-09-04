@@ -184,6 +184,29 @@ Exit gate:
 Outcome: a human can understand and control ongoing work without reading raw
 gateway logs.
 
+Implementation state: the server-side Activity read foundation exists in
+`crates/ortak-observability` over the existing `runs`/`run_events` rows and
+the `RunEvent`/`RunStatus` contracts (no duplicate normalization, no
+lifecycle change). It delivers, behind the `ActivityQueries` port on
+`PgControlPlane`: a company-scoped run list with deterministic keyset paging
+on `(queued_at DESC, run_id DESC)` (hard cap 100, employee/status/time
+filters, opaque cursor; migration 0046 adds the supporting index); one run
+detail with bounded/redacted terminal text and a fixed-query aggregate
+summary (tool start/complete/fail, terminal commands and non-zero/abnormal
+exits, file changes by kind, usage totals, terminal state, last event); and a
+typed `ActivityEntry` timeline for lifecycle, assistant output, tool,
+terminal, file, usage, delivery-intent, and error events with
+`after_sequence` incremental paging (hard cap 500, `has_more`, next cursor,
+gap signal). Company scope is a separate argument, never a filter field;
+unknown and cross-company runs are one `RunNotFound`; closed vocabularies
+fail closed; runtime run references and cursors surface only as presence
+booleans, and the opt-in raw view is the already-bounded normalized payload
+with the run reference scrubbed. Not yet delivered: desktop Activity
+list/detail/rail rendering, API or WebSocket transport composition, realtime
+push (clients poll the sequence cursor for now), retry/cancel actions from
+Activity, an operator-only raw model, employee current-run summary, and
+large-payload artifact offload beyond the existing `artifact_ref` slot.
+
 - Add normalized RunEvent ingestion, ordering, redaction, and large-payload
   artifact offload.
 - Adapt the existing activity/tool/file/terminal renderers to Ortak RunEvents.
