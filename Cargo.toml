@@ -2,6 +2,7 @@
 members = [
     "crates/ortak-domain",
     "crates/ortak-router",
+    "crates/ortak-control",
     "crates/buzz-relay",
     "crates/buzz-core",
     "crates/buzz-conformance",
@@ -157,6 +158,8 @@ buzz-ws-client = { path = "crates/buzz-ws-client" }
 buzz-relay-mesh = { path = "crates/buzz-relay-mesh" }
 buzz-datastore-tracing = { path = "crates/buzz-datastore-tracing" }
 ortak-domain = { path = "crates/ortak-domain" }
+ortak-router = { path = "crates/ortak-router" }
+ortak-control = { path = "crates/ortak-control" }
 
 # CI profile — builds the relay for desktop e2e. Dependencies keep full
 # release optimization (warm from main's cache; they carry the runtime hot

@@ -175,6 +175,9 @@ pub enum RoutingReason {
     NoEligibleEmployee,
     /// No deterministic target or semantic match was found.
     NoRelevantEmployee,
+    /// Authoritative inputs kept changing until the bounded refresh/re-score
+    /// attempts were exhausted; the control layer recorded silence.
+    RevalidationExhausted,
 }
 
 /// Stable non-sensitive taxonomy label supplied by a semantic scorer.
