@@ -1,5 +1,5 @@
 //! Dispatch authority derived from durable rows, and the pure validation
-//! that turns a pinned revision into a runtime binding and bounded input.
+//! that turns a pinned revision into runtime configuration and bounded input.
 //!
 //! A leased `run_dispatch` outbox row carries a JSON payload written by the
 //! routing commit. That payload is only a hint. Everything that reaches the
@@ -12,7 +12,9 @@ use std::fmt;
 use ortak_control::run_event::strip_control_characters;
 use ortak_control::runtime::{RunContext, RunSpec, RuntimeError, MAX_RUN_INPUT_BYTES};
 use ortak_control::MessageId;
-use ortak_domain::{CredentialRef, Employee, EmployeeId, EmployeeStatus, RuntimeBinding};
+use ortak_domain::{
+    CredentialRef, Employee, EmployeeId, EmployeeStatus, PermissionPolicy, RuntimeBinding,
+};
 use uuid::Uuid;
 
 /// Why a leased dispatch cannot start a run. Every variant is bounded and
@@ -171,8 +173,28 @@ pub struct StoredRuntimeBinding {
     pub validated: bool,
 }
 
+/// Runtime configuration validated together from one pinned revision manifest.
+/// No public constructor permits mixing a binding and another revision's policy.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ValidatedRunConfiguration {
+    binding: RuntimeBinding,
+    permissions: PermissionPolicy,
+}
+
+impl ValidatedRunConfiguration {
+    /// Runtime binding from the validated manifest.
+    pub fn binding(&self) -> &RuntimeBinding {
+        &self.binding
+    }
+
+    /// Structurally validated permission policy from the same manifest.
+    pub fn permissions(&self) -> &PermissionPolicy {
+        &self.permissions
+    }
+}
+
 /// Validates the pinned revision against its lifecycle and binding rows and
-/// returns the runtime binding the run must use.
+/// returns the runtime binding and permission policy the run must use.
 ///
 /// The manifest is parsed as a full [`Employee`], must describe
 /// `employee_id`, and must pass definition validation; the stored binding row
@@ -184,7 +206,7 @@ pub fn validate_pinned_revision(
     status: EmployeeStatus,
     manifest: &serde_json::Value,
     stored: Option<&StoredRuntimeBinding>,
-) -> std::result::Result<RuntimeBinding, DispatchRefusal> {
+) -> std::result::Result<ValidatedRunConfiguration, DispatchRefusal> {
     if status != EmployeeStatus::Active {
         return Err(DispatchRefusal::EmployeeNotActive { status });
     }
@@ -222,7 +244,10 @@ pub fn validate_pinned_revision(
     if stored.options != binding.options {
         return Err(mismatch("options"));
     }
-    Ok(binding)
+    Ok(ValidatedRunConfiguration {
+        binding,
+        permissions: employee.permissions,
+    })
 }
 
 /// Bounds the canonical message text for the runtime: control characters
@@ -250,7 +275,7 @@ pub fn run_idempotency_key(company_id: Uuid, run_id: Uuid) -> String {
 /// rows by [`RunDispatchRepository`](crate::repository::RunDispatchRepository).
 ///
 /// There is no public constructor and every field is read-only, so a caller
-/// cannot present identity, revision, message, or binding values of its own
+/// cannot present identity, revision, message, binding, or permission values of its own
 /// to run creation, runtime start, or correlation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DispatchAuthority {
@@ -262,7 +287,7 @@ pub struct DispatchAuthority {
     employee_revision_id: Uuid,
     message_id: MessageId,
     root_message_id: MessageId,
-    binding: RuntimeBinding,
+    configuration: ValidatedRunConfiguration,
     input: RunInput,
 }
 
@@ -278,7 +303,7 @@ impl DispatchAuthority {
         employee_revision_id: Uuid,
         message_id: MessageId,
         root_message_id: MessageId,
-        binding: RuntimeBinding,
+        configuration: ValidatedRunConfiguration,
         input: RunInput,
     ) -> Self {
         Self {
@@ -290,7 +315,7 @@ impl DispatchAuthority {
             employee_revision_id,
             message_id,
             root_message_id,
-            binding,
+            configuration,
             input,
         }
     }
@@ -337,7 +362,12 @@ impl DispatchAuthority {
 
     /// Runtime binding from the validated revision manifest.
     pub fn binding(&self) -> &RuntimeBinding {
-        &self.binding
+        self.configuration.binding()
+    }
+
+    /// Permission policy from the same validated, pinned revision manifest.
+    pub fn permissions(&self) -> &PermissionPolicy {
+        self.configuration.permissions()
     }
 
     /// Bounded input derived from the canonical Office event.
@@ -351,7 +381,8 @@ impl DispatchAuthority {
             run_id,
             employee_id: self.employee_id.clone(),
             revision_id: self.employee_revision_id,
-            binding: self.binding.clone(),
+            binding: self.binding().clone(),
+            permissions: self.permissions().clone(),
             input: self.input.body.clone(),
             context: RunContext {
                 conversation_ref: self.input.channel_id.map(|channel| channel.to_string()),
@@ -370,12 +401,12 @@ impl DispatchAuthority {
 mod tests {
     use std::collections::BTreeMap;
 
-    use ortak_domain::{EmployeeId, EmployeeManifest, EmployeeStatus};
+    use ortak_domain::{EmployeeId, EmployeeManifest, EmployeeStatus, PermissionPolicy};
     use uuid::Uuid;
 
     use super::{
-        bound_message_text, run_idempotency_key, validate_pinned_revision, DispatchRefusal,
-        StoredRuntimeBinding,
+        bound_message_text, run_idempotency_key, validate_pinned_revision, DispatchAuthority,
+        DispatchRefusal, RunInput, StoredRuntimeBinding,
     };
 
     fn manifest() -> (EmployeeId, serde_json::Value, StoredRuntimeBinding) {
@@ -410,16 +441,48 @@ mod tests {
     }
 
     #[test]
-    fn matching_manifest_and_validated_binding_yield_the_manifest_binding() {
+    fn matching_manifest_yields_binding_and_permissions_and_rejects_invalid_specs() {
         let (id, manifest, stored) = manifest();
-        let binding =
+        let configuration =
             validate_pinned_revision(&id, EmployeeStatus::Active, &manifest, Some(&stored))
                 .expect("valid");
+        let binding = configuration.binding();
         assert_eq!(binding.adapter, "hermes");
         assert_eq!(
             binding.profile_ref.as_deref(),
             Some("/opt/data/profiles/cem")
         );
+        assert_eq!(
+            serde_json::to_value(configuration.permissions()).expect("permissions json"),
+            manifest["permissions"]
+        );
+        let authority = DispatchAuthority::new(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            id,
+            Uuid::new_v4(),
+            ortak_control::MessageId::from_bytes([1; 32]),
+            ortak_control::MessageId::from_bytes([1; 32]),
+            configuration,
+            RunInput {
+                body: "Cem, selam".to_owned(),
+                truncated: false,
+                channel_id: Some(Uuid::new_v4()),
+                event_kind: 9,
+            },
+        );
+        let mut spec = authority.run_spec(Uuid::new_v4()).expect("valid spec");
+        assert_eq!(&spec.permissions, authority.permissions());
+        spec.permissions = PermissionPolicy::default();
+        spec.validate().expect("empty policy is structurally valid");
+        spec.permissions.allowed_networks = vec!["private-policy-value\n".to_owned()];
+        assert!(matches!(
+            spec.validate(),
+            Err(ortak_control::runtime::RuntimeError::InvalidSpec { detail })
+                if detail.to_string() == "run permission policy is invalid"
+        ));
     }
 
     #[test]

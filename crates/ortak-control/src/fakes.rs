@@ -73,6 +73,7 @@ struct RuntimeState {
     deleted: Vec<String>,
     runs: BTreeMap<String, FakeRun>,
     start_receipts: BTreeMap<String, RunStartReceipt>,
+    start_specs: Vec<RunSpec>,
     next_run: u64,
 }
 
@@ -156,6 +157,12 @@ impl FakeRuntimeAdapter {
     /// Profiles deleted through this adapter, in order.
     pub fn deleted_profiles(&self) -> Vec<String> {
         lock(&self.state).deleted.clone()
+    }
+
+    /// Specifications received by `start_run`, including retries and refusals,
+    /// captured before validation so tests can detect every runtime call.
+    pub fn start_specs(&self) -> Vec<RunSpec> {
+        lock(&self.state).start_specs.clone()
     }
 
     /// Appends an event to a started run's stream.
@@ -315,8 +322,9 @@ impl RuntimeAdapter for FakeRuntimeAdapter {
         &self,
         spec: &RunSpec,
     ) -> std::result::Result<RunStartReceipt, RuntimeError> {
-        spec.validate()?;
         let mut state = lock(&self.state);
+        state.start_specs.push(spec.clone());
+        spec.validate()?;
         Self::guard(&state)?;
         if let Some(receipt) = state.start_receipts.get(&spec.idempotency_key) {
             return Ok(receipt.clone());

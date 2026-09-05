@@ -17,7 +17,7 @@
 //!   canonical event's kind and channel, before the content is read as text.
 //! - `employees.status` must be `active`; `employee_revisions.manifest` and
 //!   the validated `employee_runtime_bindings` row of the pinned revision
-//!   supply the runtime binding.
+//!   supply the runtime binding and permission policy from that same manifest.
 
 use std::collections::BTreeMap;
 
@@ -277,13 +277,13 @@ impl RunDispatchRepository for PgControlPlane {
         }
         let manifest: serde_json::Value = row.try_get("manifest")?;
         let stored = stored_binding(&row)?;
-        let binding = match validate_pinned_revision(
+        let configuration = match validate_pinned_revision(
             &employee_id,
             employee_status,
             &manifest,
             stored.as_ref(),
         ) {
-            Ok(binding) => binding,
+            Ok(configuration) => configuration,
             Err(refusal) => return refused(refusal),
         };
 
@@ -339,7 +339,7 @@ impl RunDispatchRepository for PgControlPlane {
                 employee_revision_id,
                 message_id,
                 root_message_id,
-                binding,
+                configuration,
                 input,
             ),
         )))

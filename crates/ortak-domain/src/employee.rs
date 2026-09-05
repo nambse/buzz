@@ -230,6 +230,34 @@ pub struct PermissionPolicy {
     pub approval_required: Vec<ApprovalRequirement>,
 }
 
+impl PermissionPolicy {
+    /// Validates policy structure and reference bounds, without granting access.
+    pub fn validate(&self) -> Result<(), DomainError> {
+        validate_bounded_values(
+            "employee.permissions.allowed_workspaces",
+            &self.allowed_workspaces,
+            64,
+            1_024,
+        )?;
+        validate_bounded_values(
+            "employee.permissions.allowed_networks",
+            &self.allowed_networks,
+            64,
+            1_024,
+        )?;
+        if self.allowed_tools.len() > 64
+            || self.approval_required.len() > 64
+            || has_duplicates(&self.allowed_tools)
+            || has_duplicates(&self.approval_required)
+        {
+            return Err(DomainError::InvalidField {
+                field: "employee.permissions",
+            });
+        }
+        Ok(())
+    }
+}
+
 /// Per-employee participation policy used by the conversation router.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -357,26 +385,7 @@ impl Employee {
             require_bounded_text("employee.office.home_channel_ref", home_channel_ref, 1_024)?;
         }
 
-        validate_bounded_values(
-            "employee.permissions.allowed_workspaces",
-            &self.permissions.allowed_workspaces,
-            64,
-            1_024,
-        )?;
-        validate_bounded_values(
-            "employee.permissions.allowed_networks",
-            &self.permissions.allowed_networks,
-            64,
-            1_024,
-        )?;
-        if has_duplicates(&self.permissions.allowed_tools)
-            || has_duplicates(&self.permissions.approval_required)
-        {
-            return Err(DomainError::InvalidField {
-                field: "employee.permissions",
-            });
-        }
-
+        self.permissions.validate()?;
         self.routing.validate()
     }
 

@@ -12,7 +12,7 @@ use std::collections::BTreeSet;
 use std::fmt;
 
 use chrono::{DateTime, Utc};
-use ortak_domain::{CredentialRef, EmployeeId, ProvisioningMode, RuntimeBinding};
+use ortak_domain::{CredentialRef, EmployeeId, PermissionPolicy, ProvisioningMode, RuntimeBinding};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -130,6 +130,10 @@ pub struct RunSpec {
     pub revision_id: Uuid,
     /// Runtime binding of that revision.
     pub binding: RuntimeBinding,
+    /// Authoritative permission policy from the same immutable revision.
+    /// Transport and structural validation do not enforce tool access; the
+    /// runtime adapter must enforce this policy at its tool boundary.
+    pub permissions: PermissionPolicy,
     /// Bounded input text.
     pub input: String,
     /// Trusted context.
@@ -144,6 +148,11 @@ pub const MAX_RUN_INPUT_BYTES: usize = 64 * 1024;
 impl RunSpec {
     /// Validates bounds before any adapter call.
     pub fn validate(&self) -> Result<(), RuntimeError> {
+        self.permissions
+            .validate()
+            .map_err(|_| RuntimeError::InvalidSpec {
+                detail: Detail::new("run permission policy is invalid"),
+            })?;
         if self.input.trim().is_empty() || self.input.len() > MAX_RUN_INPUT_BYTES {
             return Err(RuntimeError::InvalidSpec {
                 detail: Detail::new("run input is empty or above the ceiling"),

@@ -1,5 +1,6 @@
 use ortak_domain::{
-    DomainError, EmployeeCatalog, EmployeeManifest, EmployeeStatus, ProvisioningMode,
+    ApprovalRequirement, DomainError, EmployeeCatalog, EmployeeManifest, EmployeeStatus,
+    PermissionPolicy, ProvisioningMode, ToolCapability,
 };
 
 const CEM_RAW: &str = include_str!("../../../config/employees/cem.yaml");
@@ -124,4 +125,60 @@ fn semantic_candidate_metadata_is_bounded_before_catalog_entry() {
         .allowed_tools
         .push(duplicate_capability.employee.permissions.allowed_tools[0]);
     assert!(duplicate_capability.validate().is_err());
+}
+
+#[test]
+fn permission_validation_preserves_reference_bounds_and_typed_uniqueness() {
+    let mut employee = manifests()[0].employee.clone();
+    let mut check = |policy: PermissionPolicy, valid| {
+        assert_eq!(policy.validate().is_ok(), valid);
+        employee.permissions = policy;
+        assert_eq!(employee.validate_definition().is_ok(), valid);
+    };
+    check(PermissionPolicy::default(), true);
+    check(
+        PermissionPolicy {
+            allowed_workspaces: vec!["w".repeat(1_024); 64],
+            allowed_networks: vec!["n".repeat(1_024); 64],
+            ..PermissionPolicy::default()
+        },
+        true,
+    );
+    for references in [
+        vec!["w".to_owned(); 65],
+        vec!["w".repeat(1_025)],
+        vec![" ".to_owned()],
+        vec!["private-policy-value\n".to_owned()],
+    ] {
+        for policy in [
+            PermissionPolicy {
+                allowed_workspaces: references.clone(),
+                ..PermissionPolicy::default()
+            },
+            PermissionPolicy {
+                allowed_networks: references.clone(),
+                ..PermissionPolicy::default()
+            },
+        ] {
+            let error = policy.validate().expect_err("invalid references");
+            assert!(!error.to_string().contains("private-policy-value"));
+            check(policy, false);
+        }
+    }
+    for count in [2, 65] {
+        check(
+            PermissionPolicy {
+                allowed_tools: vec![ToolCapability::Terminal; count],
+                ..PermissionPolicy::default()
+            },
+            false,
+        );
+        check(
+            PermissionPolicy {
+                approval_required: vec![ApprovalRequirement::ExternalPublish; count],
+                ..PermissionPolicy::default()
+            },
+            false,
+        );
+    }
 }
