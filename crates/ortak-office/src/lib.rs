@@ -25,12 +25,17 @@
 //!   settles the row through the existing outbox lease, bounded retry, and
 //!   terminal-failure contract.
 //!
+//! The inbound side of the boundary is [`normalizer::PgChannelNormalizer`],
+//! the production `MessageNormalizer` that turns a claimed inbox row into a
+//! routable envelope or an explicit refusal from canonical Office rows.
+//!
 //! Nothing here connects to a real Office, runs a worker, or stores secrets.
 
 pub mod delivery;
 mod error;
 pub mod event;
 pub mod fakes;
+pub mod normalizer;
 pub mod postgres;
 pub mod publisher;
 pub mod repository;
@@ -42,6 +47,9 @@ pub use event::{
     is_allowed_publish_kind, FrozenSignedEvent, IntentFingerprint, OfficeEventError,
     OfficePublishIntent, OfficePublishPayload, UnsignedOfficeEvent, ALLOWED_PUBLISH_KINDS,
     KIND_STREAM_MESSAGE, KIND_STREAM_MESSAGE_V2,
+};
+pub use normalizer::{
+    expected_channel_type, is_supported_channel_kind, PgChannelNormalizer, KIND_GIFT_WRAP,
 };
 pub use publisher::{OfficePublishError, OfficePublisher, PublishReceipt};
 pub use repository::{

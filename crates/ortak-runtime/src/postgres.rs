@@ -12,7 +12,9 @@
 //! - `delivery_chain_visits` must hold the recipient's reservation.
 //! - `office_inbox` must be `decided`; its `(event_created_at, event_id)`
 //!   locate the signed `events` row through the company's community binding,
-//!   which supplies the message text.
+//!   which supplies the message text. The inbox kind must be a supported
+//!   plaintext channel kind and channel-scoped, and must agree with the
+//!   canonical event's kind and channel, before the content is read as text.
 //! - `employees.status` must be `active`; `employee_revisions.manifest` and
 //!   the validated `employee_runtime_bindings` row of the pinned revision
 //!   supply the runtime binding.
@@ -21,6 +23,7 @@ use std::collections::BTreeMap;
 
 use chrono::Utc;
 use ortak_control::adapter::truncate_at_char_boundary;
+use ortak_control::inbox::is_supported_channel_kind;
 use ortak_control::outbox::{OutboxKind, OutboxLease};
 use ortak_control::run_event::{RunEvent, RunEventPayload};
 use ortak_control::runtime::{RunStartReceipt, RuntimeCursor, RuntimeRunRef};
@@ -59,6 +62,7 @@ const AUTHORITY_SQL: &str = "SELECT o.kind, o.state, o.dedup_key, o.lease_token,
             rb.credential_refs AS binding_credential_refs, rb.options AS binding_options,
             rb.validated_at AS binding_validated_at,
             i.state AS inbox_state, i.event_kind, i.channel_id,
+            ev.kind AS message_kind, ev.channel_id AS message_channel_id,
             ev.content AS message_content, ev.deleted_at AS message_deleted_at
        FROM outbox o
        LEFT JOIN routing_decisions d
@@ -283,10 +287,31 @@ impl RunDispatchRepository for PgControlPlane {
             Err(refusal) => return refused(refusal),
         };
 
-        // 5. Canonical message text.
+        // 5. Last-mile channel-kind guard, before any content is read as
+        //    text. A stale or hand-seeded dispatch for a gift wrap (1059) or
+        //    any other non-channel kind is refused here even if it somehow
+        //    reached a `wake` recipient row, and the inbox copy of kind and
+        //    channel must agree with the canonical signed event.
+        let event_kind: Option<i32> = row.try_get("event_kind")?;
+        let channel_id: Option<Uuid> = row.try_get("channel_id")?;
+        let Some(event_kind) = event_kind else {
+            return refused(DispatchRefusal::MessageUnavailable);
+        };
+        if !is_supported_channel_kind(event_kind) {
+            return refused(DispatchRefusal::UnsupportedMessageKind { kind: event_kind });
+        }
+        let Some(channel_id) = channel_id else {
+            return refused(DispatchRefusal::MessageChannelMissing);
+        };
         let Some(content) = row.try_get::<Option<String>, _>("message_content")? else {
             return refused(DispatchRefusal::MessageUnavailable);
         };
+        if row.try_get::<Option<i32>, _>("message_kind")? != Some(event_kind) {
+            return refused(DispatchRefusal::MessageProvenanceMismatch { field: "kind" });
+        }
+        if row.try_get::<Option<Uuid>, _>("message_channel_id")? != Some(channel_id) {
+            return refused(DispatchRefusal::MessageProvenanceMismatch { field: "channel" });
+        }
         if row
             .try_get::<Option<chrono::DateTime<Utc>>, _>("message_deleted_at")?
             .is_some()
@@ -300,8 +325,8 @@ impl RunDispatchRepository for PgControlPlane {
         let input = RunInput {
             body,
             truncated,
-            channel_id: row.try_get("channel_id")?,
-            event_kind: row.try_get("event_kind")?,
+            channel_id: Some(channel_id),
+            event_kind,
         };
 
         Ok(DispatchAuthorization::Authorized(Box::new(

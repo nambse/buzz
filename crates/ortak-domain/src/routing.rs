@@ -178,6 +178,39 @@ pub enum RoutingReason {
     /// Authoritative inputs kept changing until the bounded refresh/re-score
     /// attempts were exhausted; the control layer recorded silence.
     RevalidationExhausted,
+    /// The production semantic scorer is explicitly disabled; untargeted
+    /// human input is recorded as silence, never scored with placeholders.
+    SemanticScorerDisabled,
+    /// An encrypted direct message (gift wrap) was held as an explicit
+    /// refusal: trusted participant resolution and decryption normalization
+    /// are not available yet, and ciphertext is never routed.
+    DmNormalizationPending,
+    /// The server could not derive trusted provenance (loop root or reply
+    /// parent) from persisted canonical rows, so it refused rather than guess.
+    UnresolvedProvenance,
+    /// The authoring key is neither a company employee binding nor a known
+    /// community/channel member.
+    UnknownOrigin,
+    /// The authoring key is a known legacy automation identity (relay agent
+    /// registration or bot membership) that is not registered as an Ortak
+    /// employee; it is refused rather than treated as a human.
+    LegacyAutomationOrigin,
+    /// The authoring key belongs to a deactivated community user.
+    OriginDeactivated,
+    /// The channel is not live text-channel state the router may act on
+    /// (archived, deleted, or not the channel type expected for the kind).
+    ChannelNotRoutable,
+    /// The signed event carries more tags or mention keys than the bounded
+    /// scan admits; the message is refused instead of being routed on a
+    /// truncated view.
+    TagBoundsExceeded,
+    /// The target is a known company employee whose current verified Office
+    /// identity is not a live member of the conversation's channel.
+    TargetNotChannelMember,
+    /// The authoring key is a known identity (employee binding or relay
+    /// member) but is not a live member of the private channel the message
+    /// was stored in; the relay's open-channel exception does not apply.
+    OriginNotChannelMember,
 }
 
 /// Stable non-sensitive taxonomy label supplied by a semantic scorer.

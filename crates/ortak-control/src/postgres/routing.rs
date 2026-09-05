@@ -357,6 +357,7 @@ impl RoutingRepository for PgControlPlane {
             &chain,
             policy.max_recipients,
             &employees,
+            &proposal.eligible_employee_ids,
         );
         let hop_consumed = guarded.wake_count > 0;
         let next_hop = if hop_consumed {

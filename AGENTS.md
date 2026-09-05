@@ -17,12 +17,20 @@ Before planning or implementing a non-trivial change:
    employee runtime independently subscribes to Office and decides to wake.
 6. Never commit private keys, OAuth material, provider tokens, `auth.json`, or
    secret values. Employee manifests contain opaque credential references only.
-7. Existing Cem and Zeynep resources are adopted external resources. Tests and
-   provisioning code must not activate, delete, or recreate them before all
-   runtime, memory, Office membership, and signer health checks pass.
+7. Existing Cem and Zeynep resources belong to a preserved external test stack;
+   adopting them is optional. Follow `docs/ortak/DEPLOYMENT_STRATEGY_V0.md`:
+   a clean isolated stack may use fresh disposable employee resources. Do not
+   implicitly activate, replace, migrate, or delete the old resources. If
+   adoption is chosen, runtime, memory, Office membership, and signer health
+   gates still apply; health checks alone do not authorize deletion.
 8. Pure delivery-chain values are snapshots, not concurrency authority. Durable
    per-root counters and unique employee reservations must be committed with the
    routing decision and dispatch outbox.
+9. Manage both Buzz and Hermes upstream changes using
+   `docs/ortak/UPSTREAM_MAINTENANCE.md` (also covers Honcho). Check relevant
+   deltas at integration, import, and release checkpoints; distinguish observed,
+   reviewed, and deployed revisions. Selectively import Buzz changes and pin
+   tested runtime artifacts. Never auto-merge or auto-deploy floating upstream.
 
 The inherited Buzz guidance below remains useful for retained legacy modules,
 testing, Rust/Tauri conventions, and safety. If it conflicts with the Ortak

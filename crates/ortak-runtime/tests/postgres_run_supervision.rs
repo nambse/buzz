@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use chrono::Utc;
 use ortak_control::fakes::FakeRuntimeAdapter;
-use ortak_control::inbox::InboxEvent;
+use ortak_control::inbox::{InboxEvent, KIND_GIFT_WRAP, KIND_STREAM_MESSAGE};
 use ortak_control::outbox::{OutboxFailOutcome, OutboxKind, OutboxLease};
 use ortak_control::ports::{
     CompanyDirectory, InboxRepository, OutboxRepository, RoutingRepository,
@@ -146,21 +146,33 @@ impl Fixture {
         }
     }
 
-    /// Stores a signed Office event plus its inbox row, routes it to Cem
-    /// through the production routing commit, and returns the decision id.
+    /// Stores a signed channel text event (kind 9) plus its inbox row, routes
+    /// it to Cem through the production routing commit, and returns the
+    /// decision id.
     async fn route(&self, content: &str) -> Uuid {
+        self.route_kind(KIND_STREAM_MESSAGE, Some(Uuid::new_v4()), content)
+            .await
+    }
+
+    /// Like [`Self::route`] for an arbitrary event kind and channel scope:
+    /// the shape a stale or hand-seeded dispatch for a non-channel event
+    /// would leave behind.
+    async fn route_kind(&self, kind: i32, channel_id: Option<Uuid>, content: &str) -> Uuid {
         let id = message_id();
         let created_at = Utc::now();
         sqlx::query(
-            "INSERT INTO events (community_id, id, pubkey, created_at, kind, tags, content, sig)
-             VALUES ($1, $2, $3, $4, 1, '[]'::jsonb, $5, $6)",
+            "INSERT INTO events
+                 (community_id, id, pubkey, created_at, kind, tags, content, sig, channel_id)
+             VALUES ($1, $2, $3, $4, $5, '[]'::jsonb, $6, $7, $8)",
         )
         .bind(self.community_id)
         .bind(id.as_bytes().as_slice())
         .bind([7u8; 32].as_slice())
         .bind(created_at)
+        .bind(kind)
         .bind(content)
         .bind([9u8; 64].as_slice())
+        .bind(channel_id)
         .execute(&self.pool)
         .await
         .expect("insert event");
@@ -170,9 +182,9 @@ impl Fixture {
                 &InboxEvent {
                     event_id: id,
                     event_created_at: created_at,
-                    event_kind: 1,
+                    event_kind: kind,
                     author_pubkey: [7; 32],
-                    channel_id: Some(Uuid::new_v4()),
+                    channel_id,
                 },
             )
             .await
@@ -195,6 +207,7 @@ impl Fixture {
                 revision_id: self.revision_id,
             }],
             roster_scope: RosterScope::Targets,
+            eligible_employee_ids: std::iter::once(employee_id("cem")).collect(),
             decision: RoutingDecision {
                 message_id: id.to_hex(),
                 mode: RoutingMode::Deterministic,
@@ -524,6 +537,111 @@ async fn dispatch_derives_authority_from_durable_rows_and_never_from_the_lease()
         DispatchOutcome::Started { .. }
     ));
     assert_eq!(fixture.run_rows().await, 2);
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres"]
+async fn non_channel_kinds_and_provenance_mismatches_are_refused_before_any_text_is_read() {
+    let fixture = Fixture::new().await;
+    let supervisor = fixture.supervisor(fixture.config());
+
+    // A stale or hand-seeded dispatch for a gift wrap reached a `wake`
+    // recipient row: the ciphertext must never become a run input.
+    fixture
+        .route_kind(
+            KIND_GIFT_WRAP,
+            None,
+            "AtN3f0ciphertextThatMustNeverBeRead==",
+        )
+        .await;
+    let lease = fixture.lease(Duration::from_secs(60)).await;
+    let outcome = supervisor
+        .dispatch(&fixture.scope, &lease)
+        .await
+        .expect("dispatch");
+    assert_eq!(
+        outcome,
+        DispatchOutcome::Refused {
+            refusal: DispatchRefusal::UnsupportedMessageKind {
+                kind: KIND_GIFT_WRAP
+            },
+            retry: OutboxFailOutcome::Retrying,
+        }
+    );
+    assert_eq!(fixture.run_rows().await, 0);
+    assert!(matches!(
+        fixture
+            .adapter
+            .next_events(&RuntimeRunRef("fake-run-1".to_owned()), None, 1)
+            .await,
+        Err(RuntimeError::UnknownRun { .. })
+    ));
+    let outbox = fixture.outbox(lease.id).await;
+    assert_eq!(outbox.state, "pending");
+    assert!(outbox
+        .last_error
+        .as_deref()
+        .is_some_and(|error| error.contains("1059")));
+    // Drain the retried row so the next lease is the next scenario.
+    sqlx::query("UPDATE outbox SET state = 'failed' WHERE company_id = $1 AND id = $2")
+        .bind(fixture.scope.company_id())
+        .bind(lease.id)
+        .execute(&fixture.pool)
+        .await
+        .expect("park row");
+
+    // A supported kind whose inbox row lost its channel scope is not a
+    // channel run either.
+    fixture
+        .route_kind(KIND_STREAM_MESSAGE, None, "Cem, kanalsız")
+        .await;
+    let lease = fixture.lease(Duration::from_secs(60)).await;
+    let outcome = supervisor
+        .dispatch(&fixture.scope, &lease)
+        .await
+        .expect("dispatch");
+    assert!(matches!(
+        outcome,
+        DispatchOutcome::Refused {
+            refusal: DispatchRefusal::MessageChannelMissing,
+            ..
+        }
+    ));
+    assert_eq!(fixture.run_rows().await, 0);
+    sqlx::query("UPDATE outbox SET state = 'failed' WHERE company_id = $1 AND id = $2")
+        .bind(fixture.scope.company_id())
+        .bind(lease.id)
+        .execute(&fixture.pool)
+        .await
+        .expect("park row");
+
+    // The inbox copy of the channel must agree with the canonical event.
+    let decision_id = fixture.route("Cem, kanal uyuşmazlığı").await;
+    sqlx::query(
+        "UPDATE office_inbox SET channel_id = $3
+          WHERE company_id = $1
+            AND event_id = (SELECT message_id FROM routing_decisions
+                             WHERE company_id = $1 AND id = $2)",
+    )
+    .bind(fixture.scope.company_id())
+    .bind(decision_id)
+    .bind(Uuid::new_v4())
+    .execute(&fixture.pool)
+    .await
+    .expect("desync inbox channel");
+    let lease = fixture.lease(Duration::from_secs(60)).await;
+    let outcome = supervisor
+        .dispatch(&fixture.scope, &lease)
+        .await
+        .expect("dispatch");
+    assert!(matches!(
+        outcome,
+        DispatchOutcome::Refused {
+            refusal: DispatchRefusal::MessageProvenanceMismatch { field: "channel" },
+            ..
+        }
+    ));
+    assert_eq!(fixture.run_rows().await, 0);
 }
 
 #[tokio::test]

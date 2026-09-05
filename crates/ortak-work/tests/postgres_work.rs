@@ -251,6 +251,7 @@ impl Company {
                 revision_id: self.cem_revision,
             }],
             roster_scope: RosterScope::Targets,
+            eligible_employee_ids: std::iter::once(employee("cem")).collect(),
             decision: RoutingDecision {
                 message_id: id.to_hex(),
                 mode,

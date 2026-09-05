@@ -4,11 +4,13 @@
 //! traits. The traits use native `async fn`, so implementations are selected
 //! statically and the services are generic over them.
 
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use ortak_domain::{
-    Employee, EmployeeCatalog, EmployeeId, MessageEnvelope, RoutingPolicy, SemanticScore,
+    Employee, EmployeeCatalog, EmployeeId, MessageEnvelope, MessageOrigin, RoutingPolicy,
+    RoutingReason, SemanticScore,
 };
 use ortak_router::{SemanticRoutingRequest, SemanticScoringFailure};
 use uuid::Uuid;
@@ -220,17 +222,58 @@ pub struct NormalizedMessage {
     pub envelope: MessageEnvelope,
     /// Root of the delivery chain this message belongs to.
     pub root_message_id: MessageId,
+    /// Employees that may be woken for this conversation, derived by the
+    /// adapter from live conversation membership and each employee's
+    /// current verified Office identity.
+    ///
+    /// The routing service intersects every path (structured mentions,
+    /// aliases, replies, assignments, and the semantic roster) with this
+    /// set. A deterministic target outside it is recorded as a visible
+    /// `target_not_channel_member` drop and never falls through to
+    /// semantic fan-out. An empty set means no employee may wake.
+    pub eligible_employee_ids: BTreeSet<EmployeeId>,
 }
 
-/// Turns an inbox row into a normalized envelope, or `None` when it cannot route.
+/// An explicit, server-derived refusal to build a routable envelope.
+///
+/// A refusal is committed as one silent, empty routing decision through the
+/// same authoritative inbox-claim transaction as any other decision, so the
+/// inbox row reaches `decided` with an Activity-visible reason and no
+/// dispatch outbox row. The reason must be a closed [`RoutingReason`] code.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NormalizationRefusal {
+    /// Closed snake_case reason persisted as `summary_reason`.
+    pub reason: RoutingReason,
+    /// The most specific origin the server could derive without trusting
+    /// message content or client tags (for an encrypted wrap this is the
+    /// outer signing key, recorded as a human-class origin id).
+    pub origin: MessageOrigin,
+}
+
+/// Result of normalizing the accepted event behind an inbox row.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Normalization {
+    /// A routable envelope with server-derived origin, context, and targets.
+    Message(Box<NormalizedMessage>),
+    /// The event is Office input the server refuses to route right now; the
+    /// refusal becomes a durable silent decision.
+    Refused(NormalizationRefusal),
+    /// The event is not Office message input at all (a kind the router can
+    /// never act on); the inbox row is finalized as `dropped` with no
+    /// decision.
+    NotOfficeInput,
+}
+
+/// Turns an inbox row into a typed [`Normalization`].
+///
+/// Implementations must derive every trusted field (origin, channel, reply
+/// parent, mentions, loop root) from canonical server rows, never from the
+/// message body or client-supplied tags alone, and must never read or pass
+/// on encrypted content.
 #[allow(async_fn_in_trait)]
 pub trait MessageNormalizer {
     /// Normalizes the accepted event behind an inbox row.
-    async fn normalize(
-        &self,
-        scope: &CompanyScope,
-        inbox: &InboxRow,
-    ) -> Result<Option<NormalizedMessage>>;
+    async fn normalize(&self, scope: &CompanyScope, inbox: &InboxRow) -> Result<Normalization>;
 }
 
 /// Durable provisioning saga state (Architecture v0 §6).

@@ -85,6 +85,17 @@ pub struct RoutingProposal {
     pub candidates: Vec<CandidateRevision>,
     /// Which roster the candidate set describes.
     pub roster_scope: RosterScope,
+    /// Employees the Office adapter found eligible for this conversation
+    /// (live membership plus a current verified Office identity) when the
+    /// proposal was prepared.
+    ///
+    /// This is a **snapshot, not authority**: the commit transaction
+    /// reapplies it (a proposed wake outside the set is dropped as
+    /// `target_not_channel_member`) and narrows the newly-eligible roster
+    /// check to it, but it does not re-read channel membership or Office
+    /// bindings under the root lock. Refreshing that Office authority inside
+    /// the transaction is the open B1b gate (`B1_CHANNEL_NORMALIZATION.md`).
+    pub eligible_employee_ids: BTreeSet<EmployeeId>,
     /// Pure router decision computed outside the transaction.
     pub decision: RoutingDecision,
     /// Scorer provenance when semantic scoring ran.
@@ -241,7 +252,8 @@ pub struct CommittedDecision {
 /// Result of the authoritative routing transaction.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RoutingCommitOutcome {
-    /// The decision, reservations, counters, and outbox rows were committed.
+    /// The decision, reservations, counters, and any dispatch rows were
+    /// committed; a silent decision writes no outbox row.
     Committed(CommittedDecision),
     /// The message already has its one dispatching decision; nothing was written.
     AlreadyDecided {
@@ -370,6 +382,7 @@ pub fn revalidate_inputs(
         let self_origin = proposal.origin.employee_id();
         let newly_eligible = employees.values().find(|record| {
             record.accepts_routing()
+                && proposal.eligible_employee_ids.contains(&record.id)
                 && self_origin != Some(&record.id)
                 && !chain.visited.contains(&record.id)
                 && !scored.contains(&record.id)
@@ -388,14 +401,17 @@ pub fn revalidate_inputs(
 /// the refreshed chain row and employee state.
 ///
 /// The pure decision is evidence: a proposed wake survives only if the locked
-/// chain still has a hop and enough wake budget and the employee is still
-/// eligible and unvisited. Proposed drops are preserved verbatim.
+/// chain still has a hop and enough wake budget, the employee is still
+/// eligible and unvisited, and the employee is inside the proposal's
+/// conversation-eligible snapshot (`eligible_employee_ids`). Proposed drops
+/// are preserved verbatim.
 pub fn reapply_guards(
     decision: &RoutingDecision,
     origin: &MessageOrigin,
     chain: &ChainState,
     max_recipients: usize,
     employees: &BTreeMap<EmployeeId, EmployeeRecord>,
+    eligible_employee_ids: &BTreeSet<EmployeeId>,
 ) -> GuardedDecision {
     let mut recipients = Vec::with_capacity(decision.recipients.len());
     let mut excluded_targets = Vec::new();
@@ -425,6 +441,8 @@ pub fn reapply_guards(
 
         let refreshed_reason = if origin.employee_id() == Some(&record.id) {
             Some(RoutingReason::SelfOrigin)
+        } else if !eligible_employee_ids.contains(&record.id) {
+            Some(RoutingReason::TargetNotChannelMember)
         } else if chain.visited.contains(&record.id) {
             Some(RoutingReason::AlreadyVisited)
         } else if record.status != EmployeeStatus::Active {
@@ -495,6 +513,10 @@ mod tests {
         EmployeeId::parse(id).expect("valid test employee id")
     }
 
+    fn eligible(ids: &[&str]) -> BTreeSet<EmployeeId> {
+        ids.iter().map(|id| employee(id)).collect()
+    }
+
     fn record(id: &str, revision: Uuid) -> EmployeeRecord {
         EmployeeRecord {
             id: employee(id),
@@ -548,6 +570,7 @@ mod tests {
             &chain(2, &["cem"]),
             2,
             &employees,
+            &eligible(&["cem", "zeynep"]),
         );
 
         assert_eq!(guarded.wake_count, 0);
@@ -573,6 +596,7 @@ mod tests {
             &chain(1, &["cem"]),
             2,
             &employees,
+            &eligible(&["cem", "zeynep", "ghost"]),
         );
 
         assert_eq!(guarded.wake_count, 1);
@@ -605,12 +629,54 @@ mod tests {
             &state,
             16,
             &employees,
+            &eligible(&["cem", "zeynep", "ada"]),
         );
 
         assert_eq!(guarded.wake_count, 1);
         assert_eq!(
             guarded.recipients[1].decision.reason,
             RoutingReason::WakeBudgetExhausted
+        );
+    }
+
+    #[test]
+    fn a_wake_outside_the_conversation_eligible_snapshot_is_dropped_visibly() {
+        let revision = Uuid::new_v4();
+        let employees = [record("cem", revision), record("zeynep", revision)]
+            .into_iter()
+            .map(|record| (record.id.clone(), record))
+            .collect();
+        let guarded = reapply_guards(
+            &decision(vec![wake("cem"), wake("zeynep")]),
+            &MessageOrigin::Human("sefa".to_owned()),
+            &chain(0, &[]),
+            16,
+            &employees,
+            &eligible(&["zeynep"]),
+        );
+
+        assert_eq!(guarded.wake_count, 1);
+        assert_eq!(guarded.mode, RoutingMode::Deterministic);
+        assert_eq!(guarded.recipients[0].decision.action, RecipientAction::Drop);
+        assert_eq!(
+            guarded.recipients[0].decision.reason,
+            RoutingReason::TargetNotChannelMember
+        );
+        assert_eq!(guarded.recipients[1].decision.action, RecipientAction::Wake);
+
+        let none_eligible = reapply_guards(
+            &decision(vec![wake("cem")]),
+            &MessageOrigin::Human("sefa".to_owned()),
+            &chain(0, &[]),
+            16,
+            &employees,
+            &eligible(&[]),
+        );
+        assert_eq!(none_eligible.wake_count, 0);
+        assert_eq!(none_eligible.mode, RoutingMode::Silent);
+        assert_eq!(
+            none_eligible.summary_reason,
+            RoutingReason::TargetNotChannelMember
         );
     }
 
@@ -635,6 +701,7 @@ mod tests {
                 revision_id: revision,
             }],
             roster_scope: RosterScope::EligibleRoster,
+            eligible_employee_ids: eligible(&["cem", "zeynep"]),
             decision: decision(vec![wake("cem")]),
             scorer: None,
         };
@@ -643,6 +710,15 @@ mod tests {
             revalidate_inputs(&proposal, &policy, &employees, &state),
             None
         );
+
+        // An employee outside the conversation-eligible snapshot joining
+        // the company roster is not a scoring input change.
+        employees.insert(employee("ada"), record("ada", revision));
+        assert_eq!(
+            revalidate_inputs(&proposal, &policy, &employees, &state),
+            None
+        );
+        employees.remove(&employee("ada"));
 
         let changed_policy = RoutingPolicy {
             semantic_threshold: 0.9,

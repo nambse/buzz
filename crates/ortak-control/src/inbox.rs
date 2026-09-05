@@ -5,6 +5,25 @@ use uuid::Uuid;
 
 use crate::ids::{ClaimGeneration, MessageId};
 
+/// NIP-29 stream chat message kind (`buzz_core::kind::KIND_STREAM_MESSAGE`).
+pub const KIND_STREAM_MESSAGE: i32 = 9;
+/// Stream chat message kind v2 (`buzz_core::kind::KIND_STREAM_MESSAGE_V2`).
+pub const KIND_STREAM_MESSAGE_V2: i32 = 40002;
+/// NIP-17 gift wrap kind (`buzz_core::kind::KIND_GIFT_WRAP`): accepted by
+/// the Office ingress into the inbox, never routed or handed to a runtime
+/// until trusted DM normalization exists.
+pub const KIND_GIFT_WRAP: i32 = 1059;
+
+/// Whether `kind` is a plaintext channel text kind the control plane may
+/// normalize, route, and hand to a runtime.
+///
+/// This is the single definition shared by the channel normalizer and the
+/// run-dispatch authority guard, so the two seams cannot drift apart: an
+/// inbox row whose kind fails this predicate is never a run input.
+pub fn is_supported_channel_kind(kind: i32) -> bool {
+    kind == KIND_STREAM_MESSAGE || kind == KIND_STREAM_MESSAGE_V2
+}
+
 /// Accepted signed Office event facts copied into the inbox row.
 ///
 /// The relay writes this in the same transaction as the signed `events` row.

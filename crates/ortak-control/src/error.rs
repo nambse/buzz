@@ -83,6 +83,18 @@ pub enum ControlError {
     #[error("routing proposal is inconsistent: {0}")]
     InvalidProposal(&'static str),
 
+    /// An inbox row disagrees with the canonical signed event it points at.
+    ///
+    /// The row is released for bounded retry and becomes terminal `failed`
+    /// for operator inspection; it is never normalized from the inbox copy.
+    #[error("inbox row for message {message_id} disagrees with the canonical event: {field}")]
+    InboxFactMismatch {
+        /// Message whose inbox facts failed validation.
+        message_id: String,
+        /// Fact that disagreed.
+        field: &'static str,
+    },
+
     /// A durable employee manifest could not be read as an employee definition.
     #[error("employee {employee_id} has an unreadable active revision manifest")]
     UnreadableManifest {

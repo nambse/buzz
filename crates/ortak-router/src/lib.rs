@@ -22,6 +22,10 @@ pub enum SemanticScoringFailure {
     /// The scoring operation was cancelled before it produced a result.
     #[error("semantic scoring cancelled")]
     Cancelled,
+    /// No production scorer is configured; the adapter is explicitly
+    /// disabled and never fabricates scores.
+    #[error("semantic scorer disabled")]
+    Disabled,
 }
 
 /// Least-privilege employee metadata sent to a semantic scorer.
@@ -163,6 +167,41 @@ impl Router {
         message: &MessageEnvelope,
         catalog: &EmployeeCatalog,
     ) -> RoutingPreparation {
+        self.prepare_inner(message, catalog, None)
+    }
+
+    /// Like [`Router::prepare`], but additionally confines wakes to the
+    /// employees whose verified Office identity is live in the message's
+    /// conversation.
+    ///
+    /// Identity still resolves against the **full** company catalog, so a
+    /// structured mention, alias, reply parent, dispatch target, or Work
+    /// assignment naming a known employee is always recognized and an alias
+    /// collision anywhere in the roster still fails closed. A deterministic
+    /// target outside `eligible` is a visible
+    /// [`RoutingReason::TargetNotChannelMember`] drop that never consumes a
+    /// recipient or chain-wake slot, so the remaining budget goes to the
+    /// eligible targets instead of being spent on an employee who cannot be
+    /// woken. Self-origin, already-visited, inactive, and routing-disabled
+    /// drops keep their more specific reasons. A known but ineligible
+    /// deterministic target never falls through to semantic fan-out; when no
+    /// deterministic target exists, the semantic roster is built from the
+    /// eligible employees only.
+    pub fn prepare_with_conversation_eligibility(
+        &self,
+        message: &MessageEnvelope,
+        catalog: &EmployeeCatalog,
+        eligible: &BTreeSet<EmployeeId>,
+    ) -> RoutingPreparation {
+        self.prepare_inner(message, catalog, Some(eligible))
+    }
+
+    fn prepare_inner(
+        &self,
+        message: &MessageEnvelope,
+        catalog: &EmployeeCatalog,
+        eligible: Option<&BTreeSet<EmployeeId>>,
+    ) -> RoutingPreparation {
         if message.validate_for_routing().is_err() {
             return RoutingPreparation::Final(self.silent(
                 message,
@@ -216,7 +255,7 @@ impl Router {
 
         if let Some((reason, targets)) = deterministic_targets(message, catalog) {
             return RoutingPreparation::Final(
-                self.route_deterministic(message, catalog, reason, targets),
+                self.route_deterministic(message, catalog, eligible, reason, targets),
             );
         }
 
@@ -228,7 +267,7 @@ impl Router {
             ));
         }
 
-        self.prepare_semantic(message, catalog)
+        self.prepare_semantic(message, catalog, eligible)
     }
 
     /// Applies authoritative policy to scores produced under a control-layer deadline.
@@ -256,6 +295,9 @@ impl Router {
             Err(SemanticScoringFailure::Cancelled) => {
                 semantic_failure_decision(request, RoutingReason::SemanticScoringCancelled)
             }
+            Err(SemanticScoringFailure::Disabled) => {
+                semantic_failure_decision(request, RoutingReason::SemanticScorerDisabled)
+            }
         }
     }
 
@@ -263,6 +305,7 @@ impl Router {
         &self,
         message: &MessageEnvelope,
         catalog: &EmployeeCatalog,
+        eligible: Option<&BTreeSet<EmployeeId>>,
         wake_reason: RoutingReason,
         targets: Vec<EmployeeId>,
     ) -> RoutingDecision {
@@ -275,7 +318,9 @@ impl Router {
         let mut recipients = Vec::with_capacity(targets.len());
 
         for employee_id in stable_deduplicate(targets) {
-            let eligibility = eligibility_reason(message, catalog.get(&employee_id));
+            // Eligibility is settled before the wake budget is touched, so an
+            // ineligible target never displaces an eligible one.
+            let eligibility = eligibility_reason(message, catalog.get(&employee_id), eligible);
             let (action, reason) = match eligibility {
                 Some(reason) => (RecipientAction::Drop, reason),
                 None if wakes >= wake_limit => {
@@ -324,13 +369,19 @@ impl Router {
         &self,
         message: &MessageEnvelope,
         catalog: &EmployeeCatalog,
+        eligible: Option<&BTreeSet<EmployeeId>>,
     ) -> RoutingPreparation {
         let mut excluded_recipients = Vec::new();
         let mut candidates = Vec::new();
         let mut effective_thresholds = BTreeMap::new();
 
-        for employee in catalog.employees() {
-            if let Some(reason) = eligibility_reason(message, Some(employee)) {
+        // Employees outside the conversation are not part of the semantic
+        // roster at all: they are neither candidates nor recorded exclusions.
+        let roster = catalog
+            .employees()
+            .filter(|employee| eligible.is_none_or(|eligible| eligible.contains(&employee.id)));
+        for employee in roster {
+            if let Some(reason) = eligibility_reason(message, Some(employee), eligible) {
                 excluded_recipients.push(RecipientDecision {
                     employee_id: employee.id.clone(),
                     action: RecipientAction::Drop,
@@ -634,6 +685,7 @@ fn is_boundary(character: char) -> bool {
 fn eligibility_reason(
     message: &MessageEnvelope,
     employee: Option<&Employee>,
+    eligible: Option<&BTreeSet<EmployeeId>>,
 ) -> Option<RoutingReason> {
     let employee = match employee {
         Some(employee) => employee,
@@ -650,6 +702,9 @@ fn eligibility_reason(
     }
     if !employee.routing.enabled {
         return Some(RoutingReason::RoutingDisabled);
+    }
+    if eligible.is_some_and(|eligible| !eligible.contains(&employee.id)) {
+        return Some(RoutingReason::TargetNotChannelMember);
     }
     None
 }
@@ -1033,6 +1088,10 @@ mod tests {
             (
                 SemanticScoringFailure::Cancelled,
                 RoutingReason::SemanticScoringCancelled,
+            ),
+            (
+                SemanticScoringFailure::Disabled,
+                RoutingReason::SemanticScorerDisabled,
             ),
         ] {
             let message = MessageEnvelope::human_channel(

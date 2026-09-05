@@ -69,6 +69,20 @@ pub enum DispatchRefusal {
     MessageUnavailable,
     /// The signed Office event was deleted.
     MessageDeleted,
+    /// The inbox row's kind is not a plaintext channel text kind; its
+    /// content (for a gift wrap, ciphertext) is never handed to a runtime.
+    UnsupportedMessageKind {
+        /// Kind the inbox row carries.
+        kind: i32,
+    },
+    /// The inbox row is not channel-scoped, so it cannot be a channel run.
+    MessageChannelMissing,
+    /// The inbox row disagrees with the canonical signed event on a fact
+    /// the run input depends on.
+    MessageProvenanceMismatch {
+        /// Fact that disagreed.
+        field: &'static str,
+    },
     /// The message has no routable text after bounding.
     EmptyMessage,
 }
@@ -107,6 +121,19 @@ impl fmt::Display for DispatchRefusal {
             }
             Self::MessageUnavailable => formatter.write_str("office message unavailable"),
             Self::MessageDeleted => formatter.write_str("office message deleted"),
+            Self::UnsupportedMessageKind { kind } => {
+                write!(
+                    formatter,
+                    "office message kind {kind} is not a channel text kind"
+                )
+            }
+            Self::MessageChannelMissing => formatter.write_str("office message has no channel"),
+            Self::MessageProvenanceMismatch { field } => {
+                write!(
+                    formatter,
+                    "inbox {field} disagrees with the canonical office event"
+                )
+            }
             Self::EmptyMessage => formatter.write_str("office message has no text"),
         }
     }

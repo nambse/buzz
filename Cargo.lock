@@ -6607,6 +6607,7 @@ dependencies = [
  "ortak-domain",
  "serde",
  "serde_json",
+ "serde_yaml",
  "sha2 0.11.0",
  "sqlx",
  "thiserror 2.0.18",

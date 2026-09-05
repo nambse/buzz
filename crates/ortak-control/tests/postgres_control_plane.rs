@@ -12,8 +12,8 @@ use chrono::Utc;
 use ortak_control::inbox::{InboxEvent, InboxInsertOutcome, InboxState};
 use ortak_control::outbox::{OutboxFailOutcome, OutboxKind};
 use ortak_control::ports::{
-    CompanyDirectory, InboxRepository, MessageNormalizer, NormalizedMessage, OutboxRepository,
-    RoutingRepository, ScoringOutcome, SemanticScorer,
+    CompanyDirectory, InboxRepository, MessageNormalizer, Normalization, NormalizedMessage,
+    OutboxRepository, RoutingRepository, ScoringOutcome, SemanticScorer,
 };
 use ortak_control::routing::{
     CandidateRevision, RevalidationFailure, RosterScope, RoutingCommitOutcome, RoutingProposal,
@@ -176,6 +176,7 @@ impl Fixture {
             input_hash: [9; 32],
             candidates,
             roster_scope: RosterScope::Targets,
+            eligible_employee_ids: targets.iter().map(|target| employee_id(target)).collect(),
             decision: RoutingDecision {
                 message_id: id.to_hex(),
                 mode: RoutingMode::Deterministic,
@@ -1096,8 +1097,11 @@ impl MessageNormalizer for FakeNormalizer {
         &self,
         _scope: &CompanyScope,
         inbox: &ortak_control::inbox::InboxRow,
-    ) -> ortak_control::Result<Option<NormalizedMessage>> {
-        Ok(self.messages.get(&inbox.event.event_id).cloned())
+    ) -> ortak_control::Result<Normalization> {
+        Ok(match self.messages.get(&inbox.event.event_id).cloned() {
+            Some(message) => Normalization::Message(Box::new(message)),
+            None => Normalization::NotOfficeInput,
+        })
     }
 }
 
@@ -1166,6 +1170,9 @@ async fn service_rescores_when_a_candidate_revision_changes_during_scoring() {
             NormalizedMessage {
                 envelope: envelope.clone(),
                 root_message_id: id,
+                eligible_employee_ids: [employee_id("cem"), employee_id("zeynep")]
+                    .into_iter()
+                    .collect(),
             },
         )]),
     };
@@ -1235,6 +1242,9 @@ async fn service_rescores_when_a_candidate_revision_changes_during_scoring() {
                 revision_id: current_zeynep,
             },
         ],
+        &[employee_id("cem"), employee_id("zeynep")]
+            .into_iter()
+            .collect(),
         &policy,
     );
     assert_eq!(stored.input_hash, expected_hash);

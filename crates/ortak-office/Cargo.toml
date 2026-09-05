@@ -22,4 +22,5 @@ uuid.workspace = true
 
 [dev-dependencies]
 buzz-db.workspace = true
+serde_yaml.workspace = true
 tokio.workspace = true
