@@ -549,6 +549,17 @@ fn inert_env_vars<'a>(names: &[&'a str], lookup: impl Fn(&str) -> Option<String>
 }
 
 impl Config {
+    /// Keeps health and metrics on the selected loopback address for a local
+    /// relay. Network deployments retain the existing wildcard IPv4 listener.
+    pub fn diagnostics_bind_addr(&self, port: u16) -> SocketAddr {
+        let ip = if self.bind_addr.ip().is_loopback() {
+            self.bind_addr.ip()
+        } else {
+            std::net::Ipv4Addr::UNSPECIFIED.into()
+        };
+        SocketAddr::new(ip, port)
+    }
+
     /// Loads configuration from environment variables, falling back to development defaults.
     pub fn from_env() -> Result<Self, ConfigError> {
         let bind_addr_raw =
@@ -1294,6 +1305,26 @@ mod tests {
     // Parallel env-var mutation causes `defaults_are_valid` to see the invalid
     // value set by `invalid_bind_addr_returns_error`, causing a flaky failure.
     static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn loopback_relay_keeps_health_and_metrics_on_the_same_interface() {
+        let _guard = ENV_MUTEX.lock().expect("env mutex");
+        let mut config = Config::from_env().expect("valid config");
+        for (app, diagnostic_ip) in [
+            ("127.0.0.1:3038", "127.0.0.1"),
+            ("127.0.0.2:3038", "127.0.0.2"),
+            ("[::1]:3038", "::1"),
+            ("0.0.0.0:3000", "0.0.0.0"),
+            ("192.0.2.1:3000", "0.0.0.0"),
+        ] {
+            config.bind_addr = app.parse().expect("fixture address");
+            for port in [config.health_port, config.metrics_port] {
+                let address = config.diagnostics_bind_addr(port);
+                assert_eq!(address.ip().to_string(), diagnostic_ip);
+                assert_eq!(address.port(), port);
+            }
+        }
+    }
 
     /// Look up against a fixed set, standing in for process env.
     fn env_of<'a>(set: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + use<'a> {

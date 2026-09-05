@@ -22,7 +22,10 @@ use ortak_control::outbox::{OutboxKind, OutboxLease};
 use ortak_control::{CompanyScope, PgControlPlane};
 use ortak_domain::{CredentialRef, EmployeeId};
 use sqlx::postgres::PgRow;
-use sqlx::{PgExecutor, Row};
+use sqlx::{PgConnection, Row};
+
+mod authority;
+pub(crate) use authority::before_publish;
 use uuid::Uuid;
 
 use crate::error::{BindingRejection, OfficeDeliveryError, Result};
@@ -63,8 +66,8 @@ fn unauthorized(
 ///
 /// Everything is read by company id; nothing from the caller's draft other
 /// than the run id is consulted.
-async fn derive_provenance<'e>(
-    executor: impl PgExecutor<'e> + Copy,
+async fn derive_provenance(
+    connection: &mut PgConnection,
     company_id: Uuid,
     run_id: Uuid,
 ) -> Result<Provenance> {
@@ -77,11 +80,11 @@ async fn derive_provenance<'e>(
              ON rev.company_id = r.company_id
             AND rev.employee_id = r.employee_id
             AND rev.id = r.employee_revision_id
-          WHERE r.company_id = $1 AND r.id = $2",
+          WHERE r.company_id = $1 AND r.id = $2 FOR UPDATE OF r",
     )
     .bind(company_id)
     .bind(run_id)
-    .fetch_optional(executor)
+    .fetch_optional(&mut *connection)
     .await?;
     let Some(run) = run else {
         return Err(OfficeDeliveryError::UnknownRun { run_id });
@@ -122,14 +125,14 @@ async fn derive_provenance<'e>(
     let binding = sqlx::query(
         "SELECT id, employee_id, signer_ref,
                 verified_at IS NOT NULL AS verified,
-                valid_from <= now() AS started,
-                (valid_until IS NULL OR valid_until > now()) AS unexpired
+                valid_from <= clock_timestamp() AS started,
+                (valid_until IS NULL OR valid_until > clock_timestamp()) AS unexpired
            FROM employee_office_bindings
           WHERE company_id = $1 AND public_key = $2",
     )
     .bind(company_id)
     .bind(public_key.as_bytes().to_vec())
-    .fetch_optional(executor)
+    .fetch_optional(&mut *connection)
     .await?;
     let Some(binding) = binding else {
         return Err(unauthorized(
@@ -175,13 +178,14 @@ async fn derive_provenance<'e>(
 }
 
 /// Derives the authorized publish for `draft` on outbox row `outbox_id`.
-async fn authorize<'e>(
-    executor: impl PgExecutor<'e> + Copy,
+async fn authorize(
+    connection: &mut PgConnection,
     scope: &CompanyScope,
     outbox_id: Uuid,
     draft: &OfficePublishDraft,
 ) -> Result<AuthorizedOfficePublish> {
-    let provenance = derive_provenance(executor, scope.company_id(), draft.run_id).await?;
+    let provenance = derive_provenance(connection, scope.company_id(), draft.run_id).await?;
+    authority::channel(connection, scope, draft, &provenance).await?;
     let intent = draft
         .clone()
         .into_intent(provenance.employee_id, provenance.employee_revision_id);
@@ -212,6 +216,7 @@ struct PublishRow {
     run_id: Option<Uuid>,
     state: String,
     lease_token: Option<Uuid>,
+    lease_live: bool,
     payload: serde_json::Value,
     signed_event_id: Option<Vec<u8>>,
     signed_event_bytes: Option<Vec<u8>>,
@@ -224,6 +229,7 @@ impl PublishRow {
             run_id: row.try_get("run_id")?,
             state: row.try_get("state")?,
             lease_token: row.try_get("lease_token")?,
+            lease_live: row.try_get("lease_live")?,
             payload: row.try_get("payload")?,
             signed_event_id: row.try_get("signed_event_id")?,
             signed_event_bytes: row.try_get("signed_event_bytes")?,
@@ -296,7 +302,8 @@ fn check_row(
     {
         return Err(OfficeDeliveryError::IntentMismatch { outbox_id });
     }
-    let live = row.state == "pending" && row.lease_token == Some(lease.lease_token);
+    let live =
+        row.state == "pending" && row.lease_token == Some(lease.lease_token) && row.lease_live;
     Ok((payload, live))
 }
 
@@ -320,70 +327,85 @@ fn read_frozen(
     .map_err(|error| invalid_row(outbox_id, format!("frozen event: {error}")))
 }
 
+/// Enqueues inside the caller's transaction, preserving its atomic output job update.
+/// The caller must hold the shared Office authority fence before any row locks.
+/// This helper never commits and performs no network work.
+pub async fn enqueue_office_publish_on(
+    connection: &mut PgConnection,
+    scope: &CompanyScope,
+    draft: &OfficePublishDraft,
+) -> Result<EnqueueOutcome> {
+    draft.validate()?;
+    if draft.company_id != scope.company_id() {
+        return Err(OfficeDeliveryError::CompanyMismatch {
+            expected: scope.company_id(),
+            found: draft.company_id,
+        });
+    }
+    // Authorize before touching the outbox; the row id is attached once
+    // the insert (or the replayed row) is known.
+    let provisional = authorize(connection, scope, Uuid::nil(), draft).await?;
+    let payload = provisional.payload();
+    let dedup_key = provisional.dedup_key();
+    let with_row = |outbox_id: Uuid| {
+        AuthorizedOfficePublish::new(
+            outbox_id,
+            provisional.intent().clone(),
+            provisional.binding_id(),
+            provisional.signer_ref().clone(),
+            *provisional.public_key(),
+        )
+    };
+    let inserted = sqlx::query(
+        "INSERT INTO outbox (company_id, kind, dedup_key, run_id, payload)
+             VALUES ($1, 'office_publish', $2, $3, $4)
+             ON CONFLICT (company_id, dedup_key) DO NOTHING
+             RETURNING id",
+    )
+    .bind(scope.company_id())
+    .bind(&dedup_key)
+    .bind(draft.run_id)
+    .bind(serde_json::to_value(&payload).map_err(ortak_control::ControlError::from)?)
+    .fetch_optional(&mut *connection)
+    .await?;
+    if let Some(row) = inserted {
+        return Ok(EnqueueOutcome::Enqueued(with_row(row.try_get("id")?)));
+    }
+
+    let existing = sqlx::query(
+        "SELECT id, kind, run_id, payload FROM outbox
+              WHERE company_id = $1 AND dedup_key = $2",
+    )
+    .bind(scope.company_id())
+    .bind(&dedup_key)
+    .fetch_one(&mut *connection)
+    .await?;
+    let outbox_id: Uuid = existing.try_get("id")?;
+    let kind: String = existing.try_get("kind")?;
+    let run_id: Option<Uuid> = existing.try_get("run_id")?;
+    let stored: serde_json::Value = existing.try_get("payload")?;
+    let stored: OfficePublishPayload = serde_json::from_value(stored)
+        .map_err(|error| invalid_row(outbox_id, format!("payload: {error}")))?;
+    if kind != OutboxKind::OfficePublish.as_str()
+        || run_id != Some(draft.run_id)
+        || stored != payload
+    {
+        return Err(OfficeDeliveryError::IntentMismatch { outbox_id });
+    }
+    Ok(EnqueueOutcome::Existing(with_row(outbox_id)))
+}
+
 impl OfficeDeliveryRepository for PgControlPlane {
     async fn enqueue_office_publish(
         &self,
         scope: &CompanyScope,
         draft: &OfficePublishDraft,
     ) -> Result<EnqueueOutcome> {
-        draft.validate()?;
-        if draft.company_id != scope.company_id() {
-            return Err(OfficeDeliveryError::CompanyMismatch {
-                expected: scope.company_id(),
-                found: draft.company_id,
-            });
-        }
-        // Authorize before touching the outbox; the row id is attached once
-        // the insert (or the replayed row) is known.
-        let provisional = authorize(self.pool(), scope, Uuid::nil(), draft).await?;
-        let payload = provisional.payload();
-        let dedup_key = provisional.dedup_key();
-        let with_row = |outbox_id: Uuid| {
-            AuthorizedOfficePublish::new(
-                outbox_id,
-                provisional.intent().clone(),
-                provisional.binding_id(),
-                provisional.signer_ref().clone(),
-                *provisional.public_key(),
-            )
-        };
-        let inserted = sqlx::query(
-            "INSERT INTO outbox (company_id, kind, dedup_key, run_id, payload)
-             VALUES ($1, 'office_publish', $2, $3, $4)
-             ON CONFLICT (company_id, dedup_key) DO NOTHING
-             RETURNING id",
-        )
-        .bind(scope.company_id())
-        .bind(&dedup_key)
-        .bind(draft.run_id)
-        .bind(serde_json::to_value(&payload).map_err(ortak_control::ControlError::from)?)
-        .fetch_optional(self.pool())
-        .await?;
-        if let Some(row) = inserted {
-            return Ok(EnqueueOutcome::Enqueued(with_row(row.try_get("id")?)));
-        }
-
-        let existing = sqlx::query(
-            "SELECT id, kind, run_id, payload FROM outbox
-              WHERE company_id = $1 AND dedup_key = $2",
-        )
-        .bind(scope.company_id())
-        .bind(&dedup_key)
-        .fetch_one(self.pool())
-        .await?;
-        let outbox_id: Uuid = existing.try_get("id")?;
-        let kind: String = existing.try_get("kind")?;
-        let run_id: Option<Uuid> = existing.try_get("run_id")?;
-        let stored: serde_json::Value = existing.try_get("payload")?;
-        let stored: OfficePublishPayload = serde_json::from_value(stored)
-            .map_err(|error| invalid_row(outbox_id, format!("payload: {error}")))?;
-        if kind != OutboxKind::OfficePublish.as_str()
-            || run_id != Some(draft.run_id)
-            || stored != payload
-        {
-            return Err(OfficeDeliveryError::IntentMismatch { outbox_id });
-        }
-        Ok(EnqueueOutcome::Existing(with_row(outbox_id)))
+        let mut tx = self.pool().begin().await?;
+        authority::lock(&mut tx, scope).await?;
+        let result = enqueue_office_publish_on(&mut tx, scope, draft).await?;
+        tx.commit().await?;
+        Ok(result)
     }
 
     async fn frozen_event(
@@ -411,19 +433,21 @@ impl OfficeDeliveryRepository for PgControlPlane {
         // Re-derive provenance now: the presented object must still be what
         // the control plane would authorize for this row, and the binding
         // must still be verified and in-window before any signing.
-        let current = authorize(self.pool(), scope, lease.id, &draft_of(authorized)).await?;
+        let mut tx = self.pool().begin().await?;
+        authority::lock(&mut tx, scope).await?;
+        let current = authorize(&mut tx, scope, lease.id, &draft_of(authorized)).await?;
         if current != *authorized {
             return Err(OfficeDeliveryError::IntentMismatch {
                 outbox_id: lease.id,
             });
         }
         let row = sqlx::query(
-            "SELECT kind, run_id, state, lease_token, payload, signed_event_id, signed_event_bytes
+            "SELECT kind, run_id, state, lease_token, COALESCE(lease_expires_at>clock_timestamp(),false) AS lease_live, payload, signed_event_id, signed_event_bytes
                FROM outbox WHERE company_id = $1 AND id = $2",
         )
         .bind(scope.company_id())
         .bind(lease.id)
-        .fetch_optional(self.pool())
+        .fetch_optional(&mut *tx)
         .await?;
         let Some(row) = row else {
             return Err(OfficeDeliveryError::NotFound {
@@ -440,7 +464,7 @@ impl OfficeDeliveryRepository for PgControlPlane {
         if !live {
             return Ok(FrozenLookup::StaleLease);
         }
-        match (&row.signed_event_id, &row.signed_event_bytes) {
+        let result = match (&row.signed_event_id, &row.signed_event_bytes) {
             (Some(event_id), Some(bytes)) => Ok(FrozenLookup::Frozen(Box::new(read_frozen(
                 scope,
                 lease.id,
@@ -454,7 +478,9 @@ impl OfficeDeliveryRepository for PgControlPlane {
                 lease.id,
                 "signed_event_id and signed_event_bytes are not set together",
             )),
-        }
+        };
+        tx.commit().await?;
+        result
     }
 
     async fn freeze_signed_event(
@@ -474,8 +500,13 @@ impl OfficeDeliveryRepository for PgControlPlane {
         }
 
         let mut tx = self.pool().begin().await?;
+        authority::lock(&mut tx, scope).await?;
+        let current = authorize(&mut tx, scope, lease.id, &authority::draft(event)?).await?;
+        if !authority::matches(&current, event) {
+            return Err(authority::denied());
+        }
         let row = sqlx::query(
-            "SELECT kind, run_id, state, lease_token, payload, signed_event_id, signed_event_bytes
+            "SELECT kind, run_id, state, lease_token, COALESCE(lease_expires_at>clock_timestamp(),false) AS lease_live, payload, signed_event_id, signed_event_bytes
                FROM outbox WHERE company_id = $1 AND id = $2 FOR UPDATE",
         )
         .bind(scope.company_id())
@@ -519,6 +550,7 @@ impl OfficeDeliveryRepository for PgControlPlane {
                         SET signed_event_id = $4, signed_event_bytes = $5, updated_at = now()
                       WHERE company_id = $1 AND id = $2 AND lease_token = $3
                         AND state = 'pending' AND kind = 'office_publish'
+                        AND lease_expires_at > clock_timestamp()
                         AND signed_event_id IS NULL
                       RETURNING signed_event_id, signed_event_bytes",
                 )

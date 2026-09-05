@@ -13,7 +13,8 @@ use ortak_control::run_event::strip_control_characters;
 use ortak_control::runtime::{RunContext, RunSpec, RuntimeError, MAX_RUN_INPUT_BYTES};
 use ortak_control::MessageId;
 use ortak_domain::{
-    CredentialRef, Employee, EmployeeId, EmployeeStatus, PermissionPolicy, RuntimeBinding,
+    CredentialRef, Employee, EmployeeId, EmployeeStatus, MemoryBinding, PermissionPolicy,
+    RuntimeBinding,
 };
 use uuid::Uuid;
 
@@ -21,6 +22,12 @@ use uuid::Uuid;
 /// carries identifiers or closed-vocabulary values only.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DispatchRefusal {
+    /// A durable stop request fences any subsequent start attempt.
+    CancellationRequested,
+    /// The company was suspended after the scope was resolved.
+    CompanyNotActive,
+    /// Canonical Office authorization changed since the committed decision.
+    OfficeAuthorityChanged,
     /// The outbox row names no routing decision.
     DecisionMissing,
     /// The decision has no recipient row for the employee.
@@ -60,6 +67,18 @@ pub enum DispatchRefusal {
         /// Field that differs.
         field: &'static str,
     },
+    /// A required memory binding row is missing.
+    MemoryBindingMissing,
+    /// The exact memory binding has not passed resource validation.
+    MemoryBindingUnvalidated,
+    /// Pinned, stored, and active memory identities disagree.
+    MemoryBindingChanged,
+    /// No configured adapter can serve the required memory binding.
+    MemoryAdapterUnavailable,
+    /// Memory health or bounded recall failed.
+    MemoryUnavailable,
+    /// Recalled records or the durable snapshot violate their scope or bounds.
+    MemoryContextRejected,
     /// The binding names a different adapter than the one dispatching.
     AdapterMismatch {
         /// Adapter the binding names.
@@ -92,6 +111,9 @@ pub enum DispatchRefusal {
 impl fmt::Display for DispatchRefusal {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::CancellationRequested => formatter.write_str("run cancellation requested"),
+            Self::CompanyNotActive => formatter.write_str("company is not active"),
+            Self::OfficeAuthorityChanged => formatter.write_str("Office authorization changed"),
             Self::DecisionMissing => formatter.write_str("routing decision missing"),
             Self::RecipientMissing => formatter.write_str("routing recipient missing"),
             Self::RecipientNotWake { action } => {
@@ -118,6 +140,12 @@ impl fmt::Display for DispatchRefusal {
                     "runtime binding {field} differs from the manifest"
                 )
             }
+            Self::MemoryBindingMissing => formatter.write_str("memory binding row missing"),
+            Self::MemoryBindingUnvalidated => formatter.write_str("memory binding not validated"),
+            Self::MemoryBindingChanged => formatter.write_str("memory binding identity changed"),
+            Self::MemoryAdapterUnavailable => formatter.write_str("memory adapter unavailable"),
+            Self::MemoryUnavailable => formatter.write_str("memory health or recall unavailable"),
+            Self::MemoryContextRejected => formatter.write_str("memory context rejected"),
             Self::AdapterMismatch { expected, found } => {
                 write!(formatter, "binding adapter {expected} is not {found}")
             }
@@ -173,18 +201,60 @@ pub struct StoredRuntimeBinding {
     pub validated: bool,
 }
 
+/// Memory row belonging to the same pinned employee revision.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StoredMemoryBinding {
+    /// Complete secret-free binding read from durable columns.
+    pub binding: MemoryBinding,
+    /// Whether resource validation was recorded for this revision.
+    pub validated: bool,
+}
+
 /// Runtime configuration validated together from one pinned revision manifest.
 /// No public constructor permits mixing a binding and another revision's policy.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ValidatedRunConfiguration {
     binding: RuntimeBinding,
     permissions: PermissionPolicy,
+    memory: Option<MemoryBinding>,
+    memory_validated: bool,
 }
 
 impl ValidatedRunConfiguration {
     /// Runtime binding from the validated manifest.
     pub fn binding(&self) -> &RuntimeBinding {
         &self.binding
+    }
+
+    /// Complete memory identity pinned by the same employee manifest.
+    pub fn memory_binding(&self) -> Option<&MemoryBinding> {
+        self.memory.as_ref()
+    }
+
+    /// Validates the stored memory row and the employee's live memory identity.
+    /// Unlike policy, a retired memory workspace must not remain executable.
+    pub fn with_validated_memory(
+        mut self,
+        stored: Option<&StoredMemoryBinding>,
+        active: Option<&MemoryBinding>,
+    ) -> std::result::Result<Self, DispatchRefusal> {
+        match self.memory.as_ref() {
+            Some(binding) => {
+                let stored = stored.ok_or(DispatchRefusal::MemoryBindingMissing)?;
+                if !stored.validated {
+                    return Err(DispatchRefusal::MemoryBindingUnvalidated);
+                }
+                if &stored.binding != binding || active != Some(binding) {
+                    return Err(DispatchRefusal::MemoryBindingChanged);
+                }
+            }
+            None if stored.is_some() || active.is_some() => {
+                return Err(DispatchRefusal::MemoryBindingChanged);
+            }
+            None => {}
+        }
+        self.memory_validated = true;
+        Ok(self)
     }
 
     /// Structurally validated permission policy from the same manifest.
@@ -247,6 +317,8 @@ pub fn validate_pinned_revision(
     Ok(ValidatedRunConfiguration {
         binding,
         permissions: employee.permissions,
+        memory_validated: employee.memory.is_none(),
+        memory: employee.memory,
     })
 }
 
@@ -279,6 +351,7 @@ pub fn run_idempotency_key(company_id: Uuid, run_id: Uuid) -> String {
 /// to run creation, runtime start, or correlation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DispatchAuthority {
+    office_authority: Option<ortak_control::office_authority::OfficeAuthority>,
     company_id: Uuid,
     outbox_id: Uuid,
     lease_token: Uuid,
@@ -307,6 +380,7 @@ impl DispatchAuthority {
         input: RunInput,
     ) -> Self {
         Self {
+            office_authority: None,
             company_id,
             outbox_id,
             lease_token,
@@ -323,6 +397,20 @@ impl DispatchAuthority {
     /// Company boundary.
     pub fn company_id(&self) -> Uuid {
         self.company_id
+    }
+
+    pub(crate) fn with_office_authority(
+        mut self,
+        authority: ortak_control::office_authority::OfficeAuthority,
+    ) -> Self {
+        self.office_authority = Some(authority);
+        self
+    }
+
+    pub(crate) fn office_authority(
+        &self,
+    ) -> Option<&ortak_control::office_authority::OfficeAuthority> {
+        self.office_authority.as_ref()
     }
 
     /// Outbox row the lease was verified against.
@@ -368,6 +456,18 @@ impl DispatchAuthority {
     /// Permission policy from the same validated, pinned revision manifest.
     pub fn permissions(&self) -> &PermissionPolicy {
         self.configuration.permissions()
+    }
+
+    /// Complete memory identity from the same pinned revision.
+    pub fn memory_binding(&self) -> Option<&MemoryBinding> {
+        self.configuration.memory_binding()
+    }
+
+    pub(crate) fn require_validated_memory(&self) -> std::result::Result<(), DispatchRefusal> {
+        if !self.configuration.memory_validated {
+            return Err(DispatchRefusal::MemoryBindingUnvalidated);
+        }
+        Ok(())
     }
 
     /// Bounded input derived from the canonical Office event.

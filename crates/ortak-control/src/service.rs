@@ -12,8 +12,9 @@ use ortak_domain::{
     ConversationContext, EmployeeId, MessageEnvelope, MessageOrigin, RoutingDecision, RoutingMode,
     RoutingPolicy, RoutingReason,
 };
-use ortak_router::{Router, RoutingPreparation};
+use ortak_router::{Router, RoutingPreparation, SemanticScoringFailure};
 use sha2::{Digest, Sha256};
+use tokio::time::{timeout_at, Instant};
 use uuid::Uuid;
 
 use crate::error::{ControlError, Result};
@@ -21,12 +22,14 @@ use crate::ids::{CompanyScope, MessageId};
 use crate::inbox::{InboxClaim, InboxState};
 use crate::ports::{
     InboxRepository, MessageNormalizer, Normalization, NormalizationRefusal, NormalizedMessage,
-    RoutingRepository, RoutingSnapshot, SemanticScorer,
+    RoutingRepository, RoutingSnapshot, ScoringOutcome, SemanticScorer,
 };
 use crate::routing::{
     CandidateRevision, ChainState, CommittedDecision, RosterScope, RoutingCommitOutcome,
     RoutingProposal,
 };
+
+use crate::semantic::SemanticScoringInput;
 
 /// Worker tuning for the inbox routing service.
 #[derive(Clone, Debug)]
@@ -35,6 +38,10 @@ pub struct RoutingWorkerConfig {
     pub worker_id: String,
     /// Inbox claim lease; a slower scorer loses its claim to a reclaiming worker.
     pub claim_lease: Duration,
+    /// Total scoring time across refresh attempts; clamped to 1 ms..=5 s and
+    /// capped by the claim lease. Time spent refreshing after the first score
+    /// consumes the same budget. No new scorer call begins after it expires.
+    pub semantic_timeout: Duration,
     /// Claims allowed before an inbox row becomes terminal `failed`.
     pub max_claim_attempts: i32,
     /// Refresh/re-score attempts before an explainable silent decision.
@@ -48,6 +55,7 @@ impl Default for RoutingWorkerConfig {
         Self {
             worker_id: format!("router-{}", Uuid::new_v4()),
             claim_lease: Duration::from_secs(60),
+            semantic_timeout: Duration::from_secs(5),
             max_claim_attempts: 5,
             max_revalidation_attempts: 3,
             retry_backoff: Duration::from_secs(30),
@@ -171,6 +179,7 @@ where
         claim: &InboxClaim,
     ) -> Result<ServiceOutcome> {
         let mut attempts = 0u32;
+        let mut scoring_deadline = None::<Instant>;
         while attempts < self.config.max_revalidation_attempts.max(1) {
             attempts += 1;
             let snapshot = self.snapshot_for_claim(scope, claim).await?;
@@ -241,20 +250,30 @@ where
                         (decision, None, candidates, RosterScope::Targets)
                     }
                     RoutingPreparation::Semantic(request) => {
-                        let candidates = request
-                            .candidates()
-                            .iter()
-                            .filter_map(|candidate| {
-                                snapshot.active_revision(candidate.employee_id()).map(
-                                    |revision_id| CandidateRevision {
-                                        employee_id: candidate.employee_id().clone(),
-                                        revision_id,
-                                    },
-                                )
-                            })
-                            .collect::<Vec<_>>();
+                        let input = SemanticScoringInput::new(
+                            scope,
+                            claim,
+                            &snapshot,
+                            &envelope,
+                            eligible,
+                            request.clone(),
+                        )?;
+                        let candidates = input.candidates().to_vec();
+                        let now = Instant::now();
+                        let lease_remaining = remaining_claim_time(claim, &snapshot);
+                        let budget = self
+                            .config
+                            .semantic_timeout
+                            .clamp(Duration::from_millis(1), Duration::from_secs(5))
+                            .min(self.config.claim_lease)
+                            .min(lease_remaining);
+                        let deadline = scoring_deadline.get_or_insert(now + budget);
+                        // A refreshed lease may shorten the budget, never renew it.
+                        *deadline = (*deadline).min(now + lease_remaining);
                         // Remote scoring runs here, with no database transaction open.
-                        let outcome = self.scorer.score(&request).await;
+                        // timeout_at drops the owned future; no detached late result can
+                        // enter completion, persistence, or a subsequent attempt.
+                        let outcome = score_before_deadline(&self.scorer, &input, *deadline).await;
                         let decision = router.complete_semantic(request, outcome.result);
                         (
                             decision,
@@ -266,6 +285,8 @@ where
                 };
 
             let proposal = RoutingProposal {
+                office_authority: snapshot.office_authority.clone(),
+                office_input_hash: office_input_hash(&envelope, root_message_id, eligible),
                 company_id: claim.company_id,
                 message_id: claim.message_id,
                 root_message_id,
@@ -345,6 +366,12 @@ where
                 Normalization::NotOfficeInput => return Ok(ServiceOutcome::StaleClaim),
             };
         let proposal = RoutingProposal {
+            office_authority: snapshot.office_authority.clone(),
+            office_input_hash: office_input_hash(
+                &normalized.envelope,
+                normalized.root_message_id,
+                &normalized.eligible_employee_ids,
+            ),
             company_id: claim.company_id,
             message_id: claim.message_id,
             root_message_id: normalized.root_message_id,
@@ -394,6 +421,12 @@ where
         refusal: NormalizationRefusal,
     ) -> Result<ServiceOutcome> {
         let proposal = RoutingProposal {
+            office_authority: snapshot.office_authority.clone(),
+            office_input_hash: refusal_input_hash(
+                claim.message_id,
+                &refusal,
+                &RoutingPolicy::default(),
+            ),
             company_id: claim.company_id,
             message_id: claim.message_id,
             root_message_id: claim.message_id,
@@ -466,6 +499,53 @@ fn origin_label(origin: &MessageOrigin) -> String {
         MessageOrigin::Integration(id) => format!("integration:{id}"),
         MessageOrigin::System => "system".to_owned(),
     }
+}
+
+fn remaining_claim_time(claim: &InboxClaim, snapshot: &RoutingSnapshot) -> Duration {
+    let expires_at = snapshot
+        .inbox
+        .claim_expires_at
+        .map(|expires| expires.min(claim.claim_expires_at))
+        .unwrap_or(claim.claim_expires_at);
+    (expires_at - Utc::now()).to_std().unwrap_or(Duration::ZERO)
+}
+
+async fn score_before_deadline<S: SemanticScorer>(
+    scorer: &S,
+    input: &SemanticScoringInput,
+    deadline: Instant,
+) -> ScoringOutcome {
+    let started = Instant::now();
+    let mut metadata = scorer.metadata();
+    if started < deadline {
+        let outcome = timeout_at(deadline, scorer.score(input)).await;
+        // A future which blocks within one poll can return after timeout_at's
+        // timer was due. Its result is still late and must never wake anyone.
+        match outcome {
+            Ok(outcome) if Instant::now() < deadline => return outcome,
+            _ => {}
+        }
+    }
+    metadata.latency_ms = Some(i32::try_from(started.elapsed().as_millis()).unwrap_or(i32::MAX));
+    metadata.usage = None;
+    ScoringOutcome {
+        result: Err(SemanticScoringFailure::TimedOut),
+        metadata,
+    }
+}
+
+/// Fingerprints normalized Office authorization without candidate revisions or
+/// routing policy. Admission can revalidate the canonical message while keeping
+/// the configuration revision chosen by the committed routing decision.
+pub fn office_input_hash(
+    envelope: &MessageEnvelope,
+    root_message_id: MessageId,
+    eligible: &BTreeSet<EmployeeId>,
+) -> [u8; 32] {
+    let envelope = envelope
+        .clone()
+        .with_delivery_chain(ortak_domain::DeliveryChain::root(root_message_id.to_hex()));
+    routing_input_hash(&envelope, &[], eligible, &RoutingPolicy::default())
 }
 
 /// Canonical SHA-256 of the bounded router/scorer input pinned on a decision.
@@ -761,3 +841,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "service_deadline_tests.rs"]
+mod deadline_tests;

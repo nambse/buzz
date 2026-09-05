@@ -12,6 +12,7 @@ use uuid::Uuid;
 use super::company::parse_policy;
 use super::inbox::inbox_row;
 use super::{bytes32, column_value, is_unique_violation, parse_column, PgControlPlane};
+use super::{lock_office_authority_on, office_authority_matches_on};
 use crate::error::{ControlError, Result};
 use crate::ids::{ClaimGeneration, CompanyScope, MessageId};
 use crate::inbox::InboxState;
@@ -19,7 +20,7 @@ use crate::outbox::DispatchTicket;
 use crate::ports::{RosterEmployee, RoutingRepository, RoutingSnapshot};
 use crate::routing::{
     reapply_guards, revalidate_inputs, ChainCounters, ChainState, CommittedDecision,
-    EmployeeRecord, RoutingCommitOutcome, RoutingProposal, StoredDecision,
+    EmployeeRecord, RevalidationFailure, RoutingCommitOutcome, RoutingProposal, StoredDecision,
 };
 
 /// Minimal manifest view read inside the transaction: only the routing
@@ -153,7 +154,8 @@ impl RoutingRepository for PgControlPlane {
         scope: &CompanyScope,
         message_id: MessageId,
     ) -> Result<Option<RoutingSnapshot>> {
-        let mut connection = self.pool.acquire().await?;
+        let mut connection = self.pool.begin().await?;
+        let office_authority = lock_office_authority_on(&mut connection, scope).await?;
         let inbox = sqlx::query(
             "SELECT event_id, event_created_at, event_kind, author_pubkey, channel_id, state,
                     claim_generation, claimed_by, claim_expires_at, attempt_count, retry_after,
@@ -204,6 +206,7 @@ impl RoutingRepository for PgControlPlane {
         }
 
         Ok(Some(RoutingSnapshot {
+            office_authority,
             inbox,
             policy,
             roster,
@@ -260,6 +263,12 @@ impl RoutingRepository for PgControlPlane {
         let message_bytes = proposal.message_id.as_bytes().as_slice();
         let root_bytes = proposal.root_message_id.as_bytes().as_slice();
 
+        // Lock order: community deletion -> Office authority -> inbox -> root.
+        // Mutations (including absent key registration) share this protocol.
+        // Matching the initial witness proves that every normalizer read was
+        // made against unchanged authorization facts, even across pool reads.
+        lock_office_authority_on(&mut tx, scope).await?;
+
         // 1. Fence the inbox claim under the row lock.
         let inbox = sqlx::query(
             "SELECT state, claim_generation FROM office_inbox
@@ -302,6 +311,13 @@ impl RoutingRepository for PgControlPlane {
                 observed_state,
                 observed_generation,
             });
+        }
+
+        if !office_authority_matches_on(&mut tx, scope, &proposal.office_authority).await? {
+            tx.rollback().await?;
+            return Ok(RoutingCommitOutcome::InputsChanged(
+                RevalidationFailure::OfficeAuthorityChanged,
+            ));
         }
 
         // 3. Current company policy.
@@ -359,6 +375,29 @@ impl RoutingRepository for PgControlPlane {
             &employees,
             &proposal.eligible_employee_ids,
         );
+        // A score may have completed while the claim was live, then waited
+        // behind the root lock. Re-read database time after every blocking lock.
+        // Zero-wake timeout silence can still finalize this same generation;
+        // a waking decision must retain its lease through deferred commit too.
+        if guarded.wake_count > 0 {
+            let claim_live: bool = sqlx::query_scalar(
+                "SELECT EXISTS (SELECT 1 FROM office_inbox
+                  WHERE company_id=$1 AND event_id=$2 AND state='claimed'
+                    AND claim_generation=$3 AND claim_expires_at>clock_timestamp())",
+            )
+            .bind(company_id)
+            .bind(message_bytes)
+            .bind(proposal.claim_generation.0)
+            .fetch_one(&mut *tx)
+            .await?;
+            if !claim_live {
+                tx.rollback().await?;
+                return Ok(RoutingCommitOutcome::StaleClaim {
+                    observed_state,
+                    observed_generation,
+                });
+            }
+        }
         let hop_consumed = guarded.wake_count > 0;
         let next_hop = if hop_consumed {
             chain.hop_count + 1
@@ -385,9 +424,10 @@ impl RoutingRepository for PgControlPlane {
                   candidate_revision_ids, excluded_targets,
                   scorer_adapter, scorer_model, scorer_prompt_version, scorer_version,
                   scorer_latency_ms, scorer_usage,
-                  wake_count, hop_consumed, chain_hop_count, chain_wake_count)
+                  wake_count, hop_consumed, chain_hop_count, chain_wake_count,
+                  office_authority_generation, office_authority_valid_before, office_input_hash)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-                     $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+                     $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
              RETURNING id",
         )
         .bind(company_id)
@@ -413,6 +453,9 @@ impl RoutingRepository for PgControlPlane {
         .bind(hop_consumed)
         .bind(i16::from(next_hop))
         .bind(i32::try_from(next_wakes).unwrap_or(i32::MAX))
+        .bind(proposal.office_authority.generation())
+        .bind(proposal.office_authority.valid_before())
+        .bind(proposal.office_input_hash.as_slice())
         .fetch_one(&mut *tx)
         .await;
         let decision_id: Uuid = match decision_insert {

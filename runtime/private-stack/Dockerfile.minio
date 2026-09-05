@@ -1,0 +1,41 @@
+# syntax=docker/dockerfile:1
+# Build context must contain ONLY the verified archive named source.tar.gz.
+FROM golang:1.24.8-alpine@sha256:3d78beb141d98f42337f1252ecf2a5f20374109929a4c3f6817f9e4179cc0ae5 AS build
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOMAXPROCS=2 GOMEMLIMIT=1536MiB \
+    GOCACHE=/tmp/ortak-go-build GOMODCACHE=/tmp/ortak-go-mod \
+    GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org
+WORKDIR /src
+COPY source.tar.gz /tmp/minio-source.tar.gz
+# Only direct go build is used: upstream make also invokes unrelated debug and
+# development targets. Cache/module downloads are removed in this same layer.
+RUN echo '45521908307306e925c98d629e1c17d78c8b72b6ee242b1bfb1409f7d8ee5841  /tmp/minio-source.tar.gz' | sha256sum -c - && \
+    tar -xzf /tmp/minio-source.tar.gz --strip-components=1 -C /src && \
+    test "$(go env GOVERSION)" = 'go1.24.8' && \
+    echo '673f06144e90bc045f0a20050d2874c52e551be5bfbd70dff6e76b66da0db702  go.mod' > /tmp/module-hashes && \
+    echo '86e062349c7abdce0465561bb409d410a95b00b0969ba05d5fb5f2e3550a5cd4  go.sum' >> /tmp/module-hashes && \
+    sha256sum -c /tmp/module-hashes && mkdir -p /out/data && \
+    go build -mod=readonly -p=2 -tags=kqueue -trimpath -buildvcs=false \
+      -ldflags '-s -w -buildid= -X github.com/minio/minio/cmd.Version=2025-10-15T17:29:55Z -X github.com/minio/minio/cmd.ReleaseTag=RELEASE.2025-10-15T17-29-55Z -X github.com/minio/minio/cmd.CommitID=9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a -X github.com/minio/minio/cmd.ShortCommitID=9e49d5e7a648 -X github.com/minio/minio/cmd.CopyrightYear=2025' \
+      -o /out/minio . && \
+    sha256sum -c /tmp/module-hashes && \
+    /out/minio --version && \
+    cp LICENSE /out/LICENSE && \
+    rm -rf /tmp/ortak-go-build /tmp/ortak-go-mod /src /tmp/minio-source.tar.gz
+
+FROM scratch
+LABEL org.opencontainers.image.title="Ortak private MinIO source build" \
+      org.opencontainers.image.source="https://github.com/minio/minio" \
+      org.opencontainers.image.revision="9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a" \
+      org.opencontainers.image.version="RELEASE.2025-10-15T17-29-55Z" \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later" \
+      org.ortak.source.archive.sha256="45521908307306e925c98d629e1c17d78c8b72b6ee242b1bfb1409f7d8ee5841"
+COPY --from=build /out/minio /usr/local/bin/minio
+COPY --from=build /out/LICENSE /usr/share/doc/minio/LICENSE
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=build --chown=10001:10001 /out/data /data
+ENV HOME=/tmp MINIO_BROWSER=off MINIO_UPDATE=off
+USER 10001:10001
+WORKDIR /data
+ENTRYPOINT ["/usr/local/bin/minio"]
+# A build or bare image run never creates a store. Server composition is explicit.
+CMD ["--version"]

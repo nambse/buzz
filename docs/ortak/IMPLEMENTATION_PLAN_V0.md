@@ -288,16 +288,39 @@ keyset paging. Migration 0047 also adds the `runs.work_item_id` foreign key
 that 0045 reserved. Company scope is a separate argument on every method;
 unknown and cross-company ids fail closed as the same not-found error.
 
-Not yet delivered: Work and Projects APIs (HTTP/WebSocket) and realtime
-projections; Work/Projects desktop surfaces and employee work queues (the
-`work_assignments` active index exists, the query does not); dispatch-from-
-work (creating a run for an assignment and linking it through
-`runs.work_item_id`); artifact attachments and artifact storage (no
-`artifacts` relation yet); assignment release, dependency removal, parent/child
-decomposition, and editing of titles/descriptions/criteria after creation;
-project-level policy and Office conversation linkage beyond the promoted
-message; and the end-to-end exit-gate flow below, which still needs the run
-dispatch and artifact pieces.
+Manual E1 integration (2026-09-05): migration 0054 adds immutable channel-bound
+project authority, durable human grants and idempotent operation receipts. The
+signed HTTP API rechecks company, channel, project role, canonical promoted
+source and current employee identity/membership before its manual operations.
+The desktop Projects & Work tab now provides named-channel project creation,
+project/work lists and details, manual work creation and status, cohort-scoped
+assignment, reviewer acceptance criteria, approvals and completion. It preserves
+an uncertain operation's exact body/UUID across tab changes, refreshes authority
+after 409, and aborts/fences reads and pending requests on scope or access loss.
+Assignment and saved `in_progress` do not dispatch a runtime.
+
+Verification: 14 Work core PostgreSQL cases passed in 4.50 seconds; 10 signed API
+PostgreSQL cases passed in 5.53 seconds, including seven Work cases. Six focused
+Work UI unit tests, TypeScript, scoped Biome and the isolated mock build pass.
+The three-case headless Ortak suite passed in 16.4 seconds, with the Work-only
+final screenshot rerun passing in 2.9 seconds. All three distinct headless
+captures were visually inspected with complete, readable content. The final
+native package build passed in 43.53 seconds, the production frontend matrix
+passed, and private app start is verified. The fresh private database has
+migrations 0053/0054 applied and the refreshed API passes seven original network
+checks. Root TCP verification and the actual live manual Work workflow remain
+pending; no native visual/OS interaction is claimed. See `WORK_API_E1.md` for
+the exact boundary.
+
+Not yet delivered: Work WebSocket/realtime projections; employee work queues
+(the `work_assignments` active index exists, the query does not); a desktop
+conversation-promotion control; dispatch-from-work (creating a run for an
+assignment and linking it through `runs.work_item_id`); artifact attachments and
+artifact storage (no `artifacts` relation yet); assignment release, dependency
+removal, parent/child decomposition, and editing of titles/descriptions/criteria
+after creation; project sharing/archive controls and project-level policy beyond
+the API's immutable Office channel binding; and the end-to-end exit-gate flow
+below, which still needs the run dispatch and artifact pieces.
 
 - Implement Project and WorkItem aggregates, histories, dependencies, and
   assignments.

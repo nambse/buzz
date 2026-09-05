@@ -37,15 +37,21 @@ pub enum RuntimeCapability {
     RunEvents,
     /// Cancel a run.
     RunCancel,
+    /// Find the receipt of a start by stable key without starting execution.
+    RunLookup,
+    /// Cancel by stable start key, including a durable pre-start tombstone.
+    RunCancelStart,
 }
 
 /// Capabilities every activated runtime binding must support.
-pub const ACTIVATION_REQUIRED_CAPABILITIES: [RuntimeCapability; 5] = [
+pub const ACTIVATION_REQUIRED_CAPABILITIES: [RuntimeCapability; 7] = [
     RuntimeCapability::HealthProbe,
     RuntimeCapability::ProfileInspect,
     RuntimeCapability::RunStart,
     RuntimeCapability::RunEvents,
     RuntimeCapability::RunCancel,
+    RuntimeCapability::RunLookup,
+    RuntimeCapability::RunCancelStart,
 ];
 
 /// Probed capability set for one adapter deployment.
@@ -104,9 +110,10 @@ impl fmt::Display for RuntimeRunRef {
 #[serde(transparent)]
 pub struct RuntimeCursor(pub String);
 
-/// Conversation and work context handed to a run. Only bounded, trusted,
-/// server-derived references; never raw memory or credentials.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+/// Server-derived conversation/work references and bounded, provenance-tagged
+/// memory snippets. Memory content remains untrusted data; credentials are absent.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RunContext {
     /// Office conversation reference.
     pub conversation_ref: Option<String>,
@@ -120,7 +127,8 @@ pub struct RunContext {
 }
 
 /// Everything a runtime needs to start one run.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RunSpec {
     /// Durable run id (already inserted in `runs`).
     pub run_id: Uuid,
@@ -215,6 +223,15 @@ pub enum CancelOutcome {
     Cancelled,
     /// The run had already reached a terminal state.
     AlreadyTerminal,
+}
+
+/// Terminal acknowledgement for cancelling a stable start key.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CancelStartReceipt {
+    /// Existing runtime identity, absent when a tombstone prevented any start.
+    pub runtime_run_ref: Option<RuntimeRunRef>,
+    /// Confirmed terminal result; a pending request is never an acknowledgement.
+    pub outcome: CancelOutcome,
 }
 
 /// Runtime adapter failures. Details are bounded and never carry secrets.
@@ -325,6 +342,31 @@ pub trait RuntimeAdapter {
     /// Starts a run; idempotent per `spec.idempotency_key`.
     async fn start_run(&self, spec: &RunSpec) -> Result<RunStartReceipt, RuntimeError>;
 
+    /// Looks up an existing receipt without causing execution. This recovers a
+    /// lost start acknowledgement using the original stable idempotency key.
+    async fn lookup_start(
+        &self,
+        _idempotency_key: &str,
+    ) -> Result<Option<RunStartReceipt>, RuntimeError> {
+        Err(RuntimeError::Unsupported {
+            capability: RuntimeCapability::RunLookup,
+        })
+    }
+
+    /// Persists a cancellation tombstone for the stable start key, even when
+    /// no start is registered yet. Every later start with that key must remain
+    /// stopped. Success requires confirmed termination of contained execution;
+    /// a transient failure must propagate so the durable request can retry.
+    async fn cancel_start(
+        &self,
+        _idempotency_key: &str,
+        _reason: &str,
+    ) -> Result<CancelStartReceipt, RuntimeError> {
+        Err(RuntimeError::Unsupported {
+            capability: RuntimeCapability::RunCancelStart,
+        })
+    }
+
     /// Reads up to `limit` ordered events after `after` (`None` from the start).
     async fn next_events(
         &self,
@@ -373,6 +415,21 @@ impl<T: RuntimeAdapter + ?Sized> RuntimeAdapter for &T {
 
     async fn start_run(&self, spec: &RunSpec) -> Result<RunStartReceipt, RuntimeError> {
         (**self).start_run(spec).await
+    }
+
+    async fn lookup_start(
+        &self,
+        idempotency_key: &str,
+    ) -> Result<Option<RunStartReceipt>, RuntimeError> {
+        (**self).lookup_start(idempotency_key).await
+    }
+
+    async fn cancel_start(
+        &self,
+        idempotency_key: &str,
+        reason: &str,
+    ) -> Result<CancelStartReceipt, RuntimeError> {
+        (**self).cancel_start(idempotency_key, reason).await
     }
 
     async fn next_events(

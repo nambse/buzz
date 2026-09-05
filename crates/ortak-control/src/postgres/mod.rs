@@ -5,6 +5,8 @@
 
 mod company;
 mod inbox;
+mod memory_jobs;
+mod office_authority;
 mod outbox;
 mod provisioning;
 mod routing;
@@ -17,6 +19,8 @@ use sqlx::PgPool;
 use crate::error::{ControlError, Result};
 
 pub use inbox::insert_accepted_event_on;
+pub use memory_jobs::prepare_memory_write_on;
+pub use office_authority::{lock_office_authority_on, office_authority_matches_on};
 
 /// PostgreSQL implementation of every control-plane repository port.
 #[derive(Clone, Debug)]

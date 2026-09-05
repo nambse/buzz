@@ -1,0 +1,133 @@
+# Private PostgreSQL backup verification
+
+This helper backs up **only the main PostgreSQL database** of the fresh dated
+private stack. It does not establish full-stack disaster recovery or complete
+remaining-work slice G. MinIO objects, Honcho's separate database, Redis state,
+Hermes/bridge journals and profiles, application configuration, private keys,
+credentials, global PostgreSQL roles/tablespaces, and an independent-host restore
+still need their own backup and recovery procedures.
+
+Run from the repository root after the marked private stack has been initialized,
+migrations through 0052 have succeeded, and the private company has been
+bootstrapped. Keep schema migrations/DDL paused for this short operation.
+Ordinary row writes may continue; source verification counts and the dump use
+the same exported PostgreSQL snapshot.
+
+```sh
+python3 scripts/ortak/backup_private_database.py \
+  --state-dir /private/tmp/ortak-private-20260905
+```
+
+The helper has no destination-container, source-database, restore-file, cleanup,
+or overwrite option. It connects through the fixed local Docker Unix socket
+`/Users/nambse/.docker/run/docker.sock`, ignoring ambient Docker contexts,
+`DOCKER_HOST`, PostgreSQL, credential and proxy variables. Before any database
+command, it verifies the exact `ortak-private-20260905-postgres-1` container,
+Compose project/service labels, repository-pinned PostgreSQL 17.6 image, and
+named volume's project ownership, local driver and mount point. Subsequent
+commands address that immutable container ID. Database clients use the
+container's local PostgreSQL socket and explicit `ortak` user/database; no
+password is passed in arguments or printed.
+
+Each invocation creates a new mode0700 directory below
+`/private/tmp/ortak-private-20260905/backups/`. Its dump, intent, final manifest,
+SQL inputs and bounded diagnostic files are mode0600. **The archive contains
+private table data and may contain secrets.** Keep the entire directory private;
+do not commit or attach it to reports. Encryption and off-device retention are
+not provided by this local verification helper.
+
+The operation:
+
+1. Journals the source and a fresh `ortak_verify_<32 lowercase hex>` database
+   name before issuing creation. Existing names are never adopted or replaced.
+2. Holds a read-only repeatable-read transaction and the coordinated schema
+   destruction shared fence. It exports a snapshot, reads source counts and
+   schema evidence from that snapshot, then creates a custom-format `pg_dump`
+   using `--snapshot`.
+3. Creates the new verification database from `template0` in this same fresh
+   container. It invokes `pg_restore --exit-on-error --single-transaction`
+   against that generated name. It never uses `--clean`, `--create`, `dropdb`,
+   or restoration to the original database.
+4. Compares every public ordinary/partitioned table's row count, successful
+   SQLx migration versions/checksums, private-company count, employee lifecycle
+   counts, server version and the selected catalog SHA256. The catalog digest
+   covers relation/column definitions, constraints, indexes, user triggers,
+   functions, view definitions, sequence definitions, policies and extensions.
+   Live-column ordinals retain semantic order while ignoring physical holes from
+   dropped columns, which PostgreSQL compacts when dumping/restoring. Component
+   hashes and sanitized restored metadata identify differing fields on failure.
+   It does not compare every row's bytes, sequence current values, database-level
+   settings or every PostgreSQL catalog property. The custom archive has its own
+   SHA256 and byte count.
+5. Records `verified` only after exact comparison. The verification database
+   remains available for inspection, with no worker or service pointed at it.
+
+The archive is capped at 256 MiB, each diagnostic stream at 64 KiB, metadata at
+1 MiB and table inventory at 2,048 entries. The whole command has a 120-second
+deadline and container-side command deadlines; locks wait at most two seconds.
+Disk capacity is checked against the source's physical size plus archive budget.
+A command error, warning, contention, timeout, size limit or comparison mismatch
+refuses verification. Any completed archive and a private failed manifest remain
+available. A partially created verification database is retained, never removed
+automatically. An interrupted container-side snapshot/client also has a finite
+timeout; no previous database or external test stack is cleaned up on failure.
+
+A fresh successful invocation is a new recovery observation, not permission to
+activate employees, start the worker or claim provider health. Record the
+manifest's public checksum/version/count evidence separately from the archive.
+The default unit suite below does not execute Docker backup/restore; the separate
+actual verification receipt follows it.
+
+```sh
+python3 scripts/ortak/test_backup_private_database.py
+```
+
+The focused tests exercise the helper's production command bounds and state
+machine: private outputs, snapshot handoff, fresh restore destination, retained
+failure artifacts, byte/time limits, exited-parent process-group cleanup,
+diagnostic privacy, remote-environment rejection, invalid counts, and mismatched
+container/volume ownership.
+
+PostgreSQL's documentation explains [custom-format dumps and synchronized
+snapshots](https://www.postgresql.org/docs/17/app-pgdump.html),
+[single-transaction restoration](https://www.postgresql.org/docs/17/app-pgrestore.html),
+and [snapshot export lifetime](https://www.postgresql.org/docs/17/functions-admin.html#FUNCTIONS-SNAPSHOT-SYNCHRONIZATION).
+
+An additional actual SQL regression runs only when an explicit retained
+verification database is selected. It creates three fresh probe tables inside a
+transaction, compares the exact production column query, then rolls the DDL back:
+a dropped-column hole must compare equal to its compact equivalent, while
+reordered live columns must differ. It refuses the original database name.
+
+```sh
+ORTAK_BACKUP_SQL_TEST_DATABASE=ortak_verify_<32_lowercase_hex_from_manifest> \
+  python3 scripts/ortak/test_backup_private_database.py
+```
+
+## Actual database verification receipt — 2026-09-05
+
+The invocation beginning at 08:48:01 Istanbul completed with `status: verified`
+and `database_only: true`. Its private directory is
+`/private/tmp/ortak-private-20260905/backups/20260905T054801Z_2d3955c2f811470b919efd32654d4555`.
+The custom archive is **502,264 bytes**, with SHA256
+`146ed286d7e71dd82c0ee82b313b0037b2827112511cf6e7cfe0300cab43fa47`.
+The retained verification database is
+`ortak_verify_265600fcd735460c8c14ccdb0fd55ae4` in the same inspected fresh
+PostgreSQL 17.6 container.
+
+All **100 public table counts**, all successful migration checksums through
+**0052**, and the selected schema catalog matched the exported source snapshot.
+The schema SHA256 is
+`07139b29b4777e67f4f6188d514c82dbb8238306d9a190bd39cc57ba5a17e011`.
+The actual SQL dropped-column ordinal regression ran against this retained
+verification database and rolled its probe DDL back. Together with the eight
+unit cases, **nine tests passed in 0.602 seconds**.
+
+An earlier verification attempt correctly refused a catalog mismatch: physical
+column-number holes survived in the source but were compacted by `pg_dump`.
+The comparison now preserves live column order using contiguous ordinals; the
+SQL regression also proves reordered columns still differ. That earlier failed
+archive, manifest and verification database remain retained. Neither attempt
+restored over, dropped or changed the original `ortak` database or any older
+external stack. The successful database receipt does not cover the other stores,
+secret recovery, independent-host recovery, service restart or employee activation.

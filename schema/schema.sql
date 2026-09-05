@@ -3095,3 +3095,851 @@ CREATE INDEX idx_relay_operator_audit_target
 INSERT INTO _operator_global_tables (table_name, reason) VALUES
     ('relay_operator_audit', 'deployment-global append-only roster mutation audit trail; no community_id intentionally');
 
+
+-- Ortak Office authority fence (migration 0048).
+-- Office authority is serialized with routing/admission, including absent rows.
+-- The generation row is also a coalescing durable reconciliation signal: a run
+-- whose admitted generation is older must be reauthorized or durably cancelled.
+-- No trigger touches runs/outbox while holding an Office mutation row lock.
+CREATE TABLE office_authority_generations (
+    company_id UUID NOT NULL PRIMARY KEY REFERENCES companies(id),
+    generation BIGINT NOT NULL CHECK (generation > 0),
+    changed_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    changed_table TEXT NOT NULL
+);
+
+ALTER TABLE routing_decisions
+    ADD COLUMN office_authority_generation BIGINT CHECK (office_authority_generation >= 0),
+    ADD COLUMN office_authority_valid_before TIMESTAMPTZ,
+    ADD COLUMN office_input_hash BYTEA CHECK (octet_length(office_input_hash) = 32);
+
+ALTER TABLE runs
+    ADD COLUMN office_admission_generation BIGINT CHECK (office_admission_generation >= 0),
+    ADD COLUMN office_admission_valid_before TIMESTAMPTZ,
+    ADD COLUMN office_admission_token UUID,
+    ADD CONSTRAINT runs_office_admission_token_required
+        CHECK ((office_admission_generation IS NULL) = (office_admission_token IS NULL));
+
+-- Domain prefixes isolate this protocol from the retained community deletion
+-- fence. Hash collisions conservatively serialize unrelated companies.
+CREATE FUNCTION ortak_office_company_lock_key(target UUID) RETURNS BIGINT
+LANGUAGE SQL IMMUTABLE STRICT PARALLEL SAFE AS $$
+    SELECT hashtextextended('ortak-office-company-v1:' || target::text, 0)
+$$;
+CREATE FUNCTION ortak_office_community_lock_key(target UUID) RETURNS BIGINT
+LANGUAGE SQL IMMUTABLE STRICT PARALLEL SAFE AS $$
+    SELECT hashtextextended('ortak-office-community-v1:' || target::text, 0)
+$$;
+
+-- Call before taking inbox/root/run/outbox row locks. Keep the transaction
+-- short and READ COMMITTED; each SELECT below gets a fresh statement snapshot.
+-- An absent generation means zero, so readers never insert or lock a row.
+CREATE FUNCTION ortak_lock_office_authority(target UUID) RETURNS BIGINT
+LANGUAGE plpgsql VOLATILE STRICT AS $$
+DECLARE
+    office_community UUID;
+    current_generation BIGINT;
+    lifecycle TEXT;
+BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'Office authority requires READ COMMITTED isolation'
+            USING ERRCODE = 'invalid_transaction_state';
+    END IF;
+    -- Same key as buzz_db::deletion::SCHEMA_DESTRUCTION_LOCK_KEY.
+    -- A nonblocking shared lock avoids migration/table-lock inversion.
+    IF NOT pg_try_advisory_xact_lock_shared(7094711454081051697::BIGINT) THEN
+        RAISE EXCEPTION 'Office authority schema fence is busy'
+            USING ERRCODE = 'serialization_failure';
+    END IF;
+    PERFORM pg_advisory_xact_lock_shared(ortak_office_company_lock_key(target));
+    SELECT community_id INTO office_community FROM office_company_bindings
+     WHERE company_id = target;
+    IF office_community IS NOT NULL THEN
+        -- Never wait with the company fence held on the reverse-order
+        -- community mutation/deletion fence. The caller retries the entire tx.
+        IF NOT pg_try_advisory_xact_lock_shared(community_deletion_lock_key(office_community))
+           OR NOT pg_try_advisory_xact_lock_shared(ortak_office_community_lock_key(office_community)) THEN
+            RAISE EXCEPTION 'Office authority community fence is busy'
+                USING ERRCODE = 'serialization_failure';
+        END IF;
+        SELECT deletion_state INTO lifecycle FROM communities WHERE id = office_community;
+        IF lifecycle IS DISTINCT FROM 'active' THEN
+            RAISE EXCEPTION 'Office authority community is not active'
+                USING ERRCODE = 'object_not_in_prerequisite_state';
+        END IF;
+    END IF;
+    SELECT generation INTO current_generation FROM office_authority_generations
+     WHERE company_id = target;
+    RETURN COALESCE(current_generation, 0);
+END
+$$;
+
+-- UPDATE/DELETE row triggers can execute after PostgreSQL has locked their
+-- target tuple. Waiting here could deadlock a fenced reader which next needs
+-- that tuple. A try-lock aborts the entire writer with a retryable SQLSTATE.
+CREATE FUNCTION ortak_advance_office_authority(target UUID, source_table TEXT) RETURNS VOID
+LANGUAGE plpgsql VOLATILE STRICT AS $$
+BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'Office authority requires READ COMMITTED isolation'
+            USING ERRCODE = 'invalid_transaction_state';
+    END IF;
+    IF NOT pg_try_advisory_xact_lock(ortak_office_company_lock_key(target)) THEN
+        RAISE EXCEPTION 'Office authority company fence is busy'
+            USING ERRCODE = 'serialization_failure';
+    END IF;
+    INSERT INTO office_authority_generations (company_id, generation, changed_table)
+    VALUES (target, 1, source_table)
+    ON CONFLICT (company_id) DO UPDATE
+       SET generation = office_authority_generations.generation + 1,
+           changed_at = clock_timestamp(), changed_table = EXCLUDED.changed_table;
+END
+$$;
+
+-- Arguments: scope (community/company/binding), followed by authoritative
+-- fields. Cosmetic fields, lease churn, counters and run lifecycle do not bump.
+CREATE FUNCTION ortak_fence_office_mutation() RETURNS TRIGGER
+LANGUAGE plpgsql VOLATILE AS $$
+DECLARE
+    previous JSONB := CASE WHEN TG_OP <> 'INSERT' THEN to_jsonb(OLD) END;
+    proposed JSONB := CASE WHEN TG_OP <> 'DELETE' THEN to_jsonb(NEW) END;
+    target UUID;
+    target_company UUID;
+    field TEXT;
+    changed BOOLEAN := TG_OP <> 'UPDATE';
+BEGIN
+    IF TG_OP = 'UPDATE' THEN
+        FOREACH field IN ARRAY TG_ARGV[1:TG_NARGS - 1] LOOP
+            IF previous -> field IS DISTINCT FROM proposed -> field THEN
+                changed := true;
+                EXIT;
+            END IF;
+        END LOOP;
+        IF NOT changed THEN RETURN NEW; END IF;
+    END IF;
+
+    -- A new canonical event cannot invalidate an authorized existing event or
+    -- parent. Missing canonical/parent events cannot have yielded a wake.
+    IF TG_TABLE_NAME LIKE 'events%' AND TG_OP = 'INSERT' THEN RETURN NEW; END IF;
+    -- A parentless metadata row has the same meaning as its absence.
+    IF TG_TABLE_NAME = 'thread_metadata' AND TG_OP = 'INSERT'
+       AND proposed ->> 'parent_event_id' IS NULL
+       AND proposed ->> 'parent_event_created_at' IS NULL THEN RETURN NEW; END IF;
+    -- Runs acquire publish provenance only through a signed office outbox row.
+    IF TG_TABLE_NAME = 'runs' AND TG_OP = 'INSERT' THEN RETURN NEW; END IF;
+    IF TG_TABLE_NAME = 'outbox'
+       AND NOT (COALESCE(previous ->> 'kind' = 'office_publish'
+                         AND previous ->> 'signed_event_id' IS NOT NULL, false)
+                OR COALESCE(proposed ->> 'kind' = 'office_publish'
+                            AND proposed ->> 'signed_event_id' IS NOT NULL, false)) THEN
+        RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+    END IF;
+
+    IF TG_ARGV[0] IN ('community', 'binding', 'community_root') THEN
+        -- Cover both old/new scopes; sorted order plus nonblocking acquisition
+        -- handles cross-company writes and community mapping insert/delete.
+        FOR target IN
+            SELECT DISTINCT value::UUID FROM (VALUES
+                (previous ->> CASE WHEN TG_ARGV[0] = 'community_root' THEN 'id' ELSE 'community_id' END),
+                (proposed ->> CASE WHEN TG_ARGV[0] = 'community_root' THEN 'id' ELSE 'community_id' END)
+            ) AS scopes(value) WHERE value IS NOT NULL ORDER BY value::UUID
+        LOOP
+            IF NOT pg_try_advisory_xact_lock(ortak_office_community_lock_key(target)) THEN
+                RAISE EXCEPTION 'Office authority community mutation fence is busy'
+                    USING ERRCODE = 'serialization_failure';
+            END IF;
+            -- A binding inserted in this transaction is not yet visible to a
+            -- BEFORE trigger's lookup; its explicit company is fenced below.
+            SELECT company_id INTO target_company FROM office_company_bindings
+             WHERE community_id = target;
+            IF target_company IS NOT NULL THEN
+                PERFORM ortak_advance_office_authority(target_company, TG_TABLE_NAME);
+            END IF;
+        END LOOP;
+    END IF;
+    IF TG_ARGV[0] IN ('company', 'binding', 'company_root') THEN
+        FOR target IN
+            SELECT DISTINCT value::UUID FROM (VALUES
+                (previous ->> CASE WHEN TG_ARGV[0] = 'company_root' THEN 'id' ELSE 'company_id' END),
+                (proposed ->> CASE WHEN TG_ARGV[0] = 'company_root' THEN 'id' ELSE 'company_id' END)
+            ) AS scopes(value) WHERE value IS NOT NULL ORDER BY value::UUID
+        LOOP
+            PERFORM ortak_advance_office_authority(target, TG_TABLE_NAME);
+        END LOOP;
+    END IF;
+    RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END
+$$;
+
+-- Alphabetically after community_write_fence_*: preserve its deletion checks.
+CREATE TRIGGER ortak_office_authority_channels BEFORE INSERT OR UPDATE OR DELETE ON channels
+FOR EACH ROW EXECUTE FUNCTION ortak_fence_office_mutation('community', 'community_id', 'id', 'channel_type', 'visibility', 'archived_at', 'deleted_at');
+CREATE TRIGGER ortak_office_authority_channel_members BEFORE INSERT OR UPDATE OR DELETE ON channel_members
+FOR EACH ROW EXECUTE FUNCTION ortak_fence_office_mutation('community', 'community_id', 'channel_id', 'pubkey', 'role', 'removed_at');
+CREATE TRIGGER ortak_office_authority_relay_members BEFORE INSERT OR UPDATE OR DELETE ON relay_members
+FOR EACH ROW EXECUTE FUNCTION ortak_fence_office_mutation('community', 'community_id', 'pubkey');
+CREATE TRIGGER ortak_office_authority_users BEFORE INSERT OR UPDATE OR DELETE ON users
+FOR EACH ROW EXECUTE FUNCTION ortak_fence_office_mutation('community', 'community_id', 'pubkey', 'agent_type', 'agent_owner_pubkey', 'deactivated_at');
+CREATE TRIGGER ortak_office_authority_events BEFORE UPDATE OR DELETE ON events
+FOR EACH ROW EXECUTE FUNCTION ortak_fence_office_mutation('community', 'community_id', 'id', 'created_at', 'pubkey', 'kind', 'tags', 'content', 'sig', 'channel_id', 'deleted_at');
+CREATE TRIGGER ortak_office_authority_thread_metadata BEFORE INSERT OR UPDATE OR DELETE ON thread_metadata
+FOR EACH ROW EXECUTE FUNCTION ortak_fence_office_mutation('community', 'community_id', 'event_id', 'event_created_at', 'parent_event_id', 'parent_event_created_at');
+CREATE TRIGGER ortak_office_authority_communities BEFORE UPDATE OR DELETE ON communities
+FOR EACH ROW EXECUTE FUNCTION ortak_fence_office_mutation('community_root', 'id', 'deletion_state', 'deletion_fence_generation', 'deleted_at');
+CREATE TRIGGER ortak_office_authority_company_bindings BEFORE INSERT OR DELETE ON office_company_bindings
+FOR EACH ROW EXECUTE FUNCTION ortak_fence_office_mutation('binding', 'community_id', 'company_id');
+CREATE TRIGGER ortak_office_authority_employee_bindings BEFORE INSERT OR UPDATE OR DELETE ON employee_office_bindings
+FOR EACH ROW EXECUTE FUNCTION ortak_fence_office_mutation('company', 'company_id', 'id', 'employee_id', 'public_key', 'signer_ref', 'valid_from', 'valid_until', 'verified_at');
+CREATE TRIGGER ortak_office_authority_employees BEFORE INSERT OR UPDATE OR DELETE ON employees
+FOR EACH ROW EXECUTE FUNCTION ortak_fence_office_mutation('company', 'company_id', 'id', 'status', 'active_revision_id');
+CREATE TRIGGER ortak_office_authority_employee_revisions BEFORE INSERT OR UPDATE OR DELETE ON employee_revisions
+FOR EACH ROW EXECUTE FUNCTION ortak_fence_office_mutation('company', 'company_id', 'id', 'employee_id', 'manifest');
+CREATE TRIGGER ortak_office_authority_employee_aliases BEFORE INSERT OR UPDATE OR DELETE ON employee_aliases
+FOR EACH ROW EXECUTE FUNCTION ortak_fence_office_mutation('company', 'company_id', 'alias', 'employee_id', 'revision_id');
+CREATE TRIGGER ortak_office_authority_runs BEFORE UPDATE OR DELETE ON runs
+FOR EACH ROW EXECUTE FUNCTION ortak_fence_office_mutation('company', 'company_id', 'id', 'employee_id', 'employee_revision_id', 'message_id', 'root_message_id', 'routing_decision_id', 'runtime_adapter');
+CREATE TRIGGER ortak_office_authority_outbox BEFORE INSERT OR UPDATE OR DELETE ON outbox
+FOR EACH ROW EXECUTE FUNCTION ortak_fence_office_mutation('company', 'company_id', 'kind', 'run_id', 'signed_event_id');
+
+CREATE TRIGGER ortak_office_authority_runtime_bindings BEFORE INSERT OR UPDATE OR DELETE ON employee_runtime_bindings
+FOR EACH ROW EXECUTE FUNCTION ortak_fence_office_mutation('company', 'company_id', 'revision_id', 'employee_id', 'adapter', 'profile_ref', 'model', 'workspace_ref', 'credential_refs', 'options', 'validated_at');
+CREATE TRIGGER ortak_office_authority_inbox BEFORE UPDATE OR DELETE ON office_inbox
+FOR EACH ROW EXECUTE FUNCTION ortak_fence_office_mutation('company', 'company_id', 'event_id', 'event_created_at', 'event_kind', 'author_pubkey', 'channel_id');
+CREATE TRIGGER ortak_office_authority_companies BEFORE UPDATE ON companies
+FOR EACH ROW EXECUTE FUNCTION ortak_fence_office_mutation('company_root', 'id', 'status', 'routing_policy');
+
+-- TRUNCATE bypasses row triggers and cannot express a bounded company scope.
+-- Retention/deletion workers must use their fenced DELETE paths instead.
+CREATE FUNCTION ortak_reject_office_truncate() RETURNS TRIGGER
+LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'Office authority tables require scoped DELETE, not TRUNCATE'
+        USING ERRCODE = 'object_not_in_prerequisite_state';
+END
+$$;
+CREATE TRIGGER ortak_office_no_truncate BEFORE TRUNCATE ON channels
+FOR EACH STATEMENT EXECUTE FUNCTION ortak_reject_office_truncate();
+CREATE TRIGGER ortak_office_no_truncate BEFORE TRUNCATE ON channel_members
+FOR EACH STATEMENT EXECUTE FUNCTION ortak_reject_office_truncate();
+CREATE TRIGGER ortak_office_no_truncate BEFORE TRUNCATE ON relay_members
+FOR EACH STATEMENT EXECUTE FUNCTION ortak_reject_office_truncate();
+CREATE TRIGGER ortak_office_no_truncate BEFORE TRUNCATE ON users
+FOR EACH STATEMENT EXECUTE FUNCTION ortak_reject_office_truncate();
+CREATE TRIGGER ortak_office_no_truncate BEFORE TRUNCATE ON events
+FOR EACH STATEMENT EXECUTE FUNCTION ortak_reject_office_truncate();
+CREATE TRIGGER ortak_office_no_truncate BEFORE TRUNCATE ON thread_metadata
+FOR EACH STATEMENT EXECUTE FUNCTION ortak_reject_office_truncate();
+CREATE TRIGGER ortak_office_no_truncate BEFORE TRUNCATE ON communities
+FOR EACH STATEMENT EXECUTE FUNCTION ortak_reject_office_truncate();
+CREATE TRIGGER ortak_office_no_truncate BEFORE TRUNCATE ON office_company_bindings
+FOR EACH STATEMENT EXECUTE FUNCTION ortak_reject_office_truncate();
+CREATE TRIGGER ortak_office_no_truncate BEFORE TRUNCATE ON employee_office_bindings
+FOR EACH STATEMENT EXECUTE FUNCTION ortak_reject_office_truncate();
+CREATE TRIGGER ortak_office_no_truncate BEFORE TRUNCATE ON employees
+FOR EACH STATEMENT EXECUTE FUNCTION ortak_reject_office_truncate();
+CREATE TRIGGER ortak_office_no_truncate BEFORE TRUNCATE ON employee_revisions
+FOR EACH STATEMENT EXECUTE FUNCTION ortak_reject_office_truncate();
+CREATE TRIGGER ortak_office_no_truncate BEFORE TRUNCATE ON employee_aliases
+FOR EACH STATEMENT EXECUTE FUNCTION ortak_reject_office_truncate();
+CREATE TRIGGER ortak_office_no_truncate BEFORE TRUNCATE ON runs
+FOR EACH STATEMENT EXECUTE FUNCTION ortak_reject_office_truncate();
+CREATE TRIGGER ortak_office_no_truncate BEFORE TRUNCATE ON outbox
+FOR EACH STATEMENT EXECUTE FUNCTION ortak_reject_office_truncate();
+CREATE TRIGGER ortak_office_no_truncate BEFORE TRUNCATE ON office_authority_generations
+FOR EACH STATEMENT EXECUTE FUNCTION ortak_reject_office_truncate();
+CREATE TRIGGER ortak_office_no_truncate BEFORE TRUNCATE ON employee_runtime_bindings
+FOR EACH STATEMENT EXECUTE FUNCTION ortak_reject_office_truncate();
+CREATE TRIGGER ortak_office_no_truncate BEFORE TRUNCATE ON office_inbox
+FOR EACH STATEMENT EXECUTE FUNCTION ortak_reject_office_truncate();
+CREATE TRIGGER ortak_office_no_truncate BEFORE TRUNCATE ON companies
+FOR EACH STATEMENT EXECUTE FUNCTION ortak_reject_office_truncate();
+
+-- Time advances without a row mutation. Check clock_timestamp at deferred
+-- constraint execution, after any blocked root/row lock and just before commit.
+-- Historical NULL witnesses remain NULL; runtime admission rejects them.
+CREATE FUNCTION ortak_check_routing_office_authority() RETURNS TRIGGER
+LANGUAGE plpgsql AS $$
+DECLARE
+    current_generation BIGINT;
+BEGIN
+    IF NEW.office_authority_generation IS NULL THEN RETURN NEW; END IF;
+    current_generation := ortak_lock_office_authority(NEW.company_id);
+    IF current_generation <> NEW.office_authority_generation
+       OR (NEW.office_authority_valid_before IS NOT NULL
+           AND clock_timestamp() >= NEW.office_authority_valid_before) THEN
+        RAISE EXCEPTION 'Office routing authority changed or expired before commit'
+            USING ERRCODE = 'serialization_failure';
+    END IF;
+    RETURN NEW;
+END
+$$;
+CREATE CONSTRAINT TRIGGER ortak_routing_office_authority_at_commit
+AFTER INSERT ON routing_decisions DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION ortak_check_routing_office_authority();
+
+
+-- Every prepare/re-prepare writes a fresh token, even when the generation and
+-- deadline are unchanged. That forces a deferred check after a blocked row
+-- lock; lifecycle-only updates retain the token so cancellation stays possible.
+CREATE FUNCTION ortak_check_run_office_authority() RETURNS TRIGGER
+LANGUAGE plpgsql AS $$
+DECLARE
+    current_generation BIGINT;
+BEGIN
+    IF NEW.office_admission_generation IS NULL THEN RETURN NEW; END IF;
+    IF TG_OP = 'UPDATE'
+       AND OLD.office_admission_generation IS NOT DISTINCT FROM NEW.office_admission_generation
+       AND OLD.office_admission_valid_before IS NOT DISTINCT FROM NEW.office_admission_valid_before
+       AND OLD.office_admission_token IS NOT DISTINCT FROM NEW.office_admission_token THEN
+        RETURN NEW;
+    END IF;
+    current_generation := ortak_lock_office_authority(NEW.company_id);
+    IF current_generation <> NEW.office_admission_generation
+       OR (NEW.office_admission_valid_before IS NOT NULL
+           AND clock_timestamp() >= NEW.office_admission_valid_before) THEN
+        RAISE EXCEPTION 'Office run admission authority changed or expired before commit'
+            USING ERRCODE = 'serialization_failure';
+    END IF;
+    RETURN NEW;
+END
+$$;
+CREATE CONSTRAINT TRIGGER ortak_run_office_authority_at_commit
+AFTER INSERT OR UPDATE ON runs DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION ortak_check_run_office_authority();
+
+-- Do not allow resetting the coalesced reconciliation signal. The update
+-- guard also catches accidental direct writes rather than only helper calls.
+CREATE FUNCTION ortak_guard_office_generation() RETURNS TRIGGER
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'Office authority generations cannot be deleted'
+            USING ERRCODE = 'object_not_in_prerequisite_state';
+    END IF;
+    IF TG_OP = 'UPDATE' AND (NEW.company_id IS DISTINCT FROM OLD.company_id
+                            OR NEW.generation <= OLD.generation) THEN
+        RAISE EXCEPTION 'Office authority generations must advance'
+            USING ERRCODE = 'object_not_in_prerequisite_state';
+    END IF;
+    IF NOT pg_try_advisory_xact_lock(ortak_office_company_lock_key(NEW.company_id)) THEN
+        RAISE EXCEPTION 'Office authority generation fence is busy'
+            USING ERRCODE = 'serialization_failure';
+    END IF;
+    RETURN NEW;
+END
+$$;
+CREATE TRIGGER ortak_office_generation_guard BEFORE INSERT OR UPDATE OR DELETE ON office_authority_generations
+FOR EACH ROW EXECUTE FUNCTION ortak_guard_office_generation();
+
+
+-- Current event partitions also reject direct TRUNCATE. New partitions must
+-- attach this statement trigger before serving (row guards clone themselves).
+DO $$
+DECLARE
+    partition_table REGCLASS;
+BEGIN
+    FOR partition_table IN
+        SELECT relid FROM pg_partition_tree('events'::REGCLASS) WHERE isleaf
+    LOOP
+        EXECUTE format('CREATE TRIGGER ortak_office_no_truncate BEFORE TRUNCATE ON %s FOR EACH STATEMENT EXECUTE FUNCTION ortak_reject_office_truncate()', partition_table);
+    END LOOP;
+END
+$$;
+
+-- Durable adapter stop acknowledgements. Local terminal run state alone is
+-- insufficient: a lost start acknowledgement must still be stopped by run key.
+CREATE TABLE runtime_cancellations (
+    company_id UUID NOT NULL REFERENCES companies(id),
+    run_id UUID NOT NULL,
+    reason TEXT NOT NULL CHECK (reason IN ('office_revoked', 'human_requested')),
+    state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'acknowledged', 'failed')),
+    attempt_count INT NOT NULL DEFAULT 0 CHECK (attempt_count BETWEEN 0 AND 20),
+    max_attempts INT NOT NULL DEFAULT 20 CHECK (max_attempts BETWEEN 1 AND 20),
+    requested_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    lease_token UUID,
+    lease_expires_at TIMESTAMPTZ,
+    last_error_code TEXT CHECK (last_error_code ~ '^[a-z][a-z0-9_.]{0,63}$'),
+    acknowledged_at TIMESTAMPTZ,
+    PRIMARY KEY (company_id, run_id),
+    FOREIGN KEY (company_id, run_id) REFERENCES runs(company_id, id),
+    CHECK (attempt_count <= max_attempts),
+    CHECK ((lease_token IS NULL) = (lease_expires_at IS NULL)),
+    CHECK ((state = 'acknowledged') = (acknowledged_at IS NOT NULL)),
+    CHECK (state = 'pending' OR lease_token IS NULL)
+);
+CREATE INDEX idx_runtime_cancellations_due
+    ON runtime_cancellations (company_id, next_attempt_at, requested_at, run_id)
+    WHERE state = 'pending';
+
+CREATE FUNCTION ortak_runtime_cancellation_guard() RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.company_id <> OLD.company_id OR NEW.run_id <> OLD.run_id
+       OR NEW.reason <> OLD.reason OR NEW.requested_at <> OLD.requested_at
+       OR NEW.max_attempts <> OLD.max_attempts OR NEW.attempt_count < OLD.attempt_count
+       OR OLD.state <> 'pending'
+    THEN
+        RAISE EXCEPTION 'ortak: cancellation attribution is immutable and terminal state is final'
+            USING ERRCODE = 'object_not_in_prerequisite_state';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_runtime_cancellations_guard BEFORE UPDATE ON runtime_cancellations
+    FOR EACH ROW EXECUTE FUNCTION ortak_runtime_cancellation_guard();
+CREATE TRIGGER trg_runtime_cancellations_no_delete BEFORE DELETE ON runtime_cancellations
+    FOR EACH ROW EXECUTE FUNCTION ortak_reject_row_mutation();
+
+
+-- Private MVP product request audit and supervised cancellation queue.
+-- Purely additive company-scoped schema; never stores signed auth JSON or keys.
+
+CREATE TABLE ortak_api_audit (
+    company_id UUID NOT NULL REFERENCES companies(id),
+    id UUID NOT NULL DEFAULT gen_random_uuid(),
+    actor_pubkey TEXT NOT NULL CHECK (actor_pubkey ~ '^[0-9a-f]{64}$'),
+    auth_event_id BYTEA NOT NULL CHECK (octet_length(auth_event_id) = 32),
+    action TEXT NOT NULL CHECK (action IN ('access', 'read_runs', 'read_run', 'read_events', 'read_employees', 'read_employee', 'cancel_run')),
+    outcome TEXT NOT NULL CHECK (outcome IN ('denied', 'not_found', 'requested', 'already_requested', 'already_terminal')),
+    -- Requested identifier only. No FK: denied and nonexistent targets must
+    -- be auditable without looking up another company's row.
+    requested_run_id UUID,
+    recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (company_id, id)
+);
+CREATE INDEX idx_ortak_api_audit_time ON ortak_api_audit (company_id, recorded_at DESC, id DESC);
+CREATE TRIGGER trg_ortak_api_audit_immutable BEFORE UPDATE OR DELETE ON ortak_api_audit
+    FOR EACH ROW EXECUTE FUNCTION ortak_reject_row_mutation();
+
+CREATE TABLE run_cancel_requests (
+    company_id UUID NOT NULL REFERENCES companies(id),
+    run_id UUID NOT NULL,
+    id UUID NOT NULL DEFAULT gen_random_uuid(),
+    requested_by TEXT NOT NULL CHECK (requested_by ~ '^[0-9a-f]{64}$'),
+    auth_event_id BYTEA NOT NULL CHECK (octet_length(auth_event_id) = 32),
+    reason_code TEXT NOT NULL DEFAULT 'human_requested' CHECK (reason_code = 'human_requested'),
+    requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- pending is a request, never a claim that Hermes has stopped.
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'acknowledged', 'failed')),
+    attempts INT NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 20),
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    lease_token UUID,
+    lease_expires_at TIMESTAMPTZ,
+    last_error_code TEXT CHECK (last_error_code ~ '^[a-z][a-z0-9_.]{0,63}$'),
+    acknowledged_at TIMESTAMPTZ,
+    PRIMARY KEY (company_id, run_id),
+    UNIQUE (company_id, id),
+    FOREIGN KEY (company_id, run_id) REFERENCES runs(company_id, id),
+    CHECK ((lease_token IS NULL) = (lease_expires_at IS NULL)),
+    CHECK ((status = 'acknowledged') = (acknowledged_at IS NOT NULL)),
+    CHECK (status = 'pending' OR lease_token IS NULL)
+);
+CREATE INDEX idx_run_cancel_requests_due ON run_cancel_requests (company_id, next_attempt_at, requested_at)
+    WHERE status = 'pending';
+
+CREATE FUNCTION ortak_cancel_request_guard() RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.company_id <> OLD.company_id OR NEW.run_id <> OLD.run_id OR NEW.id <> OLD.id
+       OR NEW.requested_by <> OLD.requested_by OR NEW.auth_event_id <> OLD.auth_event_id
+       OR NEW.reason_code <> OLD.reason_code OR NEW.requested_at <> OLD.requested_at
+       OR NEW.attempts < OLD.attempts OR OLD.status <> 'pending'
+    THEN
+        RAISE EXCEPTION 'ortak: cancellation request attribution is immutable and terminal state is final'
+            USING ERRCODE = 'object_not_in_prerequisite_state';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_run_cancel_requests_guard BEFORE UPDATE ON run_cancel_requests
+    FOR EACH ROW EXECUTE FUNCTION ortak_cancel_request_guard();
+CREATE TRIGGER trg_run_cancel_requests_no_delete BEFORE DELETE ON run_cancel_requests
+    FOR EACH ROW EXECUTE FUNCTION ortak_reject_row_mutation();
+
+-- Completion commits its publication job, including when the process crashes
+-- before a worker can construct the canonical draft.
+CREATE TABLE runtime_office_outputs (
+    company_id UUID NOT NULL REFERENCES companies(id),
+    run_id UUID NOT NULL,
+    state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','enqueued','failed')),
+    attempt_count INT NOT NULL DEFAULT 0 CHECK (attempt_count BETWEEN 0 AND 20),
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    lease_token UUID,
+    lease_expires_at TIMESTAMPTZ,
+    last_error_code TEXT CHECK (last_error_code ~ '^[a-z][a-z0-9_.]{0,63}$'),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    draft_kind INT CHECK (draft_kind IN (9,40002)),
+    draft_tags JSONB CHECK (jsonb_typeof(draft_tags)='array' AND octet_length(draft_tags::text)<=32768),
+    draft_content TEXT CHECK (octet_length(draft_content) BETWEEN 1 AND 32768 AND btrim(draft_content)<>''),
+    draft_created_at TIMESTAMPTZ,
+    source_facts JSONB CHECK (jsonb_typeof(source_facts)='object' AND octet_length(source_facts::text)<=4096),
+    office_authority_generation BIGINT CHECK (office_authority_generation>=0),
+    office_authority_valid_before TIMESTAMPTZ,
+    office_authority_token UUID,
+    outbox_id UUID,
+    enqueued_at TIMESTAMPTZ,
+    PRIMARY KEY (company_id,run_id),
+    FOREIGN KEY (company_id,run_id) REFERENCES runs(company_id,id),
+    FOREIGN KEY (company_id,outbox_id) REFERENCES outbox(company_id,id),
+    CHECK ((lease_token IS NULL)=(lease_expires_at IS NULL)),
+    CHECK (state='pending' OR lease_token IS NULL),
+    CHECK ((state='enqueued')=(outbox_id IS NOT NULL)),
+    CHECK ((state='enqueued')=(enqueued_at IS NOT NULL)),
+    CHECK ((draft_kind IS NULL AND draft_tags IS NULL AND draft_content IS NULL
+            AND draft_created_at IS NULL AND source_facts IS NULL AND office_authority_generation IS NULL
+            AND office_authority_valid_before IS NULL AND office_authority_token IS NULL)
+        OR (draft_kind IS NOT NULL AND draft_tags IS NOT NULL AND draft_content IS NOT NULL
+            AND draft_created_at IS NOT NULL AND source_facts IS NOT NULL AND office_authority_generation IS NOT NULL
+            AND office_authority_token IS NOT NULL)),
+    CHECK (state<>'enqueued' OR draft_kind IS NOT NULL)
+);
+CREATE INDEX idx_runtime_office_outputs_due ON runtime_office_outputs
+    (company_id,next_attempt_at,created_at,run_id) WHERE state='pending';
+
+CREATE FUNCTION ortak_runtime_office_output_guard() RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.company_id<>OLD.company_id OR NEW.run_id<>OLD.run_id OR NEW.created_at<>OLD.created_at
+       OR NEW.attempt_count<OLD.attempt_count OR OLD.state<>'pending'
+       OR (NEW.state='enqueued' AND NEW.office_authority_token IS NOT DISTINCT FROM OLD.office_authority_token)
+       OR (OLD.draft_kind IS NOT NULL AND
+           ROW(NEW.draft_kind,NEW.draft_tags,NEW.draft_content,NEW.draft_created_at,NEW.source_facts)
+           IS DISTINCT FROM ROW(OLD.draft_kind,OLD.draft_tags,OLD.draft_content,OLD.draft_created_at,OLD.source_facts))
+    THEN
+        RAISE EXCEPTION 'ortak: Office output draft is immutable and terminal job state is final'
+            USING ERRCODE='object_not_in_prerequisite_state';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_runtime_office_output_guard BEFORE UPDATE ON runtime_office_outputs
+    FOR EACH ROW EXECUTE FUNCTION ortak_runtime_office_output_guard();
+CREATE TRIGGER trg_runtime_office_output_no_delete BEFORE DELETE ON runtime_office_outputs
+    FOR EACH ROW EXECUTE FUNCTION ortak_reject_row_mutation();
+
+CREATE FUNCTION ortak_schedule_completed_office_output() RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.status='completed' AND NEW.delivery_intent IN ('reply','channel') THEN
+        INSERT INTO runtime_office_outputs(company_id,run_id) VALUES (NEW.company_id,NEW.id)
+        ON CONFLICT (company_id,run_id) DO NOTHING;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_runs_schedule_office_output AFTER INSERT OR UPDATE OF status,delivery_intent ON runs
+    FOR EACH ROW EXECUTE FUNCTION ortak_schedule_completed_office_output();
+
+CREATE FUNCTION ortak_check_office_output_authority() RETURNS TRIGGER AS $$
+DECLARE current_generation BIGINT;
+BEGIN
+    IF NEW.draft_kind IS NULL OR (TG_OP='UPDATE' AND
+       ROW(NEW.office_authority_token,NEW.office_authority_generation,NEW.office_authority_valid_before)
+       IS NOT DISTINCT FROM ROW(OLD.office_authority_token,OLD.office_authority_generation,OLD.office_authority_valid_before)) THEN
+        RETURN NEW;
+    END IF;
+    current_generation:=ortak_lock_office_authority(NEW.company_id);
+    IF NEW.office_authority_generation IS DISTINCT FROM current_generation
+       OR (NEW.office_authority_valid_before IS NOT NULL
+           AND clock_timestamp()>=NEW.office_authority_valid_before) THEN
+        RAISE EXCEPTION 'ortak: Office output authority changed or expired' USING ERRCODE='serialization_failure';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE CONSTRAINT TRIGGER trg_runtime_office_output_authority AFTER INSERT OR UPDATE ON runtime_office_outputs
+    DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION ortak_check_office_output_authority();
+
+INSERT INTO runtime_office_outputs(company_id,run_id)
+SELECT company_id,id FROM runs WHERE status='completed' AND delivery_intent IN ('reply','channel')
+ON CONFLICT (company_id,run_id) DO NOTHING;
+
+-- Ortak durable memory jobs and immutable run context (0052).
+-- Memory identity participates in the same generation as Office admission.
+CREATE TRIGGER ortak_office_authority_memory_bindings BEFORE INSERT OR UPDATE OR DELETE ON employee_memory_bindings
+FOR EACH ROW EXECUTE FUNCTION ortak_fence_office_mutation('company','company_id','revision_id','employee_id','adapter','provisioning_mode','endpoint_ref','workspace','user_peer','employee_peer','options','validated_at');
+CREATE TRIGGER ortak_office_no_truncate BEFORE TRUNCATE ON employee_memory_bindings
+FOR EACH STATEMENT EXECUTE FUNCTION ortak_reject_office_truncate();
+
+-- Exact serialized pre-start input. The runtime owns validation and first-writer
+-- admission; the database prevents retries from replacing an existing request.
+CREATE TABLE run_context_snapshots (
+    company_id UUID NOT NULL,
+    run_id UUID NOT NULL,
+    spec_bytes BYTEA NOT NULL CHECK (octet_length(spec_bytes) BETWEEN 1 AND 262144),
+    spec_hash BYTEA NOT NULL CHECK (octet_length(spec_hash)=32),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY (company_id,run_id),
+    FOREIGN KEY (company_id,run_id) REFERENCES runs(company_id,id)
+);
+CREATE TRIGGER trg_run_context_snapshot_immutable BEFORE UPDATE OR DELETE ON run_context_snapshots
+FOR EACH ROW EXECUTE FUNCTION ortak_reject_row_mutation();
+
+-- Acknowledged Office replies are the only automatic memory input. RunScratch
+-- preserves the original run boundary; no project/global promotion is implied.
+CREATE TABLE runtime_memory_writes (
+    company_id UUID NOT NULL,
+    run_id UUID NOT NULL,
+    employee_id TEXT NOT NULL,
+    employee_revision_id UUID NOT NULL,
+    channel_id UUID NOT NULL,
+    outbox_id UUID NOT NULL,
+    signed_event_id BYTEA NOT NULL CHECK (octet_length(signed_event_id)=32),
+    binding JSONB NOT NULL CHECK (jsonb_typeof(binding)='object' AND octet_length(binding::text)<=32768),
+    source_facts JSONB NOT NULL CHECK (jsonb_typeof(source_facts)='object' AND octet_length(source_facts::text)<=4096),
+    content TEXT NOT NULL CHECK (octet_length(content) BETWEEN 1 AND 32768 AND btrim(content)<>''),
+    recorded_at TIMESTAMPTZ NOT NULL,
+    idempotency_key TEXT NOT NULL CHECK (idempotency_key='office-output:'||run_id::text),
+    state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','acknowledged','failed')),
+    attempt_count INT NOT NULL DEFAULT 0 CHECK (attempt_count BETWEEN 0 AND 20),
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    lease_token UUID,
+    lease_expires_at TIMESTAMPTZ,
+    last_error_code TEXT CHECK (last_error_code ~ '^[a-z][a-z0-9_.]{0,63}$'),
+    admission_generation BIGINT CHECK (admission_generation>=0),
+    admission_valid_before TIMESTAMPTZ,
+    admission_token UUID,
+    receipt JSONB CHECK (jsonb_typeof(receipt)='object' AND octet_length(receipt::text)<=4096),
+    acknowledged_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY (company_id,run_id),
+    UNIQUE (company_id,outbox_id),
+    FOREIGN KEY (company_id,run_id) REFERENCES runs(company_id,id),
+    FOREIGN KEY (company_id,outbox_id) REFERENCES outbox(company_id,id),
+    FOREIGN KEY (company_id,employee_id,employee_revision_id) REFERENCES employee_revisions(company_id,employee_id,id),
+    CHECK ((lease_token IS NULL)=(lease_expires_at IS NULL)),
+    CHECK (state='pending' OR lease_token IS NULL),
+    CHECK ((admission_generation IS NULL)=(admission_token IS NULL)),
+    CHECK ((state='acknowledged')=(receipt IS NOT NULL)),
+    CHECK ((state='acknowledged')=(acknowledged_at IS NOT NULL))
+);
+CREATE INDEX idx_runtime_memory_writes_due ON runtime_memory_writes
+    (company_id,next_attempt_at,created_at,run_id) WHERE state='pending';
+
+CREATE FUNCTION ortak_memory_write_guard() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF OLD.state<>'pending' OR NEW.attempt_count<OLD.attempt_count OR
+       ROW(NEW.company_id,NEW.run_id,NEW.employee_id,NEW.employee_revision_id,NEW.channel_id,
+           NEW.outbox_id,NEW.signed_event_id,NEW.binding,NEW.source_facts,NEW.content,
+           NEW.recorded_at,NEW.idempotency_key,NEW.created_at)
+       IS DISTINCT FROM
+       ROW(OLD.company_id,OLD.run_id,OLD.employee_id,OLD.employee_revision_id,OLD.channel_id,
+           OLD.outbox_id,OLD.signed_event_id,OLD.binding,OLD.source_facts,OLD.content,
+           OLD.recorded_at,OLD.idempotency_key,OLD.created_at) THEN
+        RAISE EXCEPTION 'ortak: memory request and terminal receipt are immutable'
+            USING ERRCODE='object_not_in_prerequisite_state';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER trg_memory_write_guard BEFORE UPDATE ON runtime_memory_writes
+FOR EACH ROW EXECUTE FUNCTION ortak_memory_write_guard();
+CREATE TRIGGER trg_memory_write_no_delete BEFORE DELETE ON runtime_memory_writes
+FOR EACH ROW EXECUTE FUNCTION ortak_reject_row_mutation();
+
+CREATE FUNCTION ortak_insert_acknowledged_memory_write(target_company UUID,target_outbox UUID)
+RETURNS VOID LANGUAGE plpgsql AS $$
+BEGIN
+    -- FK insertion would otherwise wait for run FOR UPDATE while the caller
+    -- holds outbox. Cancellation takes run before outbox. Refuse immediately
+    -- on that inversion; the pending delivery lease remains safely retryable.
+    PERFORM r.id FROM outbox o
+    JOIN runtime_office_outputs j ON j.company_id=o.company_id AND j.outbox_id=o.id
+    JOIN runs r ON r.company_id=j.company_id AND r.id=j.run_id
+    WHERE o.company_id=target_company AND o.id=target_outbox AND o.kind='office_publish'
+      AND o.state='delivered' AND j.state='enqueued' AND r.status='completed'
+      AND r.delivery_intent IN ('reply','channel')
+    FOR KEY SHARE OF r NOWAIT;
+    INSERT INTO runtime_memory_writes(company_id,run_id,employee_id,employee_revision_id,channel_id,
+        outbox_id,signed_event_id,binding,source_facts,content,recorded_at,idempotency_key)
+    SELECT r.company_id,r.id,r.employee_id,r.employee_revision_id,i.channel_id,
+        o.id,o.signed_event_id,rev.manifest->'memory',j.source_facts,j.draft_content,
+        o.delivered_at,'office-output:'||r.id::text
+    FROM outbox o JOIN runtime_office_outputs j ON j.company_id=o.company_id AND j.outbox_id=o.id
+    JOIN runs r ON r.company_id=j.company_id AND r.id=j.run_id
+    JOIN employee_revisions rev ON rev.company_id=r.company_id AND rev.employee_id=r.employee_id AND rev.id=r.employee_revision_id
+    JOIN office_inbox i ON i.company_id=r.company_id AND i.event_id=r.message_id
+    WHERE o.company_id=target_company AND o.id=target_outbox AND o.kind='office_publish'
+      AND o.state='delivered' AND o.signed_event_id IS NOT NULL AND o.signed_event_bytes IS NOT NULL
+      AND o.run_id=r.id AND j.state='enqueued' AND r.status='completed'
+      AND r.delivery_intent IN ('reply','channel') AND i.channel_id IS NOT NULL
+      AND jsonb_typeof(rev.manifest->'memory')='object'
+      AND NOT EXISTS (SELECT 1 FROM runtime_cancellations x WHERE x.company_id=r.company_id AND x.run_id=r.id)
+      AND NOT EXISTS (SELECT 1 FROM run_cancel_requests x WHERE x.company_id=r.company_id AND x.run_id=r.id)
+    ON CONFLICT (company_id,run_id) DO NOTHING;
+END;
+$$;
+CREATE FUNCTION ortak_schedule_acknowledged_memory_write() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.kind='office_publish' AND NEW.state='delivered' AND OLD.state<>'delivered' THEN
+        -- A NOWAIT FK-parent check prevents waiting in outbox→run order.
+        -- Claim/prepare later revalidate current authority.
+        PERFORM ortak_insert_acknowledged_memory_write(NEW.company_id,NEW.id);
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER trg_outbox_schedule_memory_write AFTER UPDATE OF state ON outbox
+FOR EACH ROW EXECUTE FUNCTION ortak_schedule_acknowledged_memory_write();
+
+CREATE FUNCTION ortak_check_memory_write_authority() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.admission_token IS NOT NULL AND (TG_OP='INSERT' OR
+       ROW(NEW.admission_token,NEW.admission_generation,NEW.admission_valid_before)
+       IS DISTINCT FROM ROW(OLD.admission_token,OLD.admission_generation,OLD.admission_valid_before)) THEN
+        IF NEW.admission_generation IS DISTINCT FROM ortak_lock_office_authority(NEW.company_id)
+           OR (NEW.admission_valid_before IS NOT NULL AND clock_timestamp()>=NEW.admission_valid_before) THEN
+            RAISE EXCEPTION 'ortak: memory write admission changed or expired' USING ERRCODE='serialization_failure';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE CONSTRAINT TRIGGER trg_memory_write_authority AFTER INSERT OR UPDATE ON runtime_memory_writes
+DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION ortak_check_memory_write_authority();
+
+-- Existing acknowledged completions receive the same deterministic job. This
+-- function also supports desired-state reconciliation without duplicate work.
+SELECT ortak_insert_acknowledged_memory_write(company_id,id)
+FROM outbox WHERE kind='office_publish' AND state='delivered';
+
+-- Ortak waking routing claim expiry (0053).
+-- A successful score is not permission to dispatch after its inbox lease ends.
+-- Production routing already holds inbox before root/recipient/outbox locks.
+-- Keep same-generation zero-wake finalization available after scorer timeout.
+CREATE FUNCTION ortak_check_routing_claim_expiry() RETURNS TRIGGER
+LANGUAGE plpgsql AS $$
+DECLARE
+    current_claim RECORD;
+BEGIN
+    -- Legacy rows without Office authority remain inert at runtime admission,
+    -- matching0048. Every production routing commit supplies its Office witness.
+    IF NEW.wake_count = 0 OR NEW.office_authority_generation IS NULL THEN
+        RETURN NEW;
+    END IF;
+    SELECT state, claim_generation, claim_expires_at INTO current_claim
+    FROM office_inbox
+    WHERE company_id = NEW.company_id AND event_id = NEW.message_id
+    FOR UPDATE;
+    -- Evaluate the clock after lock acquisition, including any finalization wait.
+    IF NOT FOUND OR current_claim.state NOT IN ('claimed', 'decided')
+       OR current_claim.claim_generation IS DISTINCT FROM NEW.inbox_claim_generation
+       OR current_claim.claim_expires_at IS NULL
+       OR clock_timestamp() >= current_claim.claim_expires_at THEN
+        RAISE EXCEPTION 'ortak: waking routing claim changed or expired before commit'
+            USING ERRCODE = 'serialization_failure';
+    END IF;
+    RETURN NEW;
+END
+$$;
+CREATE CONSTRAINT TRIGGER ortak_routing_claim_expiry_at_commit
+AFTER INSERT ON routing_decisions DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION ortak_check_routing_claim_expiry();
+
+
+-- Ortak Work API access (0054).
+-- E1: explicit human project grants, one immutable Office channel, and retry receipts.
+-- Company grants alone never expose these projects. No existing project is adopted.
+ALTER TABLE office_company_bindings ADD CONSTRAINT uq_work_api_company_community
+    UNIQUE (company_id, community_id);
+
+CREATE TABLE project_api_bindings (
+    company_id UUID NOT NULL REFERENCES companies(id),
+    project_id UUID NOT NULL,
+    community_id UUID NOT NULL,
+    channel_id UUID NOT NULL,
+    created_by TEXT NOT NULL CHECK (created_by ~ '^[0-9a-f]{64}$'),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (company_id, project_id),
+    FOREIGN KEY (company_id, project_id) REFERENCES projects(company_id, id),
+    FOREIGN KEY (company_id, community_id) REFERENCES office_company_bindings(company_id, community_id),
+    FOREIGN KEY (community_id, channel_id) REFERENCES channels(community_id, id)
+);
+CREATE TRIGGER project_api_binding_immutable BEFORE UPDATE OR DELETE ON project_api_bindings
+FOR EACH ROW EXECUTE FUNCTION ortak_reject_row_mutation();
+CREATE TRIGGER project_api_binding_no_truncate BEFORE TRUNCATE ON project_api_bindings
+FOR EACH STATEMENT EXECUTE FUNCTION ortak_reject_office_truncate();
+SELECT attach_community_write_fence('project_api_bindings');
+
+CREATE TABLE project_access_grants (
+    company_id UUID NOT NULL REFERENCES companies(id),
+    project_id UUID NOT NULL,
+    actor_pubkey TEXT NOT NULL CHECK (actor_pubkey ~ '^[0-9a-f]{64}$'),
+    role TEXT NOT NULL CHECK (role IN ('viewer','contributor','reviewer','owner')),
+    granted_by TEXT NOT NULL CHECK (granted_by ~ '^[0-9a-f]{64}$'),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    revoked_at TIMESTAMPTZ,
+    PRIMARY KEY (company_id, project_id, actor_pubkey),
+    FOREIGN KEY (company_id, project_id) REFERENCES project_api_bindings(company_id, project_id)
+);
+CREATE INDEX idx_project_access_principal ON project_access_grants(company_id, actor_pubkey, project_id)
+WHERE revoked_at IS NULL;
+
+-- Readers/ordinary writers hold the project SHARE lock before looking up grants.
+-- Fence every ACL write, including an absent-row insertion, with that same parent.
+-- NOWAIT refuses reverse-order SQL contention instead of forming a lock cycle.
+-- Do not use the Office exclusive mutation fence: API authentication holds its
+-- shared counterpart on another connection throughout the request.
+CREATE FUNCTION ortak_project_access_guard() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP='DELETE' THEN
+        RAISE EXCEPTION 'ortak: project grants are revoked, never deleted'
+            USING ERRCODE='object_not_in_prerequisite_state';
+    END IF;
+    IF TG_OP='UPDATE' AND (NEW.company_id,NEW.project_id,NEW.actor_pubkey,NEW.granted_by,NEW.created_at)
+        IS DISTINCT FROM (OLD.company_id,OLD.project_id,OLD.actor_pubkey,OLD.granted_by,OLD.created_at) THEN
+        RAISE EXCEPTION 'ortak: project grant identity is immutable'
+            USING ERRCODE='object_not_in_prerequisite_state';
+    END IF;
+    PERFORM 1 FROM projects WHERE company_id=NEW.company_id AND id=NEW.project_id FOR UPDATE NOWAIT;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'ortak: project grant parent is missing' USING ERRCODE='foreign_key_violation';
+    END IF;
+    NEW.updated_at=clock_timestamp();
+    RETURN NEW;
+END
+$$;
+CREATE TRIGGER project_access_guard BEFORE INSERT OR UPDATE OR DELETE ON project_access_grants
+FOR EACH ROW EXECUTE FUNCTION ortak_project_access_guard();
+CREATE TRIGGER project_access_no_truncate BEFORE TRUNCATE ON project_access_grants
+FOR EACH STATEMENT EXECUTE FUNCTION ortak_reject_office_truncate();
+
+-- The receipt is also the immutable success audit: authenticated human, NIP-98
+-- event, exact operation identity/hash, project/item target and resulting version.
+-- It stores no request text, private key, provider configuration or cached response.
+CREATE TABLE work_api_operations (
+    company_id UUID NOT NULL REFERENCES companies(id),
+    actor_pubkey TEXT NOT NULL CHECK (actor_pubkey ~ '^[0-9a-f]{64}$'),
+    operation_id UUID NOT NULL CHECK (operation_id <> '00000000-0000-0000-0000-000000000000'),
+    action TEXT NOT NULL CHECK (action IN ('create_project','create_work_item','mutate_work_item')),
+    request_hash BYTEA NOT NULL CHECK (octet_length(request_hash)=32),
+    project_id UUID NOT NULL,
+    work_item_id UUID,
+    result_version BIGINT NOT NULL CHECK (result_version>=1),
+    auth_event_id BYTEA NOT NULL CHECK (octet_length(auth_event_id)=32),
+    valid_before TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (company_id, actor_pubkey, operation_id),
+    FOREIGN KEY (company_id, project_id) REFERENCES project_api_bindings(company_id, project_id),
+    FOREIGN KEY (company_id, work_item_id) REFERENCES work_items(company_id, id),
+    CHECK ((action='create_project') = (work_item_id IS NULL))
+);
+CREATE INDEX idx_work_api_operations_project ON work_api_operations(company_id, project_id, created_at DESC);
+CREATE TRIGGER work_api_operation_immutable BEFORE UPDATE OR DELETE ON work_api_operations
+FOR EACH ROW EXECUTE FUNCTION ortak_reject_row_mutation();
+CREATE TRIGGER work_api_operation_no_truncate BEFORE TRUNCATE ON work_api_operations
+FOR EACH STATEMENT EXECUTE FUNCTION ortak_reject_office_truncate();
+
+CREATE FUNCTION ortak_check_work_api_receipt() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.valid_before IS NOT NULL AND clock_timestamp()>=NEW.valid_before THEN
+        RAISE EXCEPTION 'ortak: Work authority expired before commit' USING ERRCODE='serialization_failure';
+    END IF;
+    IF NEW.work_item_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM work_items WHERE company_id=NEW.company_id AND id=NEW.work_item_id AND project_id=NEW.project_id
+    ) THEN
+        RAISE EXCEPTION 'ortak: Work receipt target differs from project' USING ERRCODE='foreign_key_violation';
+    END IF;
+    RETURN NEW;
+END
+$$;
+CREATE CONSTRAINT TRIGGER work_api_receipt_at_commit AFTER INSERT ON work_api_operations
+DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION ortak_check_work_api_receipt();

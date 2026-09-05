@@ -19,24 +19,18 @@
 //!   the validated `employee_runtime_bindings` row of the pinned revision
 //!   supply the runtime binding and permission policy from that same manifest.
 
-use std::collections::BTreeMap;
-
 use chrono::Utc;
 use ortak_control::adapter::truncate_at_char_boundary;
-use ortak_control::inbox::is_supported_channel_kind;
-use ortak_control::outbox::{OutboxKind, OutboxLease};
+use ortak_control::outbox::OutboxLease;
+use ortak_control::postgres::office_authority_matches_on;
 use ortak_control::run_event::{RunEvent, RunEventPayload};
 use ortak_control::runtime::{RunStartReceipt, RuntimeCursor, RuntimeRunRef};
-use ortak_control::{CompanyScope, ControlError, MessageId, PgControlPlane};
-use ortak_domain::{EmployeeId, EmployeeStatus};
-use sqlx::postgres::PgRow;
+use ortak_control::{CompanyScope, ControlError, PgControlPlane};
+use ortak_domain::EmployeeId;
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
-use crate::authority::{
-    bound_message_text, validate_pinned_revision, DispatchAuthority, DispatchRefusal, RunInput,
-    StoredRuntimeBinding,
-};
+use crate::authority::{DispatchAuthority, DispatchRefusal};
 use crate::error::{Result, RunSupervisionError};
 use crate::repository::{
     AppendOutcome, CorrelationOutcome, DispatchAuthorization, PrepareOutcome, PreparedRun,
@@ -44,57 +38,13 @@ use crate::repository::{
 };
 use crate::state::{fold_status, RunStatus, TerminalRecord};
 
+mod authority;
+mod memory_context;
+
 /// Ceiling for `runs.error_code`.
 const MAX_ERROR_CODE_BYTES: usize = 64;
 /// Ceiling for `runs.error_message` and `runs.cancel_reason`.
 const MAX_ROW_TEXT_BYTES: usize = 2048;
-
-const AUTHORITY_SQL: &str = "SELECT o.kind, o.state, o.dedup_key, o.lease_token,
-            (o.lease_expires_at > now()) AS lease_live,
-            o.routing_decision_id, o.employee_id,
-            d.id AS decision_id, d.message_id, d.root_message_id,
-            rr.action AS recipient_action, rr.employee_revision_id AS pinned_revision_id,
-            v.batch_hop,
-            e.status AS employee_status,
-            rev.id AS revision_id, rev.manifest,
-            rb.adapter AS binding_adapter, rb.profile_ref AS binding_profile_ref,
-            rb.model AS binding_model, rb.workspace_ref AS binding_workspace_ref,
-            rb.credential_refs AS binding_credential_refs, rb.options AS binding_options,
-            rb.validated_at AS binding_validated_at,
-            i.state AS inbox_state, i.event_kind, i.channel_id,
-            ev.kind AS message_kind, ev.channel_id AS message_channel_id,
-            ev.content AS message_content, ev.deleted_at AS message_deleted_at
-       FROM outbox o
-       LEFT JOIN routing_decisions d
-         ON d.company_id = o.company_id AND d.id = o.routing_decision_id
-       LEFT JOIN routing_recipients rr
-         ON rr.company_id = o.company_id
-        AND rr.routing_decision_id = o.routing_decision_id
-        AND rr.employee_id = o.employee_id
-       LEFT JOIN delivery_chain_visits v
-         ON v.company_id = o.company_id
-        AND v.root_message_id = d.root_message_id
-        AND v.employee_id = o.employee_id
-        AND v.routing_decision_id = d.id
-       LEFT JOIN employees e
-         ON e.company_id = o.company_id AND e.id = o.employee_id
-       LEFT JOIN employee_revisions rev
-         ON rev.company_id = o.company_id
-        AND rev.employee_id = o.employee_id
-        AND rev.id = rr.employee_revision_id
-       LEFT JOIN employee_runtime_bindings rb
-         ON rb.company_id = o.company_id
-        AND rb.employee_id = o.employee_id
-        AND rb.revision_id = rev.id
-       LEFT JOIN office_inbox i
-         ON i.company_id = o.company_id AND i.event_id = d.message_id
-       LEFT JOIN office_company_bindings ocb
-         ON ocb.company_id = o.company_id
-       LEFT JOIN events ev
-         ON ev.community_id = ocb.community_id
-        AND ev.created_at = i.event_created_at
-        AND ev.id = d.message_id
-      WHERE o.company_id = $1 AND o.id = $2";
 
 fn invalid(detail: String) -> RunSupervisionError {
     RunSupervisionError::Control(ControlError::InvalidData(detail))
@@ -102,32 +52,6 @@ fn invalid(detail: String) -> RunSupervisionError {
 
 fn parse_status(value: &str) -> Result<RunStatus> {
     RunStatus::parse(value).ok_or_else(|| invalid(format!("runs.status holds {value:?}")))
-}
-
-fn parse_employee_status(value: &str) -> Result<EmployeeStatus> {
-    serde_json::from_value(serde_json::Value::String(value.to_owned()))
-        .map_err(|_| invalid(format!("employees.status holds {value:?}")))
-}
-
-fn stored_binding(row: &PgRow) -> Result<Option<StoredRuntimeBinding>> {
-    let adapter: Option<String> = row.try_get("binding_adapter")?;
-    let Some(adapter) = adapter else {
-        return Ok(None);
-    };
-    let credential_refs: serde_json::Value = row.try_get("binding_credential_refs")?;
-    let options: serde_json::Value = row.try_get("binding_options")?;
-    let validated_at: Option<chrono::DateTime<Utc>> = row.try_get("binding_validated_at")?;
-    Ok(Some(StoredRuntimeBinding {
-        adapter,
-        profile_ref: row.try_get("binding_profile_ref")?,
-        model: row.try_get("binding_model")?,
-        workspace_ref: row.try_get("binding_workspace_ref")?,
-        credential_refs: serde_json::from_value::<Vec<String>>(credential_refs)
-            .map_err(|_| invalid("employee_runtime_bindings.credential_refs".to_owned()))?,
-        options: serde_json::from_value::<BTreeMap<String, String>>(options)
-            .map_err(|_| invalid("employee_runtime_bindings.options".to_owned()))?,
-        validated: validated_at.is_some(),
-    }))
 }
 
 /// Reads the run row under lock. `None` when it does not exist in the scope.
@@ -184,165 +108,7 @@ impl RunDispatchRepository for PgControlPlane {
         scope: &CompanyScope,
         lease: &OutboxLease,
     ) -> Result<DispatchAuthorization> {
-        let row = sqlx::query(AUTHORITY_SQL)
-            .bind(scope.company_id())
-            .bind(lease.id)
-            .fetch_optional(self.pool())
-            .await?;
-        let Some(row) = row else {
-            return Err(RunSupervisionError::UnknownOutboxRow {
-                outbox_id: lease.id,
-            });
-        };
-
-        // 1. The row itself: kind, then the lease's own copies of the routing
-        //    hints must agree with the row before anything else is derived.
-        let kind_raw: String = row.try_get("kind")?;
-        let kind = OutboxKind::parse(&kind_raw)
-            .ok_or_else(|| invalid(format!("outbox.kind holds {kind_raw:?}")))?;
-        if kind != OutboxKind::RunDispatch {
-            return Err(RunSupervisionError::WrongKind { found: kind });
-        }
-        let row_decision: Option<Uuid> = row.try_get("routing_decision_id")?;
-        let row_employee: Option<String> = row.try_get("employee_id")?;
-        let row_dedup: String = row.try_get("dedup_key")?;
-        if lease.routing_decision_id != row_decision
-            || lease.employee_id != row_employee
-            || lease.dedup_key != row_dedup
-        {
-            return Err(RunSupervisionError::LeaseInconsistent {
-                outbox_id: lease.id,
-            });
-        }
-
-        // 2. Lease fence at the database clock.
-        let state: String = row.try_get("state")?;
-        let lease_token: Option<Uuid> = row.try_get("lease_token")?;
-        let lease_live: Option<bool> = row.try_get("lease_live")?;
-        if state != "pending" || lease_token != Some(lease.lease_token) || lease_live != Some(true)
-        {
-            return Ok(DispatchAuthorization::StaleLease);
-        }
-
-        // 3. Routing provenance.
-        let refused = |refusal| Ok(DispatchAuthorization::Refused(refusal));
-        let Some(routing_decision_id) = row.try_get::<Option<Uuid>, _>("decision_id")? else {
-            return refused(DispatchRefusal::DecisionMissing);
-        };
-        let Some(employee_id_raw) = row_employee else {
-            return refused(DispatchRefusal::RecipientMissing);
-        };
-        let employee_id = EmployeeId::parse(employee_id_raw.as_str())
-            .map_err(|error| invalid(format!("outbox.employee_id: {error}")))?;
-        let message_bytes: Vec<u8> = row.try_get("message_id")?;
-        let root_bytes: Vec<u8> = row.try_get("root_message_id")?;
-        let message_id = MessageId::try_from_slice(&message_bytes)?;
-        let root_message_id = MessageId::try_from_slice(&root_bytes)?;
-        match row.try_get::<Option<String>, _>("recipient_action")? {
-            None => return refused(DispatchRefusal::RecipientMissing),
-            Some(action) if action != "wake" => {
-                return refused(DispatchRefusal::RecipientNotWake { action })
-            }
-            Some(_) => {}
-        }
-        let Some(employee_revision_id) = row.try_get::<Option<Uuid>, _>("pinned_revision_id")?
-        else {
-            return refused(DispatchRefusal::RecipientRevisionUnpinned);
-        };
-        if row.try_get::<Option<i16>, _>("batch_hop")?.is_none() {
-            return refused(DispatchRefusal::VisitMissing);
-        }
-        let inbox_state: Option<String> = row.try_get("inbox_state")?;
-        if inbox_state.as_deref() != Some("decided") {
-            return refused(DispatchRefusal::InboxNotDecided { state: inbox_state });
-        }
-
-        // 4. Employee lifecycle and the pinned revision's validated binding.
-        let Some(employee_status) = row.try_get::<Option<String>, _>("employee_status")? else {
-            return refused(DispatchRefusal::EmployeeMissing);
-        };
-        let employee_status = parse_employee_status(&employee_status)?;
-        let Some(revision_id) = row.try_get::<Option<Uuid>, _>("revision_id")? else {
-            if employee_status != EmployeeStatus::Active {
-                return refused(DispatchRefusal::EmployeeNotActive {
-                    status: employee_status,
-                });
-            }
-            return refused(DispatchRefusal::RevisionMissing);
-        };
-        if revision_id != employee_revision_id {
-            return Err(invalid(
-                "pinned revision join returned another revision".to_owned(),
-            ));
-        }
-        let manifest: serde_json::Value = row.try_get("manifest")?;
-        let stored = stored_binding(&row)?;
-        let configuration = match validate_pinned_revision(
-            &employee_id,
-            employee_status,
-            &manifest,
-            stored.as_ref(),
-        ) {
-            Ok(configuration) => configuration,
-            Err(refusal) => return refused(refusal),
-        };
-
-        // 5. Last-mile channel-kind guard, before any content is read as
-        //    text. A stale or hand-seeded dispatch for a gift wrap (1059) or
-        //    any other non-channel kind is refused here even if it somehow
-        //    reached a `wake` recipient row, and the inbox copy of kind and
-        //    channel must agree with the canonical signed event.
-        let event_kind: Option<i32> = row.try_get("event_kind")?;
-        let channel_id: Option<Uuid> = row.try_get("channel_id")?;
-        let Some(event_kind) = event_kind else {
-            return refused(DispatchRefusal::MessageUnavailable);
-        };
-        if !is_supported_channel_kind(event_kind) {
-            return refused(DispatchRefusal::UnsupportedMessageKind { kind: event_kind });
-        }
-        let Some(channel_id) = channel_id else {
-            return refused(DispatchRefusal::MessageChannelMissing);
-        };
-        let Some(content) = row.try_get::<Option<String>, _>("message_content")? else {
-            return refused(DispatchRefusal::MessageUnavailable);
-        };
-        if row.try_get::<Option<i32>, _>("message_kind")? != Some(event_kind) {
-            return refused(DispatchRefusal::MessageProvenanceMismatch { field: "kind" });
-        }
-        if row.try_get::<Option<Uuid>, _>("message_channel_id")? != Some(channel_id) {
-            return refused(DispatchRefusal::MessageProvenanceMismatch { field: "channel" });
-        }
-        if row
-            .try_get::<Option<chrono::DateTime<Utc>>, _>("message_deleted_at")?
-            .is_some()
-        {
-            return refused(DispatchRefusal::MessageDeleted);
-        }
-        let (body, truncated) = match bound_message_text(&content) {
-            Ok(bounded) => bounded,
-            Err(refusal) => return refused(refusal),
-        };
-        let input = RunInput {
-            body,
-            truncated,
-            channel_id: Some(channel_id),
-            event_kind,
-        };
-
-        Ok(DispatchAuthorization::Authorized(Box::new(
-            DispatchAuthority::new(
-                scope.company_id(),
-                lease.id,
-                lease.lease_token,
-                routing_decision_id,
-                employee_id,
-                employee_revision_id,
-                message_id,
-                root_message_id,
-                configuration,
-                input,
-            ),
-        )))
+        authority::authorize(self, scope, lease).await
     }
 
     async fn prepare_run(
@@ -358,11 +124,38 @@ impl RunDispatchRepository for PgControlPlane {
         let company_id = scope.company_id();
         let mut tx = self.pool().begin().await?;
 
+        // An unlocked fast refusal preserves the stale-lease outcome. The
+        // final conditional write below is still the authoritative lease fence.
+        let lease_live: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM outbox WHERE company_id = $1 AND id = $2
+             AND lease_token = $3 AND state = 'pending' AND lease_expires_at > clock_timestamp())",
+        )
+        .bind(company_id)
+        .bind(authority.outbox_id())
+        .bind(authority.lease_token())
+        .fetch_one(&mut *tx)
+        .await?;
+        if !lease_live {
+            return Ok(PrepareOutcome::StaleLease);
+        }
+
+        let Some(witness) = authority.office_authority() else {
+            return Ok(PrepareOutcome::Refused(
+                DispatchRefusal::OfficeAuthorityChanged,
+            ));
+        };
+        if !office_authority_matches_on(&mut tx, scope, witness).await? {
+            return Ok(PrepareOutcome::Refused(
+                DispatchRefusal::OfficeAuthorityChanged,
+            ));
+        }
+
         let inserted = sqlx::query(
             "INSERT INTO runs
                  (company_id, employee_id, employee_revision_id, routing_decision_id,
-                  message_id, root_message_id, runtime_adapter, status)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued')
+                  message_id, root_message_id, runtime_adapter, status,
+                  office_admission_generation, office_admission_valid_before, office_admission_token)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, $10)
              ON CONFLICT (company_id, routing_decision_id, employee_id) DO NOTHING
              RETURNING id",
         )
@@ -373,6 +166,9 @@ impl RunDispatchRepository for PgControlPlane {
         .bind(authority.message_id().as_bytes().as_slice())
         .bind(authority.root_message_id().as_bytes().as_slice())
         .bind(&authority.binding().adapter)
+        .bind(witness.generation())
+        .bind(witness.valid_before())
+        .bind(Uuid::new_v4())
         .fetch_optional(&mut *tx)
         .await?;
         let created = if let Some(row) = inserted {
@@ -430,15 +226,49 @@ impl RunDispatchRepository for PgControlPlane {
         let status: String = run.try_get("status")?;
         let runtime_run_ref: Option<String> = run.try_get("runtime_run_ref")?;
 
+        if sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS (SELECT 1 FROM runtime_cancellations WHERE company_id=$1 AND run_id=$2)
+                 OR EXISTS (SELECT 1 FROM run_cancel_requests WHERE company_id=$1 AND run_id=$2)",
+        )
+        .bind(company_id)
+        .bind(run_id)
+        .fetch_one(&mut *tx)
+        .await?
+        {
+            return Ok(PrepareOutcome::Refused(
+                DispatchRefusal::CancellationRequested,
+            ));
+        }
+
+        // Reconciliation after a lost start acknowledgement may renew a
+        // witness only after the canonical input hash was revalidated. The
+        // pinned employee revision and stable idempotency key remain intact.
+        sqlx::query(
+            "UPDATE runs SET office_admission_generation = $3,
+                    office_admission_valid_before = $4, office_admission_token = $5
+                    WHERE company_id = $1 AND id = $2",
+        )
+        .bind(company_id)
+        .bind(run_id)
+        .bind(witness.generation())
+        .bind(witness.valid_before())
+        .bind(Uuid::new_v4())
+        .execute(&mut *tx)
+        .await?;
+
         let fenced = sqlx::query(
             "UPDATE outbox SET run_id = $4, updated_at = now()
               WHERE company_id = $1 AND id = $2 AND lease_token = $3 AND state = 'pending'
-                AND (run_id IS NULL OR run_id = $4)",
+                AND (run_id IS NULL OR run_id = $4)
+                AND lease_expires_at > clock_timestamp()
+                AND kind = 'run_dispatch' AND routing_decision_id = $5 AND employee_id = $6",
         )
         .bind(company_id)
         .bind(authority.outbox_id())
         .bind(authority.lease_token())
         .bind(run_id)
+        .bind(authority.routing_decision_id())
+        .bind(authority.employee_id().as_str())
         .execute(&mut *tx)
         .await?;
         if fenced.rows_affected() != 1 {
@@ -717,4 +547,12 @@ impl RunDispatchRepository for PgControlPlane {
             status,
         })
     }
+}
+
+pub(crate) async fn refresh_run_office_authority(
+    control: &PgControlPlane,
+    scope: &CompanyScope,
+    run_id: Uuid,
+) -> Result<bool> {
+    authority::refresh_admission(control, scope, run_id).await
 }

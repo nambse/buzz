@@ -1,3 +1,4 @@
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 import { EllipsisVertical, Settings2, Users } from "lucide-react";
 import * as React from "react";
 import { toast } from "sonner";
@@ -274,20 +275,22 @@ export function ChannelMembersBar({
     <React.Fragment>
       {controls}
 
-      <AddChannelBotDialog
-        channelId={channel.id}
-        onCreateAgent={() => {
-          requestOpenCreateAgent({
-            channelId: channel.id,
-            channelName: channel.name,
-          });
-        }}
-        onOpenChange={setIsAddBotOpen}
-        open={isAddBotOpen}
-        providers={providers}
-        providersErrorMessage={dialogErrorMessage}
-        providersLoading={providersQuery.isLoading}
-      />
+      {!privateOrtakMode ? (
+        <AddChannelBotDialog
+          channelId={channel.id}
+          onCreateAgent={() => {
+            requestOpenCreateAgent({
+              channelId: channel.id,
+              channelName: channel.name,
+            });
+          }}
+          onOpenChange={setIsAddBotOpen}
+          open={isAddBotOpen}
+          providers={providers}
+          providersErrorMessage={dialogErrorMessage}
+          providersLoading={providersQuery.isLoading}
+        />
+      ) : null}
     </React.Fragment>
   );
 }

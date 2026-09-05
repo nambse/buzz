@@ -60,17 +60,15 @@
 //! - System origin, structured dispatch targets, Work assignments, and
 //!   chain counters are never taken from the message. They stay empty.
 //!
-//! The normalizer performs bounded reads only; it holds no transaction and
-//! writes nothing. The refusal it returns is committed by the control layer
-//! through the authoritative inbox-claim transaction. Its reads are a
-//! **snapshot**: membership, bindings, and channel state can change between
-//! this read and the routing commit, and the commit does not yet re-read
-//! them under the root lock (see `docs/ortak/B1_CHANNEL_NORMALIZATION.md`).
+//! The normalizer performs reads only. Routing carries the control plane's
+//! Office authority witness from before these reads and validates it under
+//! the coordinated mutation fence at commit. Runtime admission can use
+//! `normalize_on` within its own short transaction holding the same fence.
 
 mod postgres;
 mod tags;
 
-use ortak_control::inbox::InboxRow;
+use ortak_control::inbox::{InboxEvent, InboxRow};
 use ortak_control::office_identity::OfficePublicKey;
 use ortak_control::ports::{
     MessageNormalizer, Normalization, NormalizationRefusal, NormalizedMessage,
@@ -80,7 +78,7 @@ use ortak_domain::{
     ConversationContext, EmployeeId, MessageEnvelope, MessageKind, MessageOrigin, ReplyContext,
     RoutingReason,
 };
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 use uuid::Uuid;
 
 pub use ortak_control::inbox::{
@@ -133,16 +131,30 @@ fn attributed(prefix: &str, key: &[u8; 32]) -> MessageOrigin {
 
 impl MessageNormalizer for PgChannelNormalizer {
     async fn normalize(&self, scope: &CompanyScope, inbox: &InboxRow) -> Result<Normalization> {
-        let message_id = inbox.event.event_id;
+        let mut connection = self.pool.acquire().await?;
+        Self::normalize_on(&mut connection, scope, &inbox.event).await
+    }
+}
+
+impl PgChannelNormalizer {
+    /// Normalizes canonical Office rows on the caller's connection.
+    /// Runtime admission uses a READ COMMITTED transaction holding the shared
+    /// Office authority fence; ordinary routing carries its snapshot witness.
+    pub async fn normalize_on(
+        connection: &mut PgConnection,
+        scope: &CompanyScope,
+        inbox: &InboxEvent,
+    ) -> Result<Normalization> {
+        let message_id = inbox.event_id;
         let company_id = scope.company_id();
 
         // 1. The canonical signed row, without content, must agree with the
         //    inbox copy on every fact the inbox carries.
         let facts = postgres::canonical_facts(
-            &self.pool,
+            &mut *connection,
             company_id,
             message_id,
-            inbox.event.event_created_at,
+            inbox.event_created_at,
         )
         .await?
         .ok_or_else(|| mismatch(message_id, "event"))?;
@@ -151,13 +163,13 @@ impl MessageNormalizer for PgChannelNormalizer {
                 return Err(mismatch(message_id, "community"));
             }
         }
-        if facts.kind != inbox.event.event_kind {
+        if facts.kind != inbox.event_kind {
             return Err(mismatch(message_id, "kind"));
         }
-        if facts.author != inbox.event.author_pubkey {
+        if facts.author != inbox.author_pubkey {
             return Err(mismatch(message_id, "author"));
         }
-        if facts.channel_id != inbox.event.channel_id {
+        if facts.channel_id != inbox.channel_id {
             return Err(mismatch(message_id, "channel"));
         }
 
@@ -180,14 +192,19 @@ impl MessageNormalizer for PgChannelNormalizer {
         //    bindings first, then from relay facts; access to this channel
         //    is the relay's ingest rule (live member, or any key in an open
         //    channel) and applies to employees and humans alike.
-        let visibility = postgres::channel_visibility(&self.pool, facts.community_id, channel_id)
-            .await?
-            .ok_or_else(|| mismatch(message_id, "channel_row"))?;
+        let visibility =
+            postgres::channel_visibility(&mut *connection, facts.community_id, channel_id)
+                .await?
+                .ok_or_else(|| mismatch(message_id, "channel_row"))?;
         let author_employee =
-            postgres::employee_for_key(&self.pool, company_id, &facts.author).await?;
-        let author =
-            postgres::author_facts(&self.pool, facts.community_id, channel_id, &facts.author)
-                .await?;
+            postgres::employee_for_key(&mut *connection, company_id, &facts.author).await?;
+        let author = postgres::author_facts(
+            &mut *connection,
+            facts.community_id,
+            channel_id,
+            &facts.author,
+        )
+        .await?;
         let origin = match &author_employee {
             Some(employee_id) => MessageOrigin::Employee(employee_id.clone()),
             None => {
@@ -218,10 +235,10 @@ impl MessageNormalizer for PgChannelNormalizer {
 
         // 4. Content, tags, channel state, and persisted thread parent.
         let row = postgres::channel_message(
-            &self.pool,
+            &mut *connection,
             facts.community_id,
             message_id,
-            inbox.event.event_created_at,
+            inbox.event_created_at,
         )
         .await?
         .ok_or_else(|| mismatch(message_id, "event"))?;
@@ -236,7 +253,8 @@ impl MessageNormalizer for PgChannelNormalizer {
         let root_message_id = match &author_employee {
             None => message_id,
             Some(employee_id) => {
-                match postgres::publish_provenance(&self.pool, company_id, message_id).await? {
+                match postgres::publish_provenance(&mut *connection, company_id, message_id).await?
+                {
                     Some(provenance) if &provenance.employee_id != employee_id => {
                         return Err(ControlError::InvalidData(format!(
                             "office_publish provenance for {message_id} names employee {} but the signing key belongs to {employee_id}",
@@ -266,7 +284,7 @@ impl MessageNormalizer for PgChannelNormalizer {
             None => None,
             Some((parent_id, parent_created_at)) => {
                 let parent = postgres::parent_facts(
-                    &self.pool,
+                    &mut *connection,
                     facts.community_id,
                     parent_id,
                     parent_created_at,
@@ -279,7 +297,7 @@ impl MessageNormalizer for PgChannelNormalizer {
                             && is_supported_channel_kind(parent.kind) =>
                     {
                         let parent_origin = match postgres::employee_for_key(
-                            &self.pool,
+                            &mut *connection,
                             company_id,
                             &parent.author,
                         )
@@ -301,9 +319,9 @@ impl MessageNormalizer for PgChannelNormalizer {
         // 8. Structured mentions from accepted key tags, and the employees
         //    that are live, verified members of this channel right now.
         let structured_mentions =
-            resolve_mentions(&self.pool, company_id, &tag_facts.mention_keys).await?;
+            resolve_mentions(&mut *connection, company_id, &tag_facts.mention_keys).await?;
         let eligible_employee_ids = postgres::channel_eligible_employees(
-            &self.pool,
+            &mut *connection,
             company_id,
             facts.community_id,
             channel_id,
@@ -333,11 +351,11 @@ impl MessageNormalizer for PgChannelNormalizer {
 /// Maps mention keys to employees, preserving first-appearance order and
 /// dropping keys that belong to no employee (humans mention humans freely).
 async fn resolve_mentions(
-    pool: &PgPool,
+    connection: &mut PgConnection,
     company_id: Uuid,
     keys: &[OfficePublicKey],
 ) -> Result<Vec<EmployeeId>> {
-    let resolved = postgres::employees_for_keys(pool, company_id, keys).await?;
+    let resolved = postgres::employees_for_keys(connection, company_id, keys).await?;
     let mut mentions = Vec::with_capacity(resolved.len());
     for key in keys {
         if let Some((_, employee_id)) = resolved

@@ -732,7 +732,7 @@ mod postgres_tests {
         let mut migrations: Vec<_> = MIGRATOR.iter().collect();
         migrations.sort_by_key(|migration| migration.version);
 
-        assert_eq!(migrations.len(), 47);
+        assert_eq!(migrations.len(), 54);
         assert_eq!(migrations[0].version, 1);
         assert_eq!(&*migrations[0].description, "initial schema");
         assert!(migrations[0]
@@ -1971,6 +1971,12 @@ mod postgres_tests {
             .expect("embedded migration 0029")
             .sql
             .as_ref();
+        let migration_0054: &str = MIGRATOR
+            .iter()
+            .find(|migration| migration.version == 54)
+            .expect("embedded migration 0054")
+            .sql
+            .as_ref();
         let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .and_then(std::path::Path::parent)
@@ -2039,9 +2045,12 @@ mod postgres_tests {
         let mut expected_fences = migration.fence_attachments.clone();
         expected_fences.remove("product_feedback");
         expected_fences.remove("rate_limit_violations");
+        // Work's immutable Office binding remains community-scoped. Fold its
+        // actual migration attachment into the exact desired-state target set.
+        expected_fences.extend(surface(migration_0054).fence_attachments);
         assert_eq!(
             expected_fences, schema.fence_attachments,
-            "write-fence attachment targets differ after recovery policy"
+            "write-fence attachment targets differ after recovery policy and Work API bindings"
         );
 
         // 0029's ALTER TABLE additions are expressed inline by the

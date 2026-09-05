@@ -42,8 +42,15 @@
 //! a real Hermes, Honcho, or Office deployment.
 
 pub mod authority;
+pub mod cancellation;
 mod error;
+pub mod hermes;
+pub mod memory_context;
+pub mod memory_output;
+pub mod office_delivery;
+pub mod office_output;
 pub mod postgres;
+pub mod reconciliation;
 pub mod repository;
 pub mod state;
 pub mod supervisor;

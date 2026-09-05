@@ -1,0 +1,24 @@
+# syntax=docker/dockerfile:1
+# Supply worker_image as a digest-selected OCI-layout named build context.
+# DOCKER_CLI_IMAGE is an immutable image reference; no floating defaults.
+ARG DOCKER_CLI_IMAGE
+ARG WORKER_IMAGE
+FROM ${DOCKER_CLI_IMAGE} AS docker_cli
+FROM worker_image
+ARG DOCKER_CLI_IMAGE
+ARG WORKER_IMAGE
+USER root
+LABEL org.ortak.component="hermes-bridge-controller" \
+      org.ortak.worker.image="$WORKER_IMAGE"
+# The worker image provides the verified Python/SQLite runtime. Docker's static
+# client exists only in this derivative controller, never in the worker image.
+COPY --from=docker_cli /usr/local/bin/docker /usr/bin/docker
+COPY ortak_hermes_bridge /opt/bridge/ortak_hermes_bridge
+COPY checks /opt/bridge/checks
+RUN python -c 'import re,sqlite3,sys; assert all(re.fullmatch(r"(?:[^@ ]+@)?sha256:[0-9a-f]{64}", value) for value in sys.argv[1:]); assert sqlite3.sqlite_version_info >= (3,51,3)' "$WORKER_IMAGE" "$DOCKER_CLI_IMAGE" && \
+    /usr/bin/docker --version && chmod -R a+rX,go-w /opt/bridge
+USER 10001:10001
+WORKDIR /tmp
+ENTRYPOINT ["python", "-m", "ortak_hermes_bridge"]
+# No config, provider credential, bearer token or daemon socket is baked in.
+CMD ["--help"]

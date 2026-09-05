@@ -9,11 +9,14 @@
 //! 3. The durable run row is created (or read back) under the lease fence.
 //!    A run that is already correlated or terminal completes the lease
 //!    without a runtime call.
-//! 4. [`RuntimeAdapter::start_run`] is called outside any transaction with
-//!    the stable [`run_idempotency_key`](crate::run_idempotency_key).
-//! 5. Correlation is compare-and-set on the run row and completes the lease
+//! 4. Required memory health and bounded RunScratch recall happen outside
+//!    transactions. The full RunSpec is frozen once under fresh canonical
+//!    authority. Retries reuse its exact stored context without recalling again.
+//! 5. [`RuntimeAdapter::start_run`] receives the frozen specification outside
+//!    any transaction with the stable [`run_idempotency_key`](crate::run_idempotency_key).
+//! 6. Correlation is compare-and-set on the run row and completes the lease
 //!    in the same commit; a different runtime reference is refused and the
-//!    orphaned runtime run is cancelled best-effort.
+//!    orphaned runtime run must be cancelled; a failed cleanup propagates.
 //!
 //! Event ingestion ([`RunSupervisor::pump`]) reads the last durable cursor,
 //! calls [`RuntimeAdapter::next_events`] outside any transaction, normalizes
@@ -23,11 +26,7 @@
 //! recorded as a non-terminal `error.raised` under its cursor so the stream
 //! still advances.
 //!
-//! Next boundary (not done here): enqueueing an `office_publish` row for a
-//! completed `reply`/`channel` run. That requires the run's canonical,
-//! server-derived delivery target (thread root, channel, and reply parent
-//! read from the inbox event) to be authoritative on the run, which this
-//! slice does not yet persist.
+//! Completed Office output is scheduled separately by [`crate::office_output`].
 
 use std::time::Duration;
 
@@ -44,6 +43,9 @@ use uuid::Uuid;
 
 use crate::authority::DispatchRefusal;
 use crate::error::{Result, RunSupervisionError};
+use crate::memory_context::{
+    AdapterRunMemory, FreezeSnapshotOutcome, NoRunMemory, RunContextRepository, RunMemory,
+};
 use crate::repository::{
     AppendOutcome, CorrelationOutcome, DispatchAuthorization, PrepareOutcome, RunDispatchRepository,
 };
@@ -195,13 +197,14 @@ pub enum CancellationOutcome {
 
 /// Dispatches, pumps, and cancels runs over one runtime adapter.
 #[derive(Clone, Debug)]
-pub struct RunSupervisor<R, A> {
+pub struct RunSupervisor<R, A, M = NoRunMemory> {
     repository: R,
     adapter: A,
     config: SupervisorConfig,
+    memory: M,
 }
 
-impl<R, A> RunSupervisor<R, A>
+impl<R, A> RunSupervisor<R, A, NoRunMemory>
 where
     R: RunDispatchRepository + OutboxRepository,
     A: RuntimeAdapter,
@@ -212,6 +215,27 @@ where
             repository,
             adapter,
             config,
+            memory: NoRunMemory,
+        }
+    }
+}
+
+impl<R, A, M> RunSupervisor<R, A, M>
+where
+    R: RunDispatchRepository + OutboxRepository,
+    A: RuntimeAdapter,
+{
+    /// Uses a borrowed configured memory deployment for bounded pre-run recall.
+    /// Pumping and cancellation remain independent of memory availability.
+    pub fn with_memory<'a, N: ortak_control::memory::MemoryAdapter>(
+        self,
+        memory: &'a N,
+    ) -> RunSupervisor<R, A, AdapterRunMemory<'a, N>> {
+        RunSupervisor {
+            repository: self.repository,
+            adapter: self.adapter,
+            config: self.config,
+            memory: AdapterRunMemory::new(memory),
         }
     }
 
@@ -225,7 +249,11 @@ where
         &self,
         scope: &CompanyScope,
         lease: &OutboxLease,
-    ) -> Result<DispatchOutcome> {
+    ) -> Result<DispatchOutcome>
+    where
+        R: RunContextRepository,
+        M: RunMemory,
+    {
         if lease.kind != OutboxKind::RunDispatch {
             return Err(RunSupervisionError::WrongKind { found: lease.kind });
         }
@@ -246,6 +274,7 @@ where
         }
 
         let prepared = match self.repository.prepare_run(scope, &authority).await? {
+            PrepareOutcome::Refused(refusal) => return self.refuse(scope, lease, refusal).await,
             PrepareOutcome::Prepared(prepared) => prepared,
             PrepareOutcome::StaleLease => return Ok(DispatchOutcome::StaleLease),
         };
@@ -271,25 +300,66 @@ where
             });
         }
 
-        let spec = match authority.run_spec(prepared.run_id) {
-            Ok(spec) => spec,
-            Err(error) => {
-                // Derived input that still fails the port's bounds is a
-                // durable, bounded failure on the row, not a held lease.
+        if let Err(refusal) = self.memory.check(&authority).await {
+            return self.refuse(scope, lease, refusal).await;
+        }
+        let candidate = match self
+            .repository
+            .load_run_snapshot(scope, &authority, prepared.run_id)
+            .await
+        {
+            Ok(Some(snapshot)) => snapshot,
+            Ok(None) => match self
+                .memory
+                .snapshot(&authority, prepared.run_id, &self.config.redaction)
+                .await
+            {
+                Ok(snapshot) => snapshot,
+                Err(refusal) => return self.refuse(scope, lease, refusal).await,
+            },
+            Err(_) => {
                 let retry = self
-                    .record_failure(scope, lease, &error.to_string())
+                    .record_failure(scope, lease, "run snapshot load failed")
                     .await?;
                 return Ok(match retry {
                     OutboxFailOutcome::Stale => DispatchOutcome::StaleLease,
                     retry => DispatchOutcome::RuntimeFailed {
                         run_id: prepared.run_id,
-                        error: bounded(&error.to_string()),
+                        error: "run snapshot load failed".to_owned(),
                         retry,
                     },
                 });
             }
         };
-        let receipt = match self.adapter.start_run(&spec).await {
+        // Recall happened outside a transaction. This final step rederives
+        // canonical authority and renews admission while storing/reusing the
+        // immutable durable winner. It is mandatory on lost-ack retries too.
+        let frozen = match self
+            .repository
+            .freeze_run_snapshot(scope, lease, &authority, prepared.run_id, &candidate)
+            .await
+        {
+            Ok(FreezeSnapshotOutcome::Ready(snapshot)) => snapshot,
+            Ok(FreezeSnapshotOutcome::Refused(refusal)) => {
+                return self.refuse(scope, lease, refusal).await
+            }
+            Ok(FreezeSnapshotOutcome::StaleLease) => return Ok(DispatchOutcome::StaleLease),
+            Err(_) => {
+                let retry = self
+                    .record_failure(scope, lease, "run snapshot admission failed")
+                    .await?;
+                return Ok(match retry {
+                    OutboxFailOutcome::Stale => DispatchOutcome::StaleLease,
+                    retry => DispatchOutcome::RuntimeFailed {
+                        run_id: prepared.run_id,
+                        error: "run snapshot admission failed".to_owned(),
+                        retry,
+                    },
+                });
+            }
+        };
+        let spec = frozen.spec();
+        let receipt = match self.adapter.start_run(spec).await {
             Ok(receipt) => receipt,
             Err(error) => {
                 let retry = self
@@ -352,28 +422,20 @@ where
             }),
             CorrelationOutcome::RefConflict { durable } => {
                 // The durable correlation wins. The runtime run this attempt
-                // received is an orphan; cancel it best-effort so it cannot
-                // do work nobody supervises.
+                // received is an orphan. A failed cleanup must propagate
+                // rather than report a successfully handled dispatch.
                 tracing::error!(
                     run_id = %prepared.run_id,
                     durable = %durable,
                     presented = %receipt.runtime_run_ref,
                     "runtime returned a different run reference for the same idempotency key"
                 );
-                if let Err(error) = self
-                    .adapter
+                self.adapter
                     .cancel_run(
                         &receipt.runtime_run_ref,
                         "superseded by durable correlation",
                     )
-                    .await
-                {
-                    tracing::warn!(
-                        runtime_run_ref = %receipt.runtime_run_ref,
-                        error = %error,
-                        "orphaned runtime run could not be cancelled"
-                    );
-                }
+                    .await?;
                 let error = RunSupervisionError::RuntimeRefConflict {
                     run_id: prepared.run_id,
                     durable,

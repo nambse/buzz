@@ -5,6 +5,7 @@
 //! Run with a disposable database that can receive the embedded migrations:
 //! `ORTAK_TEST_DATABASE_URL=postgres://... cargo test -p ortak-office --test postgres_channel_normalization -- --ignored`
 
+mod fencing;
 mod fixture;
 
 use ortak_control::inbox::InboxEvent;

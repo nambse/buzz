@@ -6577,6 +6577,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "ortak-memory"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "hex",
+ "ortak-control",
+ "ortak-domain",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tokio",
+ "url",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "ortak-observability"
 version = "0.1.0"
 dependencies = [
@@ -6599,12 +6617,16 @@ dependencies = [
 name = "ortak-office"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "buzz-auth",
+ "buzz-core",
  "buzz-db",
  "chrono",
  "hex",
  "nostr 0.44.7",
  "ortak-control",
  "ortak-domain",
+ "reqwest 0.13.4",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -6613,7 +6635,9 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "url",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
@@ -6626,6 +6650,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "ortak-routing-semantic"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "ortak-control",
+ "ortak-domain",
+ "ortak-router",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.11.0",
+ "tokio",
+ "url",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "ortak-runtime"
 version = "0.1.0"
 dependencies = [
@@ -6634,6 +6677,8 @@ dependencies = [
  "hex",
  "ortak-control",
  "ortak-domain",
+ "ortak-office",
+ "reqwest 0.13.4",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -6642,6 +6687,40 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "ortak-server"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "buzz-auth",
+ "buzz-db",
+ "buzz-pubsub",
+ "chrono",
+ "deadpool-redis",
+ "hex",
+ "nostr 0.44.7",
+ "ortak-control",
+ "ortak-domain",
+ "ortak-memory",
+ "ortak-observability",
+ "ortak-office",
+ "ortak-router",
+ "ortak-routing-semantic",
+ "ortak-runtime",
+ "ortak-work",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "sqlx",
+ "tokio",
+ "tower",
+ "tower-http",
+ "url",
  "uuid",
 ]
 

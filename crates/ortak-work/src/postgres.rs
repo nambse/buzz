@@ -182,12 +182,6 @@ fn invalid(detail: impl Into<String>) -> WorkError {
     }
 }
 
-fn is_unique_violation(error: &sqlx::Error) -> bool {
-    error
-        .as_database_error()
-        .is_some_and(|database| database.is_unique_violation())
-}
-
 fn parse_state(value: &str) -> Result<WorkState> {
     WorkState::parse(value).ok_or_else(|| invalid(format!("work_items.state holds {value:?}")))
 }
@@ -848,8 +842,8 @@ fn is_promotion_replay(existing: &WorkItem, input: &NewWorkItem) -> bool {
 
 /// Resolves a promotion replay: returns the item the message was already
 /// promoted to when the input matches it, and refuses a call that names a
-/// different project or definition. Runs outside the creation
-/// transaction; the existing item is read as it stands, whether or not its
+/// different project or definition. Runs on the creation connection;
+/// the existing item is read as it stands, whether or not its
 /// project has since been archived.
 async fn replayed_promotion(
     connection: &mut PgConnection,
@@ -873,66 +867,22 @@ async fn replayed_promotion(
 
 // ── Repository ───────────────────────────────────────────────────────────────
 
+mod authorized;
+mod commands;
+mod creation;
+mod reads;
+pub use authorized::*;
+
 impl WorkRepository for PgControlPlane {
     async fn create_project(
         &self,
         scope: &CompanyScope,
         command: &CreateProject,
     ) -> Result<ProjectCreation> {
-        command.input.validate()?;
         let mut tx = self.pool().begin().await?;
-        verify_actor(&mut tx, scope, &command.actor).await?;
-        let (project, event) = Project::create(Uuid::new_v4(), &command.input)?;
-        let inserted = sqlx::query(
-            "INSERT INTO projects
-                 (company_id, id, slug, name, description, status, version,
-                  created_by_type, created_by_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-             ON CONFLICT (company_id, slug) DO NOTHING",
-        )
-        .bind(scope.company_id())
-        .bind(project.id)
-        .bind(project.slug.as_str())
-        .bind(&project.name)
-        .bind(&project.description)
-        .bind(project.status.as_str())
-        .bind(project.version)
-        .bind(command.actor.type_str())
-        .bind(command.actor.id_str())
-        .execute(&mut *tx)
-        .await?
-        .rows_affected();
-        if inserted == 0 {
-            tx.rollback().await?;
-            let row = sqlx::query(PROJECT_BY_SLUG_SQL)
-                .bind(scope.company_id())
-                .bind(project.slug.as_str())
-                .fetch_optional(self.pool())
-                .await?
-                .ok_or_else(|| invalid("project vanished after a slug conflict"))?;
-            let existing = project_record(&row)?;
-            if existing.project.name != command.input.name {
-                return Err(WorkError::ProjectConflict {
-                    slug: project.slug.to_string(),
-                });
-            }
-            return Ok(ProjectCreation {
-                project: existing,
-                created: false,
-            });
-        }
-        insert_project_history(&mut tx, scope, &project, &command.actor, &event).await?;
-        let row = sqlx::query(PROJECT_SQL)
-            .bind(scope.company_id())
-            .bind(project.id)
-            .fetch_one(&mut *tx)
-            .await?;
-        let record = project_record(&row)?;
+        let result = creation::create_project_on(&mut tx, scope, command).await?;
         tx.commit().await?;
-        Ok(ProjectCreation {
-            project: record,
-            created: true,
-        })
+        Ok(result)
     }
 
     async fn archive_project(
@@ -941,62 +891,16 @@ impl WorkRepository for PgControlPlane {
         command: &ArchiveProject,
     ) -> Result<ProjectRecord> {
         let mut tx = self.pool().begin().await?;
-        verify_actor(&mut tx, scope, &command.actor).await?;
-        let row = sqlx::query(PROJECT_FOR_UPDATE_SQL)
-            .bind(scope.company_id())
-            .bind(command.project_id)
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or(WorkError::ProjectNotFound {
-                project_id: command.project_id,
-            })?;
-        let mut record = project_record(&row)?;
-        if record.project.version != command.expected_version {
-            return Err(WorkError::VersionConflict {
-                record_id: command.project_id,
-                expected: command.expected_version,
-                actual: record.project.version,
-            });
-        }
-        let event = record.project.archive(command.reason.clone())?;
-        let updated = sqlx::query(
-            "UPDATE projects
-                SET status = 'archived', version = $3, updated_at = now(), archived_at = now()
-              WHERE company_id = $1 AND id = $2 AND version = $4",
-        )
-        .bind(scope.company_id())
-        .bind(command.project_id)
-        .bind(record.project.version)
-        .bind(command.expected_version)
-        .execute(&mut *tx)
-        .await?
-        .rows_affected();
-        if updated != 1 {
-            return Err(WorkError::VersionConflict {
-                record_id: command.project_id,
-                expected: command.expected_version,
-                actual: record.project.version,
-            });
-        }
-        insert_project_history(&mut tx, scope, &record.project, &command.actor, &event).await?;
-        let row = sqlx::query(PROJECT_SQL)
-            .bind(scope.company_id())
-            .bind(command.project_id)
-            .fetch_one(&mut *tx)
-            .await?;
-        let record = project_record(&row)?;
+        let result = commands::archive_project_on(&mut tx, scope, command).await?;
         tx.commit().await?;
-        Ok(record)
+        Ok(result)
     }
 
     async fn project(&self, scope: &CompanyScope, project_id: Uuid) -> Result<ProjectRecord> {
-        let row = sqlx::query(PROJECT_SQL)
-            .bind(scope.company_id())
-            .bind(project_id)
-            .fetch_optional(self.pool())
-            .await?
-            .ok_or(WorkError::ProjectNotFound { project_id })?;
-        project_record(&row)
+        let mut tx = self.pool().begin().await?;
+        let result = reads::project_on(&mut tx, scope, project_id).await?;
+        tx.commit().await?;
+        Ok(result)
     }
 
     async fn create_work_item(
@@ -1004,153 +908,10 @@ impl WorkRepository for PgControlPlane {
         scope: &CompanyScope,
         command: &CreateWorkItem,
     ) -> Result<WorkItemCreation> {
-        let input = &command.input;
-        input.validate()?;
         let mut tx = self.pool().begin().await?;
-        verify_actor(&mut tx, scope, &command.actor).await?;
-
-        // Promotion authority: the message must be a decided inbox row of
-        // this company; its dispatching decision is derived, never supplied.
-        // A replay is resolved before the caller-named project is examined,
-        // so an item whose project was archived after promotion is still
-        // returned, and a replay that names another project or definition
-        // is refused rather than silently answered with the original.
-        let mut source = None;
-        if let Some(hex) = &input.source_message_id {
-            let message_id = MessageId::parse_hex(hex)?;
-            if !source_message_is_decided(&mut tx, scope, message_id).await? {
-                return Err(WorkError::SourceMessageNotDecided {
-                    message_id: hex.clone(),
-                });
-            }
-            if let Some(existing) = existing_item_for_source(&mut tx, scope, message_id).await? {
-                tx.rollback().await?;
-                let mut connection = self.pool().acquire().await?;
-                return replayed_promotion(&mut connection, scope, existing, input, message_id)
-                    .await;
-            }
-            let decision_id = waking_decision_for_message(&mut tx, scope, message_id).await?;
-            source = Some((message_id, decision_id));
-        }
-
-        // The project must exist in the company and be active; FOR SHARE
-        // blocks a concurrent archive until this creation commits. Only the
-        // project row is locked here (module docs: lock order).
-        let project = sqlx::query(PROJECT_FOR_SHARE_SQL)
-            .bind(scope.company_id())
-            .bind(input.project_id)
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or(WorkError::ProjectNotFound {
-                project_id: input.project_id,
-            })?;
-        if project_record(&project)?.project.status == ProjectStatus::Archived {
-            return Err(WorkError::ProjectArchived {
-                project_id: input.project_id,
-            });
-        }
-
-        let ids = NewWorkItemIds {
-            id: Uuid::new_v4(),
-            criterion_ids: input.criteria.iter().map(|_| Uuid::new_v4()).collect(),
-            approval_ids: input.approvals.iter().map(|_| Uuid::new_v4()).collect(),
-        };
-        let (mut item, event) = WorkItem::create(ids, input)?;
-        if let Some((message_id, decision_id)) = &source {
-            item.attach_at_creation(
-                Uuid::new_v4(),
-                AttachmentRef::OfficeMessage {
-                    message_id: message_id.to_hex(),
-                },
-            )?;
-            if let Some(decision_id) = decision_id {
-                item.attach_at_creation(
-                    Uuid::new_v4(),
-                    AttachmentRef::RoutingDecision {
-                        decision_id: *decision_id,
-                    },
-                )?;
-            }
-        }
-
-        let inserted = sqlx::query(
-            "INSERT INTO work_items
-                 (company_id, id, project_id, title, description, priority, state, version,
-                  source_message_id, source_routing_decision_id, created_by_type, created_by_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
-        )
-        .bind(scope.company_id())
-        .bind(item.id)
-        .bind(item.project_id)
-        .bind(&item.title)
-        .bind(&item.description)
-        .bind(item.priority.as_str())
-        .bind(item.state.as_str())
-        .bind(item.version)
-        .bind(
-            source
-                .as_ref()
-                .map(|(message_id, _)| message_id.as_bytes().to_vec()),
-        )
-        .bind(source.as_ref().and_then(|(_, decision_id)| *decision_id))
-        .bind(command.actor.type_str())
-        .bind(command.actor.id_str())
-        .execute(&mut *tx)
-        .await;
-        match inserted {
-            Ok(_) => {}
-            Err(error) if is_unique_violation(&error) && source.is_some() => {
-                // A concurrent promotion of the same message won; resolve
-                // this call as a replay of it under the same rules.
-                tx.rollback().await?;
-                let (message_id, _) = source.ok_or_else(|| invalid("source vanished"))?;
-                let mut connection = self.pool().acquire().await?;
-                let existing = existing_item_for_source(&mut connection, scope, message_id)
-                    .await?
-                    .ok_or_else(|| invalid("promoted item vanished after a source conflict"))?;
-                return replayed_promotion(&mut connection, scope, existing, input, message_id)
-                    .await;
-            }
-            Err(error) => return Err(error.into()),
-        }
-
-        for criterion in &item.criteria {
-            sqlx::query(
-                "INSERT INTO work_acceptance_criteria
-                     (company_id, work_item_id, id, position, text)
-                 VALUES ($1, $2, $3, $4, $5)",
-            )
-            .bind(scope.company_id())
-            .bind(item.id)
-            .bind(criterion.id)
-            .bind(i16::try_from(criterion.position).map_err(|_| invalid("too many criteria"))?)
-            .bind(&criterion.text)
-            .execute(&mut *tx)
-            .await?;
-        }
-        for approval in &item.approvals {
-            sqlx::query(
-                "INSERT INTO work_approvals (company_id, work_item_id, id, gate, required)
-                 VALUES ($1, $2, $3, $4, $5)",
-            )
-            .bind(scope.company_id())
-            .bind(item.id)
-            .bind(approval.id)
-            .bind(&approval.gate)
-            .bind(approval.required)
-            .execute(&mut *tx)
-            .await?;
-        }
-        for attachment in &item.attachments {
-            insert_attachment(&mut tx, scope, item.id, attachment, &WorkActor::System).await?;
-        }
-        insert_history(&mut tx, scope, &item, &command.actor, &event).await?;
-        let aggregate = require_aggregate(&mut tx, scope, item.id).await?;
+        let result = creation::create_work_item_on(&mut tx, scope, command).await?;
         tx.commit().await?;
-        Ok(WorkItemCreation {
-            item: aggregate,
-            created: true,
-        })
+        Ok(result)
     }
 
     async fn assign_employee(
@@ -1159,55 +920,9 @@ impl WorkRepository for PgControlPlane {
         command: &AssignEmployee,
     ) -> Result<WorkItemAggregate> {
         let mut tx = self.pool().begin().await?;
-        verify_actor(&mut tx, scope, &command.actor).await?;
-        let mut item = lock_item(
-            &mut tx,
-            scope,
-            command.work_item_id,
-            command.expected_version,
-            ProjectLock::Share,
-        )
-        .await?;
-        if !employee_is_active(&mut tx, scope, &command.employee_id).await? {
-            return Err(WorkError::EmployeeNotAssignable {
-                employee_id: command.employee_id.clone(),
-            });
-        }
-        let event = item.assign(command.employee_id.clone(), command.role)?;
-        sqlx::query(
-            "INSERT INTO work_assignments
-                 (company_id, work_item_id, employee_id, role, status,
-                  assigned_by_type, assigned_by_id)
-             VALUES ($1, $2, $3, $4, 'active', $5, $6)
-             ON CONFLICT (company_id, work_item_id, employee_id) DO UPDATE
-                SET role = EXCLUDED.role,
-                    status = 'active',
-                    released_at = NULL,
-                    assigned_by_type = EXCLUDED.assigned_by_type,
-                    assigned_by_id = EXCLUDED.assigned_by_id,
-                    assigned_at = now(),
-                    updated_at = now()",
-        )
-        .bind(scope.company_id())
-        .bind(item.id)
-        .bind(command.employee_id.as_str())
-        .bind(command.role.as_str())
-        .bind(command.actor.type_str())
-        .bind(command.actor.id_str())
-        .execute(&mut *tx)
-        .await?;
-        persist_event(
-            &mut tx,
-            scope,
-            &item,
-            command.expected_version,
-            &command.actor,
-            &event,
-        )
-        .await?;
-        let aggregate = require_aggregate(&mut tx, scope, item.id).await?;
+        let result = commands::assign_employee_on(&mut tx, scope, command).await?;
         tx.commit().await?;
-        Ok(aggregate)
+        Ok(result)
     }
 
     async fn add_dependency(
@@ -1216,85 +931,9 @@ impl WorkRepository for PgControlPlane {
         command: &AddDependency,
     ) -> Result<WorkItemAggregate> {
         let mut tx = self.pool().begin().await?;
-        verify_actor(&mut tx, scope, &command.actor).await?;
-
-        // Project row FOR UPDATE, then the item row: every graph mutation
-        // of the project serializes on the project row, in the same
-        // project → item order as every other item mutation.
-        let mut item = lock_item(
-            &mut tx,
-            scope,
-            command.work_item_id,
-            command.expected_version,
-            ProjectLock::Exclusive,
-        )
-        .await?;
-        let project_id = item.project_id;
-
-        let target = sqlx::query(
-            "SELECT project_id, state FROM work_items WHERE company_id = $1 AND id = $2",
-        )
-        .bind(scope.company_id())
-        .bind(command.depends_on)
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or(WorkError::WorkItemNotFound {
-            work_item_id: command.depends_on,
-        })?;
-        let target_project: Uuid = target.try_get("project_id")?;
-        if target_project != project_id {
-            return Err(WorkError::CrossProjectDependency {
-                depends_on: command.depends_on,
-            });
-        }
-        let target_state: String = target.try_get("state")?;
-        let target_state = parse_state(&target_state)?;
-
-        let mut edges: BTreeMap<Uuid, BTreeSet<Uuid>> = BTreeMap::new();
-        for row in sqlx::query(
-            "SELECT work_item_id, depends_on_work_item_id FROM work_dependencies
-              WHERE company_id = $1 AND project_id = $2",
-        )
-        .bind(scope.company_id())
-        .bind(project_id)
-        .fetch_all(&mut *tx)
-        .await?
-        {
-            let from: Uuid = row.try_get("work_item_id")?;
-            let to: Uuid = row.try_get("depends_on_work_item_id")?;
-            edges.entry(from).or_default().insert(to);
-        }
-        if creates_dependency_cycle(&edges, command.work_item_id, command.depends_on) {
-            return Err(ortak_domain::DomainError::DependencyCycle.into());
-        }
-
-        let event = item.add_dependency(command.depends_on, target_state)?;
-        sqlx::query(
-            "INSERT INTO work_dependencies
-                 (company_id, project_id, work_item_id, depends_on_work_item_id,
-                  created_by_type, created_by_id)
-             VALUES ($1, $2, $3, $4, $5, $6)",
-        )
-        .bind(scope.company_id())
-        .bind(project_id)
-        .bind(item.id)
-        .bind(command.depends_on)
-        .bind(command.actor.type_str())
-        .bind(command.actor.id_str())
-        .execute(&mut *tx)
-        .await?;
-        persist_event(
-            &mut tx,
-            scope,
-            &item,
-            command.expected_version,
-            &command.actor,
-            &event,
-        )
-        .await?;
-        let aggregate = require_aggregate(&mut tx, scope, item.id).await?;
+        let result = commands::add_dependency_on(&mut tx, scope, command).await?;
         tx.commit().await?;
-        Ok(aggregate)
+        Ok(result)
     }
 
     async fn transition_work_item(
@@ -1303,28 +942,9 @@ impl WorkRepository for PgControlPlane {
         command: &TransitionWorkItem,
     ) -> Result<WorkItemAggregate> {
         let mut tx = self.pool().begin().await?;
-        verify_actor(&mut tx, scope, &command.actor).await?;
-        let mut item = lock_item(
-            &mut tx,
-            scope,
-            command.work_item_id,
-            command.expected_version,
-            ProjectLock::Share,
-        )
-        .await?;
-        let event = item.transition(command.target, command.reason.clone())?;
-        persist_event(
-            &mut tx,
-            scope,
-            &item,
-            command.expected_version,
-            &command.actor,
-            &event,
-        )
-        .await?;
-        let aggregate = require_aggregate(&mut tx, scope, item.id).await?;
+        let result = commands::transition_work_item_on(&mut tx, scope, command).await?;
         tx.commit().await?;
-        Ok(aggregate)
+        Ok(result)
     }
 
     async fn satisfy_criterion(
@@ -1333,45 +953,9 @@ impl WorkRepository for PgControlPlane {
         command: &SatisfyCriterion,
     ) -> Result<WorkItemAggregate> {
         let mut tx = self.pool().begin().await?;
-        verify_actor(&mut tx, scope, &command.actor).await?;
-        let mut item = lock_item(
-            &mut tx,
-            scope,
-            command.work_item_id,
-            command.expected_version,
-            ProjectLock::Share,
-        )
-        .await?;
-        let event = item.satisfy_criterion(command.criterion_id, command.actor.clone())?;
-        let updated = sqlx::query(
-            "UPDATE work_acceptance_criteria
-                SET status = 'satisfied', satisfied_by_type = $4, satisfied_by_id = $5,
-                    satisfied_at = now()
-              WHERE company_id = $1 AND work_item_id = $2 AND id = $3 AND status = 'pending'",
-        )
-        .bind(scope.company_id())
-        .bind(item.id)
-        .bind(command.criterion_id)
-        .bind(command.actor.type_str())
-        .bind(command.actor.id_str())
-        .execute(&mut *tx)
-        .await?
-        .rows_affected();
-        if updated != 1 {
-            return Err(invalid("criterion row disagrees with the aggregate"));
-        }
-        persist_event(
-            &mut tx,
-            scope,
-            &item,
-            command.expected_version,
-            &command.actor,
-            &event,
-        )
-        .await?;
-        let aggregate = require_aggregate(&mut tx, scope, item.id).await?;
+        let result = commands::satisfy_criterion_on(&mut tx, scope, command).await?;
         tx.commit().await?;
-        Ok(aggregate)
+        Ok(result)
     }
 
     async fn resolve_approval(
@@ -1380,52 +964,9 @@ impl WorkRepository for PgControlPlane {
         command: &ResolveApproval,
     ) -> Result<WorkItemAggregate> {
         let mut tx = self.pool().begin().await?;
-        verify_actor(&mut tx, scope, &command.actor).await?;
-        let mut item = lock_item(
-            &mut tx,
-            scope,
-            command.work_item_id,
-            command.expected_version,
-            ProjectLock::Share,
-        )
-        .await?;
-        let event = item.resolve_approval(
-            command.approval_id,
-            command.decision,
-            command.reason.clone(),
-            command.actor.clone(),
-        )?;
-        let updated = sqlx::query(
-            "UPDATE work_approvals
-                SET status = $4, resolved_by_type = $5, resolved_by_id = $6, reason = $7,
-                    resolved_at = now()
-              WHERE company_id = $1 AND work_item_id = $2 AND id = $3 AND status = 'pending'",
-        )
-        .bind(scope.company_id())
-        .bind(item.id)
-        .bind(command.approval_id)
-        .bind(command.decision.status().as_str())
-        .bind(command.actor.type_str())
-        .bind(command.actor.id_str())
-        .bind(command.reason.as_deref())
-        .execute(&mut *tx)
-        .await?
-        .rows_affected();
-        if updated != 1 {
-            return Err(invalid("approval row disagrees with the aggregate"));
-        }
-        persist_event(
-            &mut tx,
-            scope,
-            &item,
-            command.expected_version,
-            &command.actor,
-            &event,
-        )
-        .await?;
-        let aggregate = require_aggregate(&mut tx, scope, item.id).await?;
+        let result = commands::resolve_approval_on(&mut tx, scope, command).await?;
         tx.commit().await?;
-        Ok(aggregate)
+        Ok(result)
     }
 
     async fn attach_record(
@@ -1433,46 +974,10 @@ impl WorkRepository for PgControlPlane {
         scope: &CompanyScope,
         command: &AttachRecord,
     ) -> Result<WorkItemAggregate> {
-        command.reference.validate()?;
         let mut tx = self.pool().begin().await?;
-        verify_actor(&mut tx, scope, &command.actor).await?;
-        let mut item = lock_item(
-            &mut tx,
-            scope,
-            command.work_item_id,
-            command.expected_version,
-            ProjectLock::Share,
-        )
-        .await?;
-        if !attachment_target_exists(&mut tx, scope, &command.reference).await? {
-            return Err(WorkError::AttachmentTargetNotFound {
-                kind: command.reference.kind_str(),
-            });
-        }
-        let attachment_id = Uuid::new_v4();
-        let event = item.attach(
-            attachment_id,
-            command.reference.clone(),
-            command.label.clone(),
-        )?;
-        let attachment = item
-            .attachments
-            .iter()
-            .find(|attachment| attachment.id == attachment_id)
-            .ok_or_else(|| invalid("attachment missing after domain command"))?;
-        insert_attachment(&mut tx, scope, item.id, attachment, &command.actor).await?;
-        persist_event(
-            &mut tx,
-            scope,
-            &item,
-            command.expected_version,
-            &command.actor,
-            &event,
-        )
-        .await?;
-        let aggregate = require_aggregate(&mut tx, scope, item.id).await?;
+        let result = commands::attach_record_on(&mut tx, scope, command).await?;
         tx.commit().await?;
-        Ok(aggregate)
+        Ok(result)
     }
 
     async fn work_item(
@@ -1480,8 +985,10 @@ impl WorkRepository for PgControlPlane {
         scope: &CompanyScope,
         work_item_id: Uuid,
     ) -> Result<WorkItemAggregate> {
-        let mut connection = self.pool().acquire().await?;
-        require_aggregate(&mut connection, scope, work_item_id).await
+        let mut tx = self.pool().begin().await?;
+        let result = reads::work_item_on(&mut tx, scope, work_item_id).await?;
+        tx.commit().await?;
+        Ok(result)
     }
 
     async fn list_project_work(
@@ -1490,34 +997,9 @@ impl WorkRepository for PgControlPlane {
         project_id: Uuid,
         query: &WorkListQuery,
     ) -> Result<WorkListPage> {
-        // Fail closed for unknown and cross-company projects, even when the
-        // project would have no work.
-        sqlx::query("SELECT 1 FROM projects WHERE company_id = $1 AND id = $2")
-            .bind(scope.company_id())
-            .bind(project_id)
-            .fetch_optional(self.pool())
-            .await?
-            .ok_or(WorkError::ProjectNotFound { project_id })?;
-        let page_size = query.page_size();
-        let rows = sqlx::query(LIST_SQL)
-            .bind(scope.company_id())
-            .bind(project_id)
-            .bind(query.state_filter())
-            .bind(query.cursor.map(|cursor| cursor.created_at()))
-            .bind(query.cursor.map(|cursor| cursor.id()))
-            .bind(i64::from(page_size) + 1)
-            .fetch_all(self.pool())
-            .await?;
-        let mut items = rows
-            .iter()
-            .map(summary_from_row)
-            .collect::<Result<Vec<_>>>()?;
-        let next_cursor = if items.len() > page_size as usize {
-            items.truncate(page_size as usize);
-            items.last().map(WorkListCursor::after)
-        } else {
-            None
-        };
-        Ok(WorkListPage { items, next_cursor })
+        let mut tx = self.pool().begin().await?;
+        let result = reads::list_project_work_on(&mut tx, scope, project_id, query).await?;
+        tx.commit().await?;
+        Ok(result)
     }
 }

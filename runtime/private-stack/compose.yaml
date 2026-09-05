@@ -1,0 +1,58 @@
+name: ortak-private-20260905
+
+services:
+  postgres:
+    image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+    environment:
+      POSTGRES_USER: ortak
+      POSTGRES_DB: ortak
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    ports:
+      - "127.0.0.1:55433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - stores
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "ortak", "-d", "ortak"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
+    command: ["redis-server", "/run/secrets/redis_config"]
+    secrets:
+      - redis_config
+      - redis_password
+    ports:
+      - "127.0.0.1:56382:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - stores
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$(cat /run/secrets/redis_password)\" redis-cli ping | grep -qx PONG"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+    restart: unless-stopped
+
+networks:
+  stores:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+
+secrets:
+  postgres_password:
+    file: ${ORTAK_PRIVATE_STATE:?Set ORTAK_PRIVATE_STATE}/secrets/postgres-password
+  redis_password:
+    file: ${ORTAK_PRIVATE_STATE:?Set ORTAK_PRIVATE_STATE}/secrets/redis-password
+  redis_config:
+    file: ${ORTAK_PRIVATE_STATE:?Set ORTAK_PRIVATE_STATE}/secrets/redis.conf

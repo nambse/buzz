@@ -62,3 +62,8 @@ pub use repository::{
     WorkRepository,
 };
 pub use service::WorkService;
+
+pub use postgres::{
+    ApiProject, ApiProjectCreation, ApiProjectPage, ApiWorkPrincipal, AuthorizedWork, ProjectRole,
+    WorkMutation,
+};

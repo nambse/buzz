@@ -108,6 +108,16 @@ impl SemanticRoutingRequest {
         &self.body
     }
 
+    /// Returns the company policy version pinned when this request was prepared.
+    pub fn policy_version(&self) -> &str {
+        &self.policy_version
+    }
+
+    /// Returns the canonical fingerprint of the complete pinned company policy.
+    pub fn policy_fingerprint(&self) -> &str {
+        &self.policy_fingerprint
+    }
+
     /// Returns the least-privilege candidate views to score.
     pub fn candidates(&self) -> &[SemanticCandidate] {
         &self.candidates

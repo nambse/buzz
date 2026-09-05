@@ -69,6 +69,10 @@ pub struct ExcludedTarget {
 /// from; the commit rejects it under any other [`crate::CompanyScope`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct RoutingProposal {
+    /// Repository witness captured before reading any routing inputs.
+    pub office_authority: crate::office_authority::OfficeAuthority,
+    /// Hash of canonical normalized Office inputs, independent of revision policy.
+    pub office_input_hash: [u8; 32],
     /// Company whose inbox claim this proposal decides.
     pub company_id: Uuid,
     /// Message being decided.
@@ -89,12 +93,9 @@ pub struct RoutingProposal {
     /// (live membership plus a current verified Office identity) when the
     /// proposal was prepared.
     ///
-    /// This is a **snapshot, not authority**: the commit transaction
-    /// reapplies it (a proposed wake outside the set is dropped as
-    /// `target_not_channel_member`) and narrows the newly-eligible roster
-    /// check to it, but it does not re-read channel membership or Office
-    /// bindings under the root lock. Refreshing that Office authority inside
-    /// the transaction is the open B1b gate (`B1_CHANNEL_NORMALIZATION.md`).
+    /// The commit verifies `office_authority` under the coordinated mutation
+    /// fence before using this snapshot. Any relevant mutation or binding
+    /// validity transition requires fresh normalization outside the transaction.
     pub eligible_employee_ids: BTreeSet<EmployeeId>,
     /// Pure router decision computed outside the transaction.
     pub decision: RoutingDecision,
@@ -192,6 +193,8 @@ impl EmployeeRecord {
 /// Why the refreshed inputs invalidated the proposal.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RevalidationFailure {
+    /// Office authorization facts changed or a binding validity boundary passed.
+    OfficeAuthorityChanged,
     /// The company policy version or canonical fingerprint changed.
     PolicyChanged {
         /// Version/fingerprint pinned by the proposal.
@@ -690,6 +693,8 @@ mod tests {
             .collect();
         let state = ChainState::fresh(MessageId::from_bytes([1; 32]), &policy);
         let proposal = RoutingProposal {
+            office_input_hash: [0; 32],
+            office_authority: crate::office_authority::OfficeAuthority::new(Uuid::nil(), 0, None),
             company_id: Uuid::new_v4(),
             message_id: MessageId::from_bytes([1; 32]),
             root_message_id: MessageId::from_bytes([1; 32]),

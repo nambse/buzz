@@ -13,7 +13,47 @@ morning target, MVP-first integration order, parallel ownership, and Codex
 coding authorization. `TAKEOVER_2026-09-05.md` supplies the fresh-task context.
 The dependency gates and full v0 scope below remain in force.
 
-## 1. Where the code actually is
+## 1. Baseline used to order the remaining slices
+
+### Later integration status — 2026-09-05
+
+The baseline table below predates the overnight integration and is retained to
+explain the dependency order. It is not the current implementation inventory.
+The latest tested/runtime observations are in
+[`OVERNIGHT_DELIVERY_PLAN_2026-09-05.md`](OVERNIGHT_DELIVERY_PLAN_2026-09-05.md).
+
+The current working tree now contains the private product API/worker, fenced
+Office normalization and signed delivery, durable runtime cancellation and
+replay, the pinned Hermes bridge, native Honcho extension and Rust adapter,
+immutable run memory context and idempotent memory jobs through migration0052,
+and Office/Employees/Activity with visible recall/write provenance. A distinct
+private desktop and fresh local stores are running. One draft Ada exists;
+central routing remains disabled and no real model run has been demonstrated.
+
+The semantic scorer is now an optional, default-off production adapter with
+sealed company/revision/policy input, strict bounded HTTP response validation,
+finite concurrency/cache/circuit state and a shared control-owned deadline.
+Its loopback contracts and PostgreSQL timeout/revalidation tests pass. No
+semantic provider/model credential is selected; these are implementation tests,
+not the slice D deployed relevance-quality gate.
+
+A database-only private backup has been restored into a separate verification
+database with matching migrations, schema and100 table counts. This does not
+cover coordinated full-stack backup, object storage, Honcho, bridge state,
+upgrade or legacy-prune gates. Work execution/artifacts and the provisioning
+dashboard also remain open. The usable-MVP and full-v0 acceptance gates below
+are unchanged and have not been declared complete.
+
+Manual E1 Work/Projects now has authenticated channel-bound creation, durable
+project roles, atomic operation receipts, review/criteria/approval APIs and a
+tested desktop surface. Fourteen core PostgreSQL tests, ten signed API
+PostgreSQL tests and the three-case headless surface suite passed; final Work
+screenshots were checked. The private database upgraded through0054 and the
+native package rebuilt/restarted. The real private manual workflow check is
+pending; this does not satisfy E's dispatch/artifact acceptance gate. See
+[`WORK_API_E1.md`](WORK_API_E1.md) for the exact manual contract.
+
+### Initial inventory
 
 The working tree contains solid library foundations and one default-off production seam. There is no end-to-end company loop yet. Every path below was confirmed by reading the source on 2026-09-05. Deployed state (the Ortak Runtime host, Hermes, Honcho, signer) was inspected read-only by the operator on 2026-09-05; the observed facts are in `RUNTIME_DISCOVERY_2026-09-05.md` and are partial slice A discovery, not adoption acceptance.
 

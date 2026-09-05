@@ -6,6 +6,11 @@
 //! resource not created through the fake. Tests use their inspection methods
 //! to prove adopted resources survive compensation.
 
+mod semantic;
+
+/// Isolated semantic adapter fixture driven through the real routing service.
+pub use semantic::SemanticScoringFixture;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Mutex, MutexGuard};
 
@@ -37,9 +42,9 @@ use crate::provisioning::{
 };
 use crate::run_event::RunEventPayload;
 use crate::runtime::{
-    CancelOutcome, RunSpec, RunStartReceipt, RuntimeAdapter, RuntimeCapabilities,
-    RuntimeCapability, RuntimeCursor, RuntimeError, RuntimeEvent, RuntimeEventBatch,
-    RuntimeResourceRequest, RuntimeRunRef,
+    CancelOutcome, CancelStartReceipt, RunSpec, RunStartReceipt, RuntimeAdapter,
+    RuntimeCapabilities, RuntimeCapability, RuntimeCursor, RuntimeError, RuntimeEvent,
+    RuntimeEventBatch, RuntimeResourceRequest, RuntimeRunRef,
 };
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -74,6 +79,7 @@ struct RuntimeState {
     runs: BTreeMap<String, FakeRun>,
     start_receipts: BTreeMap<String, RunStartReceipt>,
     start_specs: Vec<RunSpec>,
+    cancelled_starts: BTreeSet<String>,
     next_run: u64,
 }
 
@@ -93,6 +99,8 @@ pub fn all_runtime_capabilities() -> BTreeSet<RuntimeCapability> {
         RuntimeCapability::RunStart,
         RuntimeCapability::RunEvents,
         RuntimeCapability::RunCancel,
+        RuntimeCapability::RunLookup,
+        RuntimeCapability::RunCancelStart,
     ]
     .into_iter()
     .collect()
@@ -329,6 +337,11 @@ impl RuntimeAdapter for FakeRuntimeAdapter {
         if let Some(receipt) = state.start_receipts.get(&spec.idempotency_key) {
             return Ok(receipt.clone());
         }
+        if state.cancelled_starts.contains(&spec.idempotency_key) {
+            return Err(RuntimeError::InvalidSpec {
+                detail: Detail::new("start key was cancelled"),
+            });
+        }
         let profile_ref = Self::profile_ref(&spec.binding, &spec.employee_id);
         if !state.profiles.contains_key(&profile_ref) {
             return Err(RuntimeError::ProfileNotFound { profile_ref });
@@ -356,6 +369,41 @@ impl RuntimeAdapter for FakeRuntimeAdapter {
             .start_receipts
             .insert(spec.idempotency_key.clone(), receipt.clone());
         Ok(receipt)
+    }
+
+    async fn lookup_start(
+        &self,
+        idempotency_key: &str,
+    ) -> std::result::Result<Option<RunStartReceipt>, RuntimeError> {
+        let state = lock(&self.state);
+        Self::guard(&state)?;
+        Ok(state.start_receipts.get(idempotency_key).cloned())
+    }
+
+    async fn cancel_start(
+        &self,
+        idempotency_key: &str,
+        reason: &str,
+    ) -> std::result::Result<CancelStartReceipt, RuntimeError> {
+        let receipt = {
+            let mut state = lock(&self.state);
+            Self::guard(&state)?;
+            state.cancelled_starts.insert(idempotency_key.to_owned());
+            state.start_receipts.get(idempotency_key).cloned()
+        };
+        match receipt {
+            Some(receipt) => {
+                let outcome = self.cancel_run(&receipt.runtime_run_ref, reason).await?;
+                Ok(CancelStartReceipt {
+                    runtime_run_ref: Some(receipt.runtime_run_ref),
+                    outcome,
+                })
+            }
+            None => Ok(CancelStartReceipt {
+                runtime_run_ref: None,
+                outcome: CancelOutcome::Cancelled,
+            }),
+        }
     }
 
     async fn next_events(

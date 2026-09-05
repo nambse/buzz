@@ -8,10 +8,11 @@
 //! [`RoutingReason::SemanticScorerDisabled`](ortak_domain::RoutingReason::SemanticScorerDisabled)
 //! and no placeholder score ever reaches persistence. It performs no I/O.
 
-use ortak_router::{SemanticRoutingRequest, SemanticScoringFailure};
+use ortak_router::SemanticScoringFailure;
 
 use crate::ports::{ScoringOutcome, SemanticScorer};
 use crate::routing::ScorerMetadata;
+use crate::semantic::SemanticScoringInput;
 
 /// Adapter name pinned on every decision this scorer touches.
 pub const DISABLED_SCORER_ADAPTER: &str = "disabled";
@@ -42,7 +43,11 @@ impl DisabledSemanticScorer {
 }
 
 impl SemanticScorer for DisabledSemanticScorer {
-    async fn score(&self, _request: &SemanticRoutingRequest) -> ScoringOutcome {
+    fn metadata(&self) -> ScorerMetadata {
+        Self::metadata()
+    }
+
+    async fn score(&self, _input: &SemanticScoringInput) -> ScoringOutcome {
         ScoringOutcome {
             result: Err(SemanticScoringFailure::Disabled),
             metadata: Self::metadata(),
@@ -78,12 +83,13 @@ mod tests {
         let router = Router::new(policy.clone()).expect("router");
         let catalog = EmployeeCatalog::new([fixture("cem"), fixture("zeynep")]).expect("catalog");
         let message =
-            MessageEnvelope::human_channel("m".repeat(64), "sefa", "office", "Herkese merhaba");
+            MessageEnvelope::human_channel("ab".repeat(32), "sefa", "office", "Herkese merhaba");
         let RoutingPreparation::Semantic(request) = router.prepare(&message, &catalog) else {
             panic!("an untargeted human message must reach semantic preparation");
         };
 
-        let outcome = DisabledSemanticScorer::new().score(&request).await;
+        let input = crate::semantic::tests::fixture_input(request.clone());
+        let outcome = DisabledSemanticScorer::new().score(&input).await;
         assert_eq!(outcome.result, Err(SemanticScoringFailure::Disabled));
         assert_eq!(outcome.metadata.adapter, DISABLED_SCORER_ADAPTER);
         assert_eq!(outcome.metadata.version, DISABLED_SCORER_VERSION);

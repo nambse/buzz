@@ -1,3 +1,4 @@
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 import * as React from "react";
 
 import { useChannelTemplatesQuery } from "@/features/channel-templates/hooks";
@@ -160,7 +161,9 @@ export function useCreateChannelForm({
             description: description.trim() || undefined,
             visibility,
             ttlSeconds: ephemeral ? ttlSeconds : undefined,
-            templateId: selectedTemplateId ?? undefined,
+            templateId: privateOrtakMode
+              ? undefined
+              : (selectedTemplateId ?? undefined),
           });
           onCreated?.();
         } catch (error) {

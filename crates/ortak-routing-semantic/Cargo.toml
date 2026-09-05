@@ -1,0 +1,24 @@
+[package]
+name = "ortak-routing-semantic"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Explicit, bounded semantic scoring outside routing authority transactions"
+
+[dependencies]
+ortak-control.workspace = true
+ortak-domain.workspace = true
+ortak-router.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+url.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+chrono.workspace = true
+serde_yaml.workspace = true

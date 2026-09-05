@@ -239,7 +239,20 @@ impl Company {
             .expect("claim")
             .expect("claimable");
         let policy = RoutingPolicy::default();
+        // This repository fixture supplies its routing proposal explicitly;
+        // it needs only the real Office fence witness, not a parsed full roster.
+        let mut witness_tx = self.pool.begin().await.expect("witness transaction");
+        let office_authority =
+            ortak_control::postgres::lock_office_authority_on(&mut witness_tx, &self.scope)
+                .await
+                .expect("Office authority witness");
+        witness_tx
+            .commit()
+            .await
+            .expect("release witness transaction");
         let proposal = RoutingProposal {
+            office_input_hash: [0; 32],
+            office_authority,
             company_id: self.scope.company_id(),
             message_id: id,
             root_message_id: id,
@@ -1634,3 +1647,6 @@ async fn concurrent_dependency_and_item_mutations_do_not_deadlock() {
         .all(|criterion| criterion.status == CriterionStatus::Satisfied));
     assert_dense_history(&sibling);
 }
+
+#[path = "postgres_work/authorized.rs"]
+mod authorized;

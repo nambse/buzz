@@ -1,0 +1,32 @@
+{
+  "identifier": "dev.ortak.private20260905",
+  "productName": "Ortak Private",
+  "build": {
+    "devUrl": "http://localhost:1427",
+    "beforeDevCommand": {
+      "script": "exec ./node_modules/.bin/vite --host localhost --port 1427 --strictPort",
+      "cwd": "..",
+      "wait": false
+    },
+    "beforeBuildCommand": {
+      "script": "node ./scripts/ortak-private-native.mjs frontend",
+      "cwd": ".."
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": []
+    },
+    "deep-link": {
+      "desktop": {
+        "schemes": ["buzz-demo-ortak-private-20260905"]
+      }
+    }
+  },
+  "bundle": {
+    "externalBin": [],
+    "macOS": {
+      "infoPlist": "Info.ortak-private.plist"
+    }
+  }
+}

@@ -1,3 +1,4 @@
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 import * as React from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { UserRoundPlus, X } from "lucide-react";
@@ -279,6 +280,8 @@ export function MembersSidebar({
     });
 
     const addCandidate = (candidate: AddMemberSearchCandidate) => {
+      if (privateOrtakMode && (candidate.isAgent || candidate.isManagedAgent))
+        return;
       const pubkey = normalizePubkey(candidate.pubkey);
       if (
         memberPubkeys.has(pubkey) ||

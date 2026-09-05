@@ -40,6 +40,7 @@ pub mod postgres;
 pub mod publisher;
 pub mod repository;
 pub mod signer;
+pub mod transport;
 
 pub use delivery::{DeliveryConfig, DeliveryOutcome, OfficeDeliveryService};
 pub use error::{BindingRejection, OfficeDeliveryError, Result};

@@ -1,0 +1,58 @@
+{
+  "protocol": "ortak-honcho/1",
+  "source_commit": "5d992bc65afcfbc05a5911ab4edbaa88ef64c690",
+  "receipt_tables": {
+    "ortak_resource_receipts": [
+      "company_id",
+      "employee_id",
+      "idempotency_key"
+    ],
+    "ortak_session_ownership": [
+      "workspace_id",
+      "session_id"
+    ],
+    "ortak_write_receipts": [
+      "workspace_id",
+      "session_id",
+      "idempotency_key"
+    ]
+  },
+  "files": {
+    ".dockerignore": "98fd69c08231ef37f19d6867bcc175deda7c70e477cfc653135b2bd0bbd6187f",
+    ".gitignore": "3c9b982f24065de5779a4a4fd3411a18dad949a26d22f00f08597a02ebb6343f",
+    "Dockerfile": "e993f0c41bfe49d06924c5ee752118f9b8e150e9bae9e8f96ec9392e4b65c77c",
+    "HTTP_SMOKE.md": "04bfe2e7769bb20a80b677b3bee244a343dd09fb7a9146dc6539f869dbd0bc6c",
+    "README.md": "717d1646bafdb135401eb23d8726e5f2706fd9829313688a1c482071f239dbd4",
+    "VALIDATION.md": "7c9ff122801f4846525eae1a1b6cb0d6df6f2a7810a32ef41b3c7bcefe34f4a2",
+    "apply_source_patch.py": "a996189be7d0be371fd1fb0c7012d76190511c512be7b61819260b3aff9b0ebe",
+    "build_image.py": "a4a32a8e5c09caf04839cc9652951bdcbf898c62df6bdf12e656d74eb54ff9e7",
+    "entrypoint.sh": "8f7a87566028375997837320d80b683a9c97749fd0c0bd8d3db99c2e9e2ead4e",
+    "honcho-source-lock.json": "19881b3434d0373e292d579037feb97e90a7f411eb1ae0f1bd98d3258a206acb",
+    "ortak_honcho/__init__.py": "bf7a9e8111c620523aea99e55d1fb253cd2b190d9411d1ae5de18a8f06b94697",
+    "ortak_honcho/app.py": "e4424672d74a58469d6ec1402d4a3d848a318f6facb5c6403c61199f4753d2eb",
+    "ortak_honcho/database.py": "7ba7af33aa25c7f6b349828a32686ef24308b60d455e371267e3316a12eb92b0",
+    "ortak_honcho/init_db.py": "a6b75b0e91cfb690351744bf9ac4c22b6e907bcb0f7a3a8e94d0d6b24fb9cb05",
+    "ortak_honcho/models.py": "43d7f2a344252bd6a9304a6dbea715e5c4be3f5b68a774a85f4b5e624a684577",
+    "ortak_honcho/recall.py": "6072e745d9528a9481911614097654f47ce76142dcb1280732e32e9e306c66c2",
+    "ortak_honcho/resources.py": "fe35b7aa43ff4def9882bf8b0ba957eee66e125a94199cee2303abc7f06cdba1",
+    "ortak_honcho/schemas.py": "d17e8110eb6b76b7aa45d6159ebc8154817e46bb4642e29417bcae16ff8536bd",
+    "ortak_honcho/service.py": "4b5640e7c78a8260671bfd76f8f20f1cbc91d5ba551921712a483950c4fe1022",
+    "prepare_source.py": "2010621292e731b879052b228e6c3c7e748e6ae6cac28e535eb75082924c303d",
+    "run_tests.py": "7b3ded4da0037371069728107f4c4d89c3575f3b5c1fd65912e9b42ec4092219",
+    "smoke_http.py": "c7428e9e37c33e3167855070172eda5960837ee1ef181f89388148168600e796",
+    "test_build_image.py": "b4e79042b60d63b9a315ff03a94afd3cf6e809e31829cabe51f45a5a6762fe6f",
+    "tests/__init__.py": "45c4f63a203c1b3b603114f48ebe1864657229d785bce1a045263d10cd158b15",
+    "tests/conftest.py": "af997fb42d7241601fe5c804d02ebe01c7b780cc3b28b54835acd831b602f519",
+    "tests/restart_probe.py": "e4d5160002df3fa841a07fab443e7e4c59813e3e217420bbbb708d661e35f2d4",
+    "tests/test_atomic.py": "5aebac3a67683d756f6d0a8f7ba63d7ad5ed9857bd60964fe944c544b002dfd4",
+    "tests/test_authority.py": "db23a860663fa1d01604ddaf85d7ab10924bef147a50cda88b3670e41df68610",
+    "tests/test_recall.py": "4af5668783d35a7a669f07c254712df3047faec3d1ec5ed9f18bb7f6ba019ea7",
+    "tests/test_resource_inspect.py": "458514b83d89833bd3176f31ea38a78bae5edb2ab3855445aeaf7c6d848497d7"
+  },
+  "read_only_resource_inspection": {
+    "method": "POST",
+    "path": "/v3/ortak/workspaces/{workspace_id}/resources/inspect",
+    "authorization": "native workspace JWT",
+    "identity": "immutable creation request hash and native IDs checked against current locked rows"
+  }
+}

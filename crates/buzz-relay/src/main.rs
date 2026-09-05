@@ -229,7 +229,12 @@ async fn run_relay_main(boot: BootTracker) -> anyhow::Result<()> {
     let usage_idle_timeout_secs = usage_metrics_idle_timeout_secs(usage_interval_secs);
     let (boot, ()) = boot.run_required(
         StartupPhase::MetricsBind,
-        || relay_metrics::try_install(config.metrics_port, usage_idle_timeout_secs),
+        || {
+            relay_metrics::try_install_on(
+                config.diagnostics_bind_addr(config.metrics_port),
+                usage_idle_timeout_secs,
+            )
+        },
         |error| match error.failure() {
             relay_metrics::MetricsInstallFailure::Bind => LifecycleReason::Bind,
             relay_metrics::MetricsInstallFailure::RecorderConflict => {
@@ -1368,9 +1373,12 @@ async fn serve(
 ) -> anyhow::Result<()> {
     let config = &state.config;
 
-    let health_listener = tokio::net::TcpListener::bind(("0.0.0.0", config.health_port))
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to bind health port {}: {e}", config.health_port))?;
+    let health_listener =
+        tokio::net::TcpListener::bind(config.diagnostics_bind_addr(config.health_port))
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!("Failed to bind health port {}: {e}", config.health_port)
+            })?;
     info!(port = config.health_port, "Health probe listener started");
     tokio::spawn(async move {
         axum::serve(health_listener, health_router).await.ok();

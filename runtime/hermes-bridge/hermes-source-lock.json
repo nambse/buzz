@@ -1,0 +1,23 @@
+{
+  "revision": "29112bef099274229cadff79cdff7bf7b99c4b77",
+  "source_files": {
+    "run_agent.py": "5b2e7083680e6c728f2306adc73e5f814c444aaa9ff3e3b840206142c67a7149",
+    "model_tools.py": "5227bfe30f7c3f6eb20d064f648420138031e038d38eac2829d25b749739ad11",
+    "agent/agent_init.py": "a7caf2c1fcd66fe55b483435ec759811376c303d0724a8dda57446f6dfd61545",
+    "agent/tool_executor.py": "5aff6c7e95a280adc5124e7c1f1019b54984b8e7091db48bac35ad5bc2387813",
+    "agent/conversation_loop.py": "33924321c2ef848a7474d4daf4dd5ec1e98588aa54db967d92ea2fc6aa3ff56a",
+    "agent/agent_runtime_helpers.py": "9164dac169ce580d2de3396885c0959c5660620724f01509416ff2136df890e2",
+    "agent/process_bootstrap.py": "a48a7ca8e39ad449ec41d751764895f46e6e682c7be1336ac1358d4da7b579aa",
+    "hermes_cli/env_loader.py": "26712ba3e020b5c306cd456e8d2cc96084fd2295f7ec4104466fffd0adeab87d",
+    "hermes_constants.py": "b78449440ce5149c3896129f9ac309e2ebe70a265b5cae08b4316b7a6910f068",
+    "tools/registry.py": "f95d011cae75f0426dd77cb1e25df6bebb61a067d795312df297cb877dd616f5",
+    "pyproject.toml": "c70c8b52f6cc08a4e65f0fc1713c26814fd4f19811bc7e01de645009b2a76600",
+    "uv.lock": "383cd8f98ec23dc3fe4cf63759ec73be5a869cc953f068b4e79ec4e8ed00287d",
+    "tools/lazy_deps.py": "76f1517972d7e2e7ffd74954cc8a09001f2de974880a78be62e4f1a17c3e9c09",
+    "tools/env_probe.py": "d46c016348a493cf26e1b0ed82c3b935672f5a9d27493d5cab2e04ecf37c34df",
+    "agent/transports/codex.py": "c90e07e6bbb01e27fe2ebd24ca96f6efffd0458738efb83fe064851b993a05c3",
+    "agent/transports/chat_completions.py": "fec0186cdb5536f657f8428ef873ea8871bed7d178db629b5a15a1c50f765003",
+    "agent/transports/__init__.py": "fe832003b28c5470608eb51a055e5cc759f1fb81d93174b54dbbd217f97bbffe"
+  },
+  "archive_sha256": "76b99a8be9b77d66833c3cfe2b35c6d6f6a58e4ff9637ef8effcfc1f420ab35a"
+}

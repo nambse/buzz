@@ -398,8 +398,8 @@ pub async fn channel_eligible_employees<'e>(
           WHERE e.company_id = $1
             AND e.active_revision_id IS NOT NULL
             AND b.verified_at IS NOT NULL
-            AND b.valid_from <= now()
-            AND (b.valid_until IS NULL OR b.valid_until > now())",
+            AND b.valid_from <= clock_timestamp()
+            AND (b.valid_until IS NULL OR b.valid_until > clock_timestamp())",
     )
     .bind(company_id)
     .bind(community_id)

@@ -1,0 +1,38 @@
+[package]
+name = "ortak-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Private Ortak product API with NIP-98 authorization and durable cancellation requests"
+
+[dependencies]
+axum.workspace = true
+base64.workspace = true
+buzz-auth.workspace = true
+buzz-pubsub.workspace = true
+chrono.workspace = true
+deadpool-redis.workspace = true
+nostr.workspace = true
+ortak-control.workspace = true
+ortak-domain.workspace = true
+ortak-memory.workspace = true
+ortak-router.workspace = true
+ortak-routing-semantic.workspace = true
+ortak-observability.workspace = true
+ortak-office.workspace = true
+ortak-runtime.workspace = true
+ortak-work.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tower.workspace = true
+tower-http = { workspace = true, features = ["set-header"] }
+url.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+buzz-db.workspace = true
+hex.workspace = true

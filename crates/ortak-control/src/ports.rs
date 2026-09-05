@@ -12,7 +12,7 @@ use ortak_domain::{
     Employee, EmployeeCatalog, EmployeeId, MessageEnvelope, MessageOrigin, RoutingPolicy,
     RoutingReason, SemanticScore,
 };
-use ortak_router::{SemanticRoutingRequest, SemanticScoringFailure};
+use ortak_router::SemanticScoringFailure;
 use uuid::Uuid;
 
 use crate::error::Result;
@@ -28,6 +28,7 @@ use crate::routing::{
     StoredDecision,
 };
 use crate::run_event::RunEvent;
+use crate::semantic::SemanticScoringInput;
 
 /// Server-owned company resolution.
 #[allow(async_fn_in_trait)]
@@ -111,6 +112,8 @@ pub struct RosterEmployee {
 /// Out-of-transaction read used to prepare a routing proposal.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RoutingSnapshot {
+    /// Mutation-fence witness captured before reading any proposal inputs.
+    pub office_authority: crate::office_authority::OfficeAuthority,
     /// Inbox row as read.
     pub inbox: InboxRow,
     /// Company policy as read.
@@ -211,8 +214,12 @@ pub struct ScoringOutcome {
 /// Remote semantic scorer, always called outside database transactions.
 #[allow(async_fn_in_trait)]
 pub trait SemanticScorer {
-    /// Scores the least-privilege request under the control layer's deadline.
-    async fn score(&self, request: &SemanticRoutingRequest) -> ScoringOutcome;
+    /// Returns configured provenance without I/O, preserved even when scoring times out.
+    fn metadata(&self) -> ScorerMetadata;
+
+    /// Scores sealed company/revision inputs under the control layer's deadline.
+    /// Implementations must not detach work that can outlive this future.
+    async fn score(&self, input: &SemanticScoringInput) -> ScoringOutcome;
 }
 
 /// Transport-independent message produced by the Office adapter.

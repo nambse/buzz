@@ -1,3 +1,4 @@
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 import * as React from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import { motion, useReducedMotion } from "motion/react";
@@ -528,6 +529,22 @@ export function MachineOnboardingFlow({
                 returningFromSecurity={returningFromSecurity}
               />
             )
+          ) : privateOrtakMode ? (
+            <section className="flex flex-col items-center gap-4 text-center">
+              <h1 className="text-xl font-semibold">
+                Connect to your private Office
+              </h1>
+              <p className="max-w-md text-sm text-muted-foreground">
+                Your identity is ready. Employees are configured by your
+                company’s Ortak operator.
+              </p>
+              <Button
+                data-testid="ortak-onboarding-continue"
+                onClick={() => complete(selectedPubkey ?? undefined)}
+              >
+                Continue to Office
+              </Button>
+            </section>
           ) : page === "setup" ? (
             <SetupStep
               actions={{

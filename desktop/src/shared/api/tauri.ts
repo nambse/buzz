@@ -1,3 +1,4 @@
+import { assertPrivateCommandAllowed } from "@/features/ortak/privateMode";
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import {
   activateRateLimit,
@@ -296,6 +297,7 @@ export async function invokeTauri<T>(
   command: string,
   args?: Record<string, unknown>,
 ): Promise<T> {
+  assertPrivateCommandAllowed(command);
   try {
     return await tauriInvoke<T>(command, args);
   } catch (error) {

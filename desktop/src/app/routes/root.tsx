@@ -1,4 +1,5 @@
-import { createRootRoute } from "@tanstack/react-router";
+import { privateRouteAllowed } from "@/features/ortak/privateMode";
+import { createRootRoute, redirect } from "@tanstack/react-router";
 
 import { AppShell } from "@/app/AppShell";
 import { HuddlePresenceProvider } from "@/features/huddle/HuddlePresenceContext";
@@ -15,5 +16,9 @@ function RootRoute() {
 }
 
 export const Route = createRootRoute({
+  beforeLoad: ({ location }) => {
+    if (!privateRouteAllowed(location.pathname))
+      throw redirect({ to: "/agents" });
+  },
   component: RootRoute,
 });

@@ -20,6 +20,7 @@ use ortak_control::routing::{
     ScorerMetadata,
 };
 use ortak_control::service::routing_input_hash;
+use ortak_control::SemanticScoringInput;
 use ortak_control::{
     ClaimGeneration, CompanyScope, ControlError, InboxRoutingService, MessageId, PgControlPlane,
     RoutingWorkerConfig, ServiceOutcome,
@@ -29,7 +30,6 @@ use ortak_domain::{
     MessageOrigin, RecipientAction, RecipientDecision, RoutingDecision, RoutingMode, RoutingPolicy,
     RoutingReason, SemanticScore,
 };
-use ortak_router::SemanticRoutingRequest;
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
@@ -137,7 +137,7 @@ impl Fixture {
             .claim_generation
     }
 
-    fn proposal(
+    async fn proposal(
         &self,
         id: MessageId,
         root: MessageId,
@@ -168,6 +168,14 @@ impl Fixture {
             })
             .collect::<Vec<_>>();
         RoutingProposal {
+            office_input_hash: [0; 32],
+            office_authority: self
+                .control
+                .routing_snapshot(&self.scope, id)
+                .await
+                .expect("snapshot")
+                .expect("inbox")
+                .office_authority,
             company_id: self.scope.company_id(),
             message_id: id,
             root_message_id: root,
@@ -310,14 +318,16 @@ async fn replayed_message_creates_one_decision_and_one_dispatch() {
     assert_eq!(fixture.accept(id).await, InboxInsertOutcome::AlreadyPresent);
 
     let generation = fixture.claim(id, "worker-a").await;
-    let proposal = fixture.proposal(
-        id,
-        id,
-        generation,
-        MessageOrigin::Human("sefa".to_owned()),
-        &["cem"],
-        &policy,
-    );
+    let proposal = fixture
+        .proposal(
+            id,
+            id,
+            generation,
+            MessageOrigin::Human("sefa".to_owned()),
+            &["cem"],
+            &policy,
+        )
+        .await;
     let first = committed(
         fixture
             .control
@@ -410,14 +420,16 @@ async fn stale_claim_generation_cannot_finalize_or_dispatch() {
     let current = fixture.claim(id, "worker-b").await;
     assert!(current > stale);
 
-    let late = fixture.proposal(
-        id,
-        id,
-        stale,
-        MessageOrigin::Human("sefa".to_owned()),
-        &["cem"],
-        &policy,
-    );
+    let late = fixture
+        .proposal(
+            id,
+            id,
+            stale,
+            MessageOrigin::Human("sefa".to_owned()),
+            &["cem"],
+            &policy,
+        )
+        .await;
     let outcome = fixture
         .control
         .commit_routing(&fixture.scope, &late)
@@ -446,14 +458,16 @@ async fn stale_claim_generation_cannot_finalize_or_dispatch() {
         .expect("chain read")
         .is_none());
 
-    let fresh = fixture.proposal(
-        id,
-        id,
-        current,
-        MessageOrigin::Human("sefa".to_owned()),
-        &["cem"],
-        &policy,
-    );
+    let fresh = fixture
+        .proposal(
+            id,
+            id,
+            current,
+            MessageOrigin::Human("sefa".to_owned()),
+            &["cem"],
+            &policy,
+        )
+        .await;
     let decision = committed(
         fixture
             .control
@@ -487,14 +501,16 @@ async fn sibling_branches_cannot_both_spend_the_final_hop() {
             .control
             .commit_routing(
                 &fixture.scope,
-                &fixture.proposal(
-                    root,
-                    root,
-                    generation,
-                    MessageOrigin::Human("sefa".to_owned()),
-                    &["cem"],
-                    &policy,
-                ),
+                &fixture
+                    .proposal(
+                        root,
+                        root,
+                        generation,
+                        MessageOrigin::Human("sefa".to_owned()),
+                        &["cem"],
+                        &policy,
+                    )
+                    .await,
             )
             .await
             .expect("root commit"),
@@ -509,15 +525,19 @@ async fn sibling_branches_cannot_both_spend_the_final_hop() {
     let left_generation = fixture.claim(left, "worker-left").await;
     let right_generation = fixture.claim(right, "worker-right").await;
     let cem = MessageOrigin::Employee(employee_id("cem"));
-    let left_proposal = fixture.proposal(
-        left,
-        root,
-        left_generation,
-        cem.clone(),
-        &["zeynep"],
-        &policy,
-    );
-    let right_proposal = fixture.proposal(right, root, right_generation, cem, &["ada"], &policy);
+    let left_proposal = fixture
+        .proposal(
+            left,
+            root,
+            left_generation,
+            cem.clone(),
+            &["zeynep"],
+            &policy,
+        )
+        .await;
+    let right_proposal = fixture
+        .proposal(right, root, right_generation, cem, &["ada"], &policy)
+        .await;
 
     let (left_outcome, right_outcome) = tokio::join!(
         fixture
@@ -592,14 +612,16 @@ async fn same_employee_is_reserved_once_per_root_chain() {
             .control
             .commit_routing(
                 &fixture.scope,
-                &fixture.proposal(
-                    root,
-                    root,
-                    generation,
-                    MessageOrigin::Human("sefa".to_owned()),
-                    &["cem"],
-                    &policy,
-                ),
+                &fixture
+                    .proposal(
+                        root,
+                        root,
+                        generation,
+                        MessageOrigin::Human("sefa".to_owned()),
+                        &["cem"],
+                        &policy,
+                    )
+                    .await,
             )
             .await
             .expect("root commit"),
@@ -612,22 +634,26 @@ async fn same_employee_is_reserved_once_per_root_chain() {
     let left_generation = fixture.claim(left, "worker-left").await;
     let right_generation = fixture.claim(right, "worker-right").await;
     let cem = MessageOrigin::Employee(employee_id("cem"));
-    let left_proposal = fixture.proposal(
-        left,
-        root,
-        left_generation,
-        cem.clone(),
-        &["zeynep"],
-        &policy,
-    );
-    let right_proposal = fixture.proposal(
-        right,
-        root,
-        right_generation,
-        cem.clone(),
-        &["zeynep"],
-        &policy,
-    );
+    let left_proposal = fixture
+        .proposal(
+            left,
+            root,
+            left_generation,
+            cem.clone(),
+            &["zeynep"],
+            &policy,
+        )
+        .await;
+    let right_proposal = fixture
+        .proposal(
+            right,
+            root,
+            right_generation,
+            cem.clone(),
+            &["zeynep"],
+            &policy,
+        )
+        .await;
 
     let (left_outcome, right_outcome) = tokio::join!(
         fixture
@@ -660,14 +686,16 @@ async fn same_employee_is_reserved_once_per_root_chain() {
             .control
             .commit_routing(
                 &fixture.scope,
-                &fixture.proposal(
-                    back,
-                    root,
-                    back_generation,
-                    MessageOrigin::Employee(employee_id("zeynep")),
-                    &["cem"],
-                    &policy,
-                ),
+                &fixture
+                    .proposal(
+                        back,
+                        root,
+                        back_generation,
+                        MessageOrigin::Employee(employee_id("zeynep")),
+                        &["cem"],
+                        &policy,
+                    )
+                    .await,
             )
             .await
             .expect("back commit"),
@@ -733,14 +761,16 @@ async fn company_scope_is_derived_from_bindings_and_isolates_companies() {
             .control
             .commit_routing(
                 &company_a.scope,
-                &company_a.proposal(
-                    shared,
-                    shared,
-                    generation_a,
-                    MessageOrigin::Human("sefa".to_owned()),
-                    &["cem"],
-                    &policy,
-                ),
+                &company_a
+                    .proposal(
+                        shared,
+                        shared,
+                        generation_a,
+                        MessageOrigin::Human("sefa".to_owned()),
+                        &["cem"],
+                        &policy,
+                    )
+                    .await,
             )
             .await
             .expect("commit in company A"),
@@ -753,14 +783,16 @@ async fn company_scope_is_derived_from_bindings_and_isolates_companies() {
             .control
             .commit_routing(
                 &company_b.scope,
-                &company_b.proposal(
-                    shared,
-                    shared,
-                    generation_b,
-                    MessageOrigin::Human("sefa".to_owned()),
-                    &["cem"],
-                    &policy,
-                ),
+                &company_b
+                    .proposal(
+                        shared,
+                        shared,
+                        generation_b,
+                        MessageOrigin::Human("sefa".to_owned()),
+                        &["cem"],
+                        &policy,
+                    )
+                    .await,
             )
             .await
             .expect("commit in company B"),
@@ -812,14 +844,16 @@ async fn proposal_and_claim_from_one_company_cannot_commit_under_another_scope()
     assert_eq!(claim_a.claim_generation, generation_b);
     assert_eq!(claim_a.company_id, company_a.scope.company_id());
 
-    let proposal_a = company_a.proposal(
-        shared,
-        shared,
-        claim_a.claim_generation,
-        MessageOrigin::Human("sefa".to_owned()),
-        &["cem"],
-        &policy,
-    );
+    let proposal_a = company_a
+        .proposal(
+            shared,
+            shared,
+            claim_a.claim_generation,
+            MessageOrigin::Human("sefa".to_owned()),
+            &["cem"],
+            &policy,
+        )
+        .await;
     assert_eq!(proposal_a.company_id, company_a.scope.company_id());
 
     // The repository refuses the cross-company pairing before any write.
@@ -937,14 +971,16 @@ async fn changed_inputs_roll_back_and_outbox_leases_are_fenced() {
     let generation = fixture.claim(id, "worker-a").await;
 
     // A stale candidate revision invalidates the proposal without touching state.
-    let mut stale_revision = fixture.proposal(
-        id,
-        id,
-        generation,
-        MessageOrigin::Human("sefa".to_owned()),
-        &["cem"],
-        &policy,
-    );
+    let mut stale_revision = fixture
+        .proposal(
+            id,
+            id,
+            generation,
+            MessageOrigin::Human("sefa".to_owned()),
+            &["cem"],
+            &policy,
+        )
+        .await;
     stale_revision.candidates[0].revision_id = Uuid::new_v4();
     let outcome = fixture
         .control
@@ -957,14 +993,16 @@ async fn changed_inputs_roll_back_and_outbox_leases_are_fenced() {
     ));
 
     // A changed policy fingerprint under the same version does too.
-    let mut stale_policy = fixture.proposal(
-        id,
-        id,
-        generation,
-        MessageOrigin::Human("sefa".to_owned()),
-        &["cem"],
-        &policy,
-    );
+    let mut stale_policy = fixture
+        .proposal(
+            id,
+            id,
+            generation,
+            MessageOrigin::Human("sefa".to_owned()),
+            &["cem"],
+            &policy,
+        )
+        .await;
     stale_policy.decision.policy_fingerprint = RoutingPolicy {
         semantic_threshold: 0.5,
         ..policy.clone()
@@ -999,14 +1037,16 @@ async fn changed_inputs_roll_back_and_outbox_leases_are_fenced() {
             .control
             .commit_routing(
                 &fixture.scope,
-                &fixture.proposal(
-                    id,
-                    id,
-                    generation,
-                    MessageOrigin::Human("sefa".to_owned()),
-                    &["cem"],
-                    &policy,
-                ),
+                &fixture
+                    .proposal(
+                        id,
+                        id,
+                        generation,
+                        MessageOrigin::Human("sefa".to_owned()),
+                        &["cem"],
+                        &policy,
+                    )
+                    .await,
             )
             .await
             .expect("commit"),
@@ -1069,9 +1109,38 @@ async fn changed_inputs_roll_back_and_outbox_leases_are_fenced() {
         .complete(&fixture.scope, &first[0])
         .await
         .expect("stale complete"));
-    assert!(fixture
+    // Expiry itself invalidates a token, even before another worker claims it.
+    sqlx::query("UPDATE outbox SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE company_id=$1 AND id=$2")
+        .bind(fixture.scope.company_id()).bind(second[0].id)
+        .execute(fixture.control.pool()).await.expect("expire lease");
+    assert!(!fixture
         .control
         .complete(&fixture.scope, &second[0])
+        .await
+        .expect("expired complete"));
+    assert_eq!(
+        fixture
+            .control
+            .fail(&fixture.scope, &second[0], "late failure", Utc::now())
+            .await
+            .expect("expired fail"),
+        OutboxFailOutcome::Stale
+    );
+    let third = fixture
+        .control
+        .claim_due(
+            &fixture.scope,
+            None,
+            "dispatcher-c",
+            Duration::from_secs(30),
+            1,
+        )
+        .await
+        .expect("reclaim expired lease");
+    assert_eq!(third.len(), 1);
+    assert!(fixture
+        .control
+        .complete(&fixture.scope, &third[0])
         .await
         .expect("complete"));
     assert!(fixture
@@ -1114,7 +1183,21 @@ struct RevisionChangingScorer {
 }
 
 impl SemanticScorer for RevisionChangingScorer {
-    async fn score(&self, request: &SemanticRoutingRequest) -> ScoringOutcome {
+    fn metadata(&self) -> ScorerMetadata {
+        ScorerMetadata {
+            adapter: "fake".to_owned(),
+            model: Some("fake-model".to_owned()),
+            prompt_version: Some("p0".to_owned()),
+            version: "v0".to_owned(),
+            latency_ms: Some(1),
+            usage: None,
+        }
+    }
+
+    async fn score(&self, input: &SemanticScoringInput) -> ScoringOutcome {
+        assert_eq!(input.company_id(), self.company_id);
+        assert_eq!(input.candidates().len(), input.request().candidates().len());
+        let request = input.request();
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         if call == 0 {
             activate_revision(&self.pool, self.company_id, &fixture_employee("zeynep")).await;
@@ -1134,14 +1217,7 @@ impl SemanticScorer for RevisionChangingScorer {
             .collect();
         ScoringOutcome {
             result: Ok(scores),
-            metadata: ScorerMetadata {
-                adapter: "fake".to_owned(),
-                model: Some("fake-model".to_owned()),
-                prompt_version: Some("p0".to_owned()),
-                version: "v0".to_owned(),
-                latency_ms: Some(1),
-                usage: None,
-            },
+            metadata: self.metadata(),
         }
     }
 }
@@ -1256,3 +1332,9 @@ async fn service_rescores_when_a_candidate_revision_changes_during_scoring() {
         .expect("route")
         .is_none());
 }
+
+#[path = "postgres_control_plane/semantic.rs"]
+mod semantic;
+
+#[path = "postgres_control_plane/claim_expiry.rs"]
+mod claim_expiry;
