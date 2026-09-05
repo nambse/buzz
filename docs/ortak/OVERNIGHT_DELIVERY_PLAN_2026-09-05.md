@@ -117,6 +117,42 @@ state is unchanged; notify on completion, meaningful failure or needed input.
 
 ## Integration checkpoint — 2026-09-05, early morning
 
+### Noon handoff — 12:00 Istanbul
+
+New unattended coding stopped at the owner-selected deadline. The app confirmed
+`ortak-morning-delivery` updated to PAUSED at12:00:14; its saved status was checked.
+All agent lanes finished, and no build/test/synthetic fixture remains running.
+The private API/relay/native app and all retained databases/evidence stay in place.
+
+Latest implementation commits are1dea0d0 (explicit credential references) and
+5c285d2 (fresh activation admission plus synthetic HTTP evidence). Private backend
+binaries remain at5c285d2 and native at the earlierd07f55c queue build. No push,
+PR, full repository CI or real employee/provider activation is claimed. The
+current CLI handoff supplies launch instructions, exact evidence and remaining
+production activation/cohort/reconciliation dependencies. Manual Work and the
+103-table database-only restore are proven; the real employee MVP remains open.
+
+### Explicit credential references — approximately11:52 Istanbul
+
+The control plane now has an environment-backed CredentialResolver source
+implementation with a finite caller-authorized reference/name map. Construction
+validates the entire allowlist without reading values. Verification denies
+unknown references before lookup and reads current selected availability without
+returning, logging or caching values. Six focused tests passed, including real
+public-path checks in fresh bounded child environments. The trait has no company
+or caller argument; all-target control-plane Clippy with warnings denied and
+workspace formatting also passed. Signed checkpoint1dea0d0 records this slice.
+The future runner must select an authorized resolver instance and align its
+mappings with the owning adapters. This port is not yet composed or
+deployed, and does not prove provider health or activate Ada.
+
+The private relay and API still run the5c285d2 backend; native runs thed07f55c
+queue package. After relay restart, a separate authenticated CLI channel listing
+passed against the fresh owner. The native TCP connection seen immediately after
+relaunch was absent at11:47; keep its UI/session/reconnect acceptance unverified.
+All backend listeners remain bound to127.0.0.1, and final Docker inventory found
+no remaining synthetic fixture containers or networks.
+
 ### Fresh activation admission — approximately11:36 Istanbul
 
 Migration56 and the provisioning repository now commit activation only against
@@ -146,8 +182,14 @@ pins and evidence are in `runtime/hermes-bridge/SYNTHETIC_HTTP.md`.
 
 Ada remains draft and routing stays disabled. Real provider selection, production
 provisioning composition and the signed Office roundtrip remain open. A live
-native process alone is not visual UI evidence; native reconnect after backend
-restart is being checked separately. Work continues to the authorized12:00 stop.
+native process alone is not visual UI evidence. The app was gracefully relaunched
+as PID18023/session64511 after the56 relay restart, with TCP to3038 established.
+The previous process did not recover that connection during observation; source
+review found an existing retry path but no proven bug without authenticated
+session/UI state. Automatic reconnect and native OS interaction remain unverified.
+The synthetic SDK metadata refusal belongs only to the fixture's extra audit
+hook, not a demonstrated production request failure; no SDK patch was added.
+The implementation is signed as5c285d2. Work continues to the authorized12:00 stop.
 
 ### Employee queue and safe community detach — approximately11:00 Istanbul
 

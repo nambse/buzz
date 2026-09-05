@@ -23,6 +23,12 @@ for that optional header; the strict audit caught and blocked it. No SDK request
 stream, transport or response method is replaced, and no model response is
 injected in memory. This seam is not a production runtime hardening fix.
 
+The subprocess refusal comes from this fixture's additional audit hook. The
+production worker does not install that hook; the observation establishes
+neither a production SDK request failure nor an employee tool escape. No
+production SDK monkeypatch was added. The existing tool-entry guards and
+container limits remain the production boundary.
+
 The controller runs with `--network none`; its real HTTP server/client communicate
 only over container loopback and require a fresh bearer. Workers and the fixture
 share a newly created, explicitly inspected **internal** Docker network with no
@@ -128,5 +134,5 @@ Frozen source SHA256 values:
 | `tests/test_synthetic_http_check.py` | `fd91eea0a8d5e46bec48f35634acb9bda13792bb81b2e1f68458691b56ad3ed3` |
 
 This is synthetic execution-boundary evidence. Actual selected-provider health,
-real model quality, production OS-header hardening, activation, runtime routing,
+real model quality, activation, runtime routing,
 and a signed Office roundtrip remain separate gates.
