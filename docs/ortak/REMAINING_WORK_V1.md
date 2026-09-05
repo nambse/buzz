@@ -8,6 +8,11 @@ Supersedes the per-milestone "Implementation state" notes in `IMPLEMENTATION_PLA
 
 Planning style: dependency-ordered slices with concrete acceptance gates; no percentages, no dates.
 
+Execution update: `OVERNIGHT_DELIVERY_PLAN_2026-09-05.md` adds the owner's
+morning target, MVP-first integration order, parallel ownership, and Codex
+coding authorization. `TAKEOVER_2026-09-05.md` supplies the fresh-task context.
+The dependency gates and full v0 scope below remain in force.
+
 ## 1. Where the code actually is
 
 The working tree contains solid library foundations and one default-off production seam. There is no end-to-end company loop yet. Every path below was confirmed by reading the source on 2026-09-05. Deployed state (the Ortak Runtime host, Hermes, Honcho, signer) was inspected read-only by the operator on 2026-09-05; the observed facts are in `RUNTIME_DISCOVERY_2026-09-05.md` and are partial slice A discovery, not adoption acceptance.
