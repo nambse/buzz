@@ -9,8 +9,10 @@ external resource was activated.
 
 The current adapters do not yet form an executable production activation path.
 There are real Hermes execution, Honcho memory, and Office delivery transports,
-but the provisioning Office identity and credential ports have only fake
-implementations. The saga also applies one acquisition mode to every resource,
+but the provisioning Office identity port still has only a fake implementation.
+An explicit environment-backed credential-reference resolver now exists in
+source; no production saga composes it with the owning adapters. The saga also
+applies one acquisition mode to every resource,
 while the currently supported Hermes and Honcho activation paths require
 different modes.
 
@@ -20,7 +22,7 @@ different modes.
 | --- | --- |
 | Provisioning Office identity | [`OfficeIdentityAdapter`](../../crates/ortak-control/src/office_identity.rs) requires signer proof, membership create/adopt, membership health, profile publication and owned-membership compensation. The only implementation found in repository Rust source is [`FakeOfficeIdentityAdapter`](../../crates/ortak-control/src/fakes.rs). |
 | Office delivery transport | [`EnvOfficeSigner` and `HttpOfficePublisher`](../../crates/ortak-office/src/transport.rs) implement delivery-time `OfficeSigner`/`OfficePublisher`. They load an explicit company/employee/key/reference allowlist and send authorized frozen events. They do **not** implement provisioning membership or profile-publication semantics. Their existence cannot satisfy the missing Office identity port. |
-| Provisioning credential resolver | [`CredentialResolver`](../../crates/ortak-control/src/credentials.rs) exposes authorized reference existence without a secret value. Only `FakeCredentialResolver` implements that port. Individual production adapters already resolve selected environment secrets, but that is not a production implementation of the saga resolver. |
+| Provisioning credential resolver | [`EnvCredentialResolver`](../../crates/ortak-control/src/credentials/environment.rs) implements the [`CredentialResolver`](../../crates/ortak-control/src/credentials.rs) port with at most128 explicit opaque-reference/environment-name mappings. It validates configuration without reading values, denies unknown references before lookup and checks current presence without returning values. The caller must choose an already-authorized instance; the trait has no principal/company input. This source implementation is not yet composed into a production saga, and its mappings must agree with the adapters that actually use those references. |
 | One acquisition mode | [`ProvisioningOperation::resource_mode`, `execute`, `check_ownership`, and `activate`](../../crates/ortak-control/src/provisioning.rs) send the same create/adopt mode to runtime, memory and Office. Update uses the manifest's single mode. Ownership contradicting that mode is rejected. [`activate_revision`](../../crates/ortak-control/src/postgres/provisioning.rs) writes the same mode to the revision and all three resource bindings. |
 | Hermes provisioning | [`HermesAdapter::ensure_profile`](../../crates/ortak-runtime/src/hermes.rs) supports **Adopt only**, verifies the configured profile, and returns adopted ownership. Create returns unsupported `ProfileCreate`; profile deletion is unsupported. An isolated prepared profile can be adopted without touching an old profile. |
 | Honcho provisioning and health | [`HonchoMemoryAdapter::ensure_resources`, `health`, `probe_capabilities`, and witness checks](../../crates/ortak-memory/src/lib.rs) require the request mode to equal the configured binding mode. Adopt performs native list-only inspection, returns adopted resources, and cannot obtain the required Recall/Remember witness. Create can establish extension ownership; healthy executable memory additionally requires explicit roundtrip validation. |
@@ -56,7 +58,8 @@ saga modes together. This is a recommendation, not implemented behavior.
    steps. Preserve their exact public bindings, resource IDs and receipt keys.
    The activation operation adopts them because that operation did not create
    them. Never select the preserved external Cem/Zeynep resources implicitly.
-2. Add production Office identity and credential-reference implementations,
+2. Add the production Office identity implementation and compose the explicit
+   environment-backed credential-reference resolver,
    bound at construction to one company/community, a finite employee and
    channel cohort, canonical relay origin, and opaque credential references.
    Prove the exact signer key and current membership, publish the actual
@@ -136,6 +139,19 @@ expiry while waiting for an operation row, and expiry at the final success write
 with complete rollback. Migration and desired-schema parity also passed for 0056.
 These are production repository tests using synthetic adapter facts, not proof
 that the missing production provisioning ports are composed or deployed.
+
+The later environment-reference implementation passed six focused tests in0.05s;
+control-plane all-target Clippy with warnings denied passed in39.51s and workspace
+formatting passed. The earlier25 control cases were not rerun for this addition.
+They exercise full-map validation before any lookup, denied/empty allowlists,
+changing availability without cached status, sanitized non-Unicode failure, and
+real public construction/verification in bounded child processes with only
+explicit synthetic environment variables. No process-global environment is
+mutated by the tests. Duplicate environment names are deliberately refused as
+part of the documented one-to-one mapping policy. This checks local existence,
+not provider health, secret format, tenant identity or deployed composition.
+The deployed backend remains the preceding5c285d2 build; this resolver has not
+been wired into or started by it.
 
 The remaining end-to-end acceptance proof must drive the real saga over a fresh
 disposable employee with no fake adapters or hand-inserted active revision. It
