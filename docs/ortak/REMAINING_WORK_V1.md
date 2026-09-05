@@ -38,7 +38,7 @@ semantic provider/model credential is selected; these are implementation tests,
 not the slice D deployed relevance-quality gate.
 
 A database-only private backup has been restored into a separate verification
-database with matching migrations, schema and100 table counts. This does not
+database with matching migrations through0054, schema and103 table counts. This does not
 cover coordinated full-stack backup, object storage, Honcho, bridge state,
 upgrade or legacy-prune gates. Work execution/artifacts and the provisioning
 dashboard also remain open. The usable-MVP and full-v0 acceptance gates below
@@ -49,8 +49,9 @@ project roles, atomic operation receipts, review/criteria/approval APIs and a
 tested desktop surface. Fourteen core PostgreSQL tests, ten signed API
 PostgreSQL tests and the three-case headless surface suite passed; final Work
 screenshots were checked. The private database upgraded through0054 and the
-native package rebuilt/restarted. The real private manual workflow check is
-pending; this does not satisfy E's dispatch/artifact acceptance gate. See
+native package rebuilt/restarted. The real private manual workflow passed
+creation→review→completion and unchanged replay, with eight operation receipts
+and zero runtime dispatches; this does not satisfy E's dispatch/artifact acceptance gate. See
 [`WORK_API_E1.md`](WORK_API_E1.md) for the exact manual contract.
 
 ### Initial inventory

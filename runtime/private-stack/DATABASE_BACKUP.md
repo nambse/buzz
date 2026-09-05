@@ -106,6 +106,18 @@ ORTAK_BACKUP_SQL_TEST_DATABASE=ortak_verify_<32_lowercase_hex_from_manifest> \
 
 ## Actual database verification receipt — 2026-09-05
 
+The later10:14 Istanbul invocation also completed with `status: verified` after
+the0054 upgrade and retained manual Work workflow. Directory:
+`/private/tmp/ortak-private-20260905/backups/20260905T071413Z_9605df7a4ddc4795a342e62090b381fd`.
+Its523,975-byte archive has SHA256
+`1cb330c41326efbaac1179661e542061bf9917134a7997034feb940def0bf265`.
+The retained restore is `ortak_verify_89a61d38d0e84f69a648682933a20de1`.
+All103 table counts and migrations through0054 matched, including one project,
+one completed item, seven history rows and eight operation receipts. The schema
+SHA256 is `c545e95082c57a2cc77df3574c9e69af1cadf1be45c091ee7f7f9d93d8f4f5cc`.
+No runs or routing dispatches exist; the sole employee remains draft. This
+supersedes the older schema/count observation below without removing its backup.
+
 The invocation beginning at 08:48:01 Istanbul completed with `status: verified`
 and `database_only: true`. Its private directory is
 `/private/tmp/ortak-private-20260905/backups/20260905T054801Z_2d3955c2f811470b919efd32654d4555`.

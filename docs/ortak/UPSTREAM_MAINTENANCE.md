@@ -52,6 +52,42 @@ downgrade is not assumed safe.
 
 ## Checkpoint: 2026-09-05
 
+### Later private integration checkpoint, approximately10:25 Istanbul
+
+Official Git refs and bounded GitHub compare responses were checked again before
+promoting further local changes. Buzz `main` is still `f038cbbb0d4092a72ffd93f17916f84d2b39bb43`.
+Hermes `main` is now `5ac75e91e2012497db474835a58e0139e89047cd`, eighteen commits
+ahead of the earlier observed `f159e581c7afd22a5c94652c569e3859f1b994d2`.
+Honcho `main` is `be54355545b64ddb10203829d323861f52423685`, fourteen commits
+ahead of the selected3.1.1 commit. Annotated tag dereferences still resolve to
+Hermes `29112bef099274229cadff79cdff7bf7b99c4b77` and Honcho
+`5d992bc65afcfbc05a5911ab4edbaa88ef64c690`; tag object IDs are not source commits.
+Honcho's GitHub latest-release endpoint returned404, so it supplied no latest
+release evidence at this check.
+
+Decision: **defer these main-branch deltas**, retain tested pins. The bounded
+Hermes review inspected the new Relay streaming accumulator, browser/search
+toolset membership change and Electron window-open denial patch. The desktop
+patch applies to upstream Electron surfaces, which the selected headless
+worker does not launch. The accumulator protects Relay's recorded streaming
+response; any future import still needs Ortak journal/output and permission
+checks. The current worker permits no tools. This is a three-file review,
+not a full review of the eighteen commits. Honcho's comparison metadata shows
+search, Qdrant, harness, MCP, telemetry and sandbox changes; their implementation
+has not passed the extension's atomicity and scoped-memory gates.
+
+The actual private artifacts remain the Hermes worker
+`sha256:623fae9e3b38c75bc3cb94f73bc3d1c303bc3ed6a77765eb51fc17b54cc90b18`
+and Honcho extension
+`sha256:cc8b4a29c0adda08978886e205ff5c5ff0a13923e4ed15e1626b24194d0c0c21`.
+No floating upstream was imported, built or deployed. Honcho build-helper/context
+hardening after that artifact remains separately documented as not rebuilt.
+
+Sources: [Hermes observed delta](https://github.com/NousResearch/hermes-agent/compare/f159e581c7afd22a5c94652c569e3859f1b994d2...5ac75e91e2012497db474835a58e0139e89047cd),
+[Honcho selected-to-observed delta](https://github.com/plastic-labs/honcho/compare/5d992bc65afcfbc05a5911ab4edbaa88ef64c690...be54355545b64ddb10203829d323861f52423685).
+
+### Earlier discovery observation
+
 - Buzz upstream `main` remained at
   [`f038cbbb0d4092a72ffd93f17916f84d2b39bb43`](https://github.com/block/buzz/commit/f038cbbb0d4092a72ffd93f17916f84d2b39bb43).
   GitHub's comparison with the already reviewed checkpoint was identical

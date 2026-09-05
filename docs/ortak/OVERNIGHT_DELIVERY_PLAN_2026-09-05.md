@@ -145,12 +145,31 @@ private native package rebuilt successfully (43.53s Rust build plus production
 frontend), restarted as PID49854/session82657, and its connection to the private
 relay3038 is established. OS-level visual interaction remains unverified.
 
-The real private manual Work workflow and upgraded database backup/restore
-are the next checks. Ada remains draft, central routing remains disabled, and
+Follow-up at approximately10:15: signed checkpoint `2eac15f` records the
+297-file integration. Both workspace and Tauri formatting checks pass; the
+295 present source files passed the pre-stage private-value/binary audit.
+Generated browser assets and all private state stay outside Git. No push occurred.
+
+The actual private manual Work script passed first traversal (version1→7) and
+an unchanged replay (7→7). It observed draft assignment refusal, acceptance and
+required-human-approval completion guards, exact-operation replays/conflicts,
+and seven dense attributed history rows. Read-only SQL confirmed one project,
+one item, eight operation receipts, zero runs/outbox/routing decisions, and
+Ada draft with no active revision. Script interruption/transport fixtures pass
+all five tests. These are explicit retained manual test records.
+
+The upgraded database backup restored into a new retained verification database:
+all103 public table counts, migration checksums through0054 and the selected
+schema catalog matched. Receipt directory is
+`/private/tmp/ortak-private-20260905/backups/20260905T071413Z_9605df7a4ddc4795a342e62090b381fd`;
+the archive is523,975 bytes with SHA256
+`1cb330c41326efbaac1179661e542061bf9917134a7997034feb940def0bf265`.
+This remains a database-only backup. Ada remains draft, central routing remains disabled, and
 no real model/provider or semantic run has occurred. Work execution, artifacts,
-sharing, realtime delivery and provisioning remain open. A signed integration
-checkpoint is being prepared; this entry does not claim a push or full-v0
-completion. The older sections below retain their historical evidence.
+sharing, realtime delivery and provisioning remain open. The next bounded E
+substep is an authorized read-only employee assignment queue. This entry does
+not claim a push or full-v0 completion. The older sections below retain their
+historical evidence.
 
 ### Semantic evidence and operations checkpoint
 
