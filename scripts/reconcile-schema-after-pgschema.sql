@@ -207,6 +207,8 @@ END $$;
 
 
 
+
+
 -- pgschema reconciles DDL but does not apply seed DML or table storage
 -- parameters from schema/schema.sql. Restore those parts of the desired-state
 -- contract explicitly and fail the bootstrap if the live catalog disagrees.
@@ -335,5 +337,25 @@ DO $$ BEGIN
        OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid='work_api_operations'::regclass
         AND tgname='work_api_operation_immutable' AND tgenabled='O') THEN
         RAISE EXCEPTION 'ortak: Work API authority or receipt guard is missing';
+    END IF;
+END $$;
+
+-- Migration0055: company Work evidence survives a fenced community purge.
+-- pgschema must retain both the executor-only guard and its commit-time proof.
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid='project_api_bindings'::regclass
+        AND tgname='project_api_binding_immutable' AND tgenabled='O'
+        AND tgfoid='ortak_guard_project_api_binding()'::regprocedure)
+       OR NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid='project_api_bindings'::regclass
+        AND tgname='project_api_binding_purge_at_commit' AND tgenabled='O'
+        AND tgfoid='ortak_project_binding_purge_at_commit()'::regprocedure
+        AND tgdeferrable AND tginitdeferred)
+       OR NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='project_access_grants'::regclass
+        AND conname='project_access_grants_company_id_project_id_fkey'
+        AND contype='f' AND confrelid='projects'::regclass AND convalidated)
+       OR NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='work_api_operations'::regclass
+        AND conname='work_api_operations_company_id_project_id_fkey'
+        AND contype='f' AND confrelid='projects'::regclass AND convalidated) THEN
+        RAISE EXCEPTION 'ortak: project binding purge or retained evidence guard is missing';
     END IF;
 END $$;

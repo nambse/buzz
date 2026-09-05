@@ -67,3 +67,5 @@ pub use postgres::{
     ApiProject, ApiProjectCreation, ApiProjectPage, ApiWorkPrincipal, AuthorizedWork, ProjectRole,
     WorkMutation,
 };
+
+pub use postgres::{EmployeeWorkQueueEntry, EmployeeWorkQueuePage};

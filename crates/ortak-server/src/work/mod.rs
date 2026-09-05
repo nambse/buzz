@@ -1,6 +1,7 @@
 //! Manual Work operations over the atomic, project-authorized core facade.
 mod dto;
 mod projection;
+mod queue;
 mod routes;
 
 pub(crate) use routes::router;

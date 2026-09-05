@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: ".",
-  testMatch: ["ortak.spec.mjs", "work.spec.mjs"],
+  testMatch: ["ortak.spec.mjs", "work.spec.mjs", "employee-work.spec.mjs"],
   timeout: 30_000,
   workers: 1,
   reporter: "list",

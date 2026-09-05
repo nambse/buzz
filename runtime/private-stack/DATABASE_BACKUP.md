@@ -143,3 +143,16 @@ archive, manifest and verification database remain retained. Neither attempt
 restored over, dropped or changed the original `ortak` database or any older
 external stack. The successful database receipt does not cover the other stores,
 secret recovery, independent-host recovery, service restart or employee activation.
+
+## Migration55 private checkpoint
+
+The final55 private database backup restored successfully into the new retained
+`ortak_verify_bab3b49077284126a479dc84b19c79d7` verification database. Receipt:
+`/private/tmp/ortak-private-20260905/backups/20260905T075300Z_efb5da81275f4a688644bce108605676/manifest.json`.
+The archive has528329 bytes and SHA256
+`8390c1772538316acea047cb3e42f9114e62c8f4274e478b2618e77cb8fcbf51`.
+All103 table counts, migration checksums through55 and the schema matched.
+The preserved scope contains one project, one completed manual item, eight
+operation receipts, seven history rows and zero runs/dispatches/decisions.
+This is database-only evidence; previous archives and verification databases
+remain retained.

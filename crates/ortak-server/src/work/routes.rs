@@ -24,6 +24,10 @@ type Params<T> = std::result::Result<Query<T>, QueryRejection>;
 
 pub(crate) fn router() -> Router<ApiState> {
     Router::new()
+        .route(
+            "/api/v1/employees/{employee_id}/work-items",
+            get(super::queue::employee_queue),
+        )
         .route("/api/v1/projects", get(projects).post(create_project))
         .route("/api/v1/projects/{project_id}", get(project))
         .route(

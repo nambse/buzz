@@ -10,6 +10,12 @@ use uuid::Uuid;
 /// variant, so existence in a foreign company is never observable.
 #[derive(Debug, Error)]
 pub enum WorkError {
+    /// Unknown or ungranted employee queue; neither exposes a foreign employee.
+    #[error("employee {employee_id} is unavailable in this audience")]
+    EmployeeNotFound {
+        /// Requested employee.
+        employee_id: EmployeeId,
+    },
     /// The authenticated human lacks the requested action on a visible project.
     #[error("Work action is not authorized")]
     AccessDenied,

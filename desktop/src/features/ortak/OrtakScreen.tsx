@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { signRelayEvent } from "@/shared/api/tauri";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Badge } from "@/shared/ui/badge";
@@ -14,6 +14,7 @@ import {
 import { Skeleton } from "@/shared/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs";
 import { createOrtakClient, OrtakApiError } from "./client";
+import { EmployeeWorkQueue } from "./work/EmployeeWorkQueue";
 import { WorkScreen } from "./work/WorkScreen";
 import { RunPanel } from "./RunPanel";
 import type { EmployeePage, RunPage } from "./types";
@@ -27,6 +28,8 @@ export function OrtakScreen({ origin }: { origin: string }) {
   const [runs, setRuns] = useState<RunPage | null>(null);
   const [employeeAfter, setEmployeeAfter] = useState<string | undefined>();
   const [runCursor, setRunCursor] = useState<string | undefined>();
+  const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
+  const selectedEmployeeButton = useRef<HTMLButtonElement | null>(null);
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
   const [tab, setTab] = useState("employees");
   const [workOpened, setWorkOpened] = useState(false);
@@ -73,6 +76,7 @@ export function OrtakScreen({ origin }: { origin: string }) {
           setEmployees(null);
           setRuns(null);
           setSelectedRun(null);
+          setSelectedEmployee(null);
         }
         failures += 1;
         if (!revoked && failures < 5)
@@ -88,6 +92,9 @@ export function OrtakScreen({ origin }: { origin: string }) {
       if (timer) clearTimeout(timer);
     };
   }, [client, employeeAfter, runCursor, refresh]);
+  const queueEmployee = employees?.employees.find(
+    (employee) => employee.employee_id === selectedEmployee,
+  );
   const selected = runs?.runs.find((run) => run.run_id === selectedRun);
   const name =
     employees?.employees.find(
@@ -165,7 +172,19 @@ export function OrtakScreen({ origin }: { origin: string }) {
                       Saved status does not confirm runtime health.
                     </p>
                   </CardContent>
-                  <CardFooter>
+                  <CardFooter className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      aria-label={`View assigned work for ${employee.name ?? "employee"}`}
+                      aria-pressed={selectedEmployee === employee.employee_id}
+                      onClick={(event) => {
+                        selectedEmployeeButton.current = event.currentTarget;
+                        setSelectedEmployee(employee.employee_id);
+                      }}
+                    >
+                      View assigned work
+                    </Button>
                     {current ? (
                       <Button
                         variant="outline"
@@ -191,6 +210,17 @@ export function OrtakScreen({ origin }: { origin: string }) {
               );
             })}
           </div>
+          {queueEmployee && !accessRevoked ? (
+            <EmployeeWorkQueue
+              key={`${origin}:${queueEmployee.employee_id}`}
+              client={client}
+              employee={queueEmployee}
+              onClose={() => {
+                setSelectedEmployee(null);
+                selectedEmployeeButton.current?.focus();
+              }}
+            />
+          ) : null}
           {employees?.employees.length === 0 ? (
             <Alert role="status">
               <AlertDescription>

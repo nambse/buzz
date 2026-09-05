@@ -375,3 +375,6 @@ mod identity;
 
 #[path = "authorized/receipts.rs"]
 mod receipts;
+
+#[path = "authorized/queue.rs"]
+mod queue;

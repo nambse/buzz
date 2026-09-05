@@ -56,7 +56,8 @@ impl From<ortak_work::WorkError> for ApiError {
         let conflict = || Self(StatusCode::CONFLICT, "work_conflict");
         match error {
             WorkError::AccessDenied => Self(StatusCode::FORBIDDEN, "forbidden"),
-            WorkError::ProjectNotFound { .. }
+            WorkError::EmployeeNotFound { .. }
+            | WorkError::ProjectNotFound { .. }
             | WorkError::WorkItemNotFound { .. }
             | WorkError::SourceMessageNotDecided { .. } => Self::not_found(),
             WorkError::InvalidQuery(_) => Self::invalid(),

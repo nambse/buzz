@@ -190,7 +190,7 @@ Outcome: conversations become assignable, executable, reviewable work with linke
 Scope:
 
 - Authenticated Work/Projects APIs over `WorkService`; `WorkActor::Human` derived from the authenticated principal; approval resolution authorized by role.
-- Employee work queues (the `work_assignments` active index exists; the query does not).
+- Read-only manual employee assignment queues are implemented over current project/channel/source audiences, with scoped pagination and no execution claim; all five core PostgreSQL queue regressions and both signed HTTP queue cases passed. Dispatch-linked execution queues remain part of the later Work execution slice.
 - Dispatch-from-work: assignment creates a run linked through `runs.work_item_id`. Successful runtime completion moves the item **toward `REVIEW`** and links the terminal output; it does not complete the item and does not satisfy acceptance criteria or approval gates. Only an authorized human review does.
 - `artifacts` relation and storage (Blossom/S3 via `buzz-media` port), artifact-created `RunEvent` kind, review permissions.
 - Editing titles/descriptions/criteria, reassignment, assignment release, dependency removal, parent/child decomposition.

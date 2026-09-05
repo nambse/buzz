@@ -198,3 +198,12 @@ export interface WorkItem extends WorkSummary {
   history_truncated: boolean;
   execution_available: false;
 }
+
+export interface EmployeeWorkPage {
+  employee_id: string;
+  work_items: (WorkSummary & {
+    assignment_role: "owner" | "contributor" | "reviewer";
+  })[];
+  next_cursor: string | null;
+  execution_available: false;
+}

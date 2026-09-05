@@ -1,6 +1,6 @@
 use super::*;
 
-async fn source_message(f: &Fixture, channel: Uuid) -> String {
+pub(super) async fn source_message(f: &Fixture, channel: Uuid) -> String {
     let event = EventBuilder::new(Kind::Custom(9), "Canonical source fixture")
         .tags([
             Tag::parse(["h", &channel.to_string()]).unwrap(),
@@ -31,7 +31,12 @@ async fn source_message(f: &Fixture, channel: Uuid) -> String {
     event.id.to_hex()
 }
 
-async fn trusted_item(f: &Fixture, project: Uuid, title: &str, source: Option<String>) -> Uuid {
+pub(super) async fn trusted_item(
+    f: &Fixture,
+    project: Uuid,
+    title: &str,
+    source: Option<String>,
+) -> Uuid {
     let scope = f
         .control
         .resolve_company_for_community(f.community)

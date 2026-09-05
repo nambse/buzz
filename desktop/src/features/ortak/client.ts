@@ -2,6 +2,7 @@ import type {
   ActivityPage,
   Cancellation,
   EmployeePage,
+  EmployeeWorkPage,
   RunDetailResponse,
   RunPage,
   ProjectPage,
@@ -120,6 +121,11 @@ export function createOrtakClient(
     return (await boundedJson(response)) as T;
   }
   return {
+    employeeWork: (employeeId: string, signal: AbortSignal, cursor?: string) =>
+      request<EmployeeWorkPage>(
+        `/api/v1/employees/${encodeURIComponent(employeeId)}/work-items?limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+        signal,
+      ),
     projects: (signal: AbortSignal, cursor?: string) =>
       request<ProjectPage>(
         `/api/v1/projects?limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,

@@ -1,11 +1,11 @@
 # Manual Work API E1
 
 Status (2026-09-05): manual E1 implemented and verified through actual
-PostgreSQL, signed HTTP, and headless desktop tests. The native package is built
-and its private app start is verified; root TCP verification and the actual live
-manual Work workflow remain pending. No native visual/OS interaction is claimed. Runtime
-dispatch, artifact access, project sharing controls and realtime delivery remain
-later integration gates.
+PostgreSQL, signed HTTP, headless desktop tests, and the actual live private-stack
+manual Work workflow, including an idempotent replay. The native package is built
+and its private app start and loopback relay TCP connection are verified. No native visual/OS interaction is claimed. Runtime dispatch,
+artifact access, project sharing controls and realtime delivery remain later
+integration gates.
 
 ## Authority
 
@@ -121,6 +121,79 @@ Deployment evidence recorded after those tests: the final native Rust package
 build passed in 43.53 seconds with the production frontend/protected-mode matrix
 also passing, and the private app was restarted. The fresh private database has
 migrations 0053/0054 applied, and the refreshed API passes its seven original
-network checks. Root TCP verification of the restarted app and an actual live
-manual Work workflow are separate pending checks; these receipts do not mark
-runtime dispatch, artifacts, or sharing as implemented.
+network checks. Root TCP verification of the restarted app remains a separate
+pending check; these receipts do not mark runtime dispatch, artifacts, or sharing
+as implemented.
+
+The actual live Work script then passed its first execution and its repeat
+against the fresh private stack. The first execution exercised its negative
+checks and advanced the work item from version 1 to 7. Replay retained version 7,
+with one project, one work item and eight operation receipts. The tested scope
+retained zero runs, outbox entries and routing decisions, and SQL confirmed Ada
+remained draft. This is live evidence for manual persistence and idempotency,
+with no employee execution claim. A subsequent database-only backup through
+migration 0054 restored into a fresh verification database and matched all 103
+tables; it does not establish a full-stack backup gate.
+
+
+## Employee manual assignment queue
+
+`GET /api/v1/employees/{employee_id}/work-items?limit=25&cursor=...` returns
+`employee_id`, `work_items`, `next_cursor`, and `execution_available: false`.
+Each entry contains the same safe Work summary as a project list plus
+`assignment_role` (`owner`, `contributor`, or `reviewer`). The existing assignment
+primary key allows one role per employee and work item, so entries are unique.
+No project descriptions, history, runtime state or artifacts are expanded.
+
+The fixed query includes every active assignment role in active projects and
+excludes completed/cancelled work and released assignments. An inactive, paused
+or disabled employee remains inspectable: this read-only queue describes saved
+manual assignments and does not test readiness or initiate execution. The target
+employee must exist in the current company and the configured employee cohort;
+otherwise the response is404. Every returned item additionally requires the
+current human's durable project grant, configured channel audience, live channel
+membership and canonical source visibility. Inaccessible entries are omitted
+before pagination; losing all project/channel access produces an empty page.
+
+Pages contain at most25 entries, ordered by work creation time and UUID descending.
+The cursor is bound to company/community, authenticated principal, global role,
+configured channel and employee audiences, requested employee, and this fixed
+query policy. It is not an authority token; every continuation reauthorizes its
+rows. Reusing it with another context returns400. Selected project, work and
+assignment rows are locked and rechecked, including the lookahead. A concurrent
+change detected after selection refuses the page (404 for lost project access,
+409 for changed eligibility), so the client must refresh from the first page.
+The existing5-second operation,500ms lock,2-second SQL and256KiB response bounds
+apply. This endpoint accepts no state filter, write body or dispatch option.
+
+All five core queue PostgreSQL tests passed within the full19-case Work suite
+(6.55s); both signed queue tests passed within the full12-case API suite (5.93s).
+The four-case headless suite passed in17.0s and the assigned-work screenshot was
+visually checked. The rebuilt private API also returned the expected empty Ada
+queue with `execution_available:false`, rejected a non-cohort employee, and
+passed all nine live checks. Ada remains draft and has no assignments.
+
+## Community detach and final private checkpoint
+
+Migration0055 permits project API bindings to detach only in an approved,
+leased community deletion. A deferred guard rechecks the real executor at the
+final purge commit. Company-owned projects, grants, items, history and operation
+receipts are retained. The three new actual deletion regressions passed in2.45s;
+the20 existing deletion PostgreSQL cases passed in7.19s. The first scratch
+candidate exposed a PL/pgSQL variable ambiguity; the corrected final migration
+was tested on a new database, without rewriting an applied checksum.
+
+Full community removal may fail API admission with503 before project lookup;
+binding absence in a still-serving Office scope is404. Both refuse access.
+Neither retained grants nor replay receipts restore detached API authority.
+
+The final55 schema matched actual pgschema plus twice-run reconciliation on a
+fresh database and the production migrator on another fresh database. The
+bounded probe receipt is recorded in `runtime/private-stack/SCHEMA_PARITY.md`.
+Clippy for buzz-db/ortak-work/ortak-server all targets passed. The private
+relay/API/admin were rebuilt; private migrations through55 applied, nine live
+API checks passed, and the manual Work replay retained version7. A database-only
+backup restored into a new verification database with matching103 tables,
+migration checksums and schema. Native queue rebuild passed in43.77s after
+clearing only regenerable task artifacts; its production frontend matrix also
+passed. Native OS visual interaction remains unverified.

@@ -105,11 +105,32 @@ try {
   assert.equal(detail.status, 200);
   assert.equal(detail.body.runtime_health, "not_probed");
   assert.equal(detail.body.current_run, null);
+  const queuePath = `${detailPath}/work-items?limit=25`;
+  const queue = await request(queuePath, {
+    Authorization: authorization(queuePath),
+  });
+  assert.equal(queue.status, 200);
+  assert.equal(queue.headers.get("cache-control"), "no-store");
+  assert.deepEqual(queue.body, {
+    employee_id: "ada-private",
+    work_items: [],
+    next_cursor: null,
+    execution_available: false,
+  });
   const forbiddenPath = `${path}/ungranted-employee`;
   assert.equal(
     (
       await request(forbiddenPath, {
         Authorization: authorization(forbiddenPath),
+      })
+    ).status,
+    404,
+  );
+  const forbiddenQueuePath = `${forbiddenPath}/work-items`;
+  assert.equal(
+    (
+      await request(forbiddenQueuePath, {
+        Authorization: authorization(forbiddenQueuePath),
       })
     ).status,
     404,
@@ -139,6 +160,8 @@ try {
         "signed_company_directory",
         "draft_not_active",
         "runtime_health_honest",
+        "manual_employee_queue",
+        "queue_employee_audience",
         "nip98_replay",
         "exact_signed_url",
         "employee_audience",

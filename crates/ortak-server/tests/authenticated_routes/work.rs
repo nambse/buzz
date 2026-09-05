@@ -365,3 +365,6 @@ async fn explicit_project_roles_and_creation_permission_cannot_be_bypassed_by_gl
     );
     assert_eq!(runtime_counts(&f).await, (0, 0, 0));
 }
+
+#[path = "work/queue.rs"]
+mod queue;

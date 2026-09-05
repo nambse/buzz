@@ -117,6 +117,32 @@ state is unchanged; notify on completion, meaningful failure or needed input.
 
 ## Integration checkpoint — 2026-09-05, early morning
 
+### Employee queue and safe community detach — approximately11:00 Istanbul
+
+The final55 candidate adds scoped read-only employee assignments, with all
+permission/source filters before pagination and current-state checks after row
+waits. Full Work19PG, signed API12PG, four headless scenarios and scoped
+Clippy passed. The assigned-work screenshot was inspected. Three real deletion
+regressions plus20 retained deletion cases prove approved detach, independent
+company history retention and expired-executor rollback.
+
+Actual pgschema and migration55 catalogs matched in two fresh retained databases;
+reconciliation ran twice. The private relay/API/admin were rebuilt, the private
+DB upgraded through55, and nine live API checks including Ada's empty manual
+queue passed. The unchanged Work replay retained version7. The55 database-only
+backup restored into a fresh verification DB with matching103 tables/schema/
+migration checksums. Receipt details are in the Work, schema parity and database
+backup runbooks. The private native queue package built in43.77s after removing
+only regenerable task artifacts to resolve disk pressure; its production
+frontend matrix passed. No native OS visual interaction is claimed.
+
+The complete real-provider employee loop remains open. An independent review
+recorded the missing production provisioning identity/credential ports and the
+Hermes/Honcho acquisition-mode mismatch in `ACTIVATION_COMPOSITION_GAPS.md`.
+Cached activation-evidence freshness is the next bounded implementation being
+prepared; a separate real-SDK/controller test uses an explicit synthetic local
+provider and will remain fixture evidence. Ada is draft; no activation occurred.
+
 ### Manual Work and private upgrade checkpoint — approximately10:10 Istanbul
 
 Manual E1 now has authenticated project creation, durable project roles,

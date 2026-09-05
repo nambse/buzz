@@ -312,8 +312,11 @@ checks. Root TCP verification and the actual live manual Work workflow remain
 pending; no native visual/OS interaction is claimed. See `WORK_API_E1.md` for
 the exact boundary.
 
-Not yet delivered: Work WebSocket/realtime projections; employee work queues
-(the `work_assignments` active index exists, the query does not); a desktop
+Read-only manual employee assignment queues now have scoped core and signed
+API queries; all five core PostgreSQL queue tests and both signed HTTP queue
+cases passed. This does not implement dispatch from an assignment.
+
+Not yet delivered: Work WebSocket/realtime projections; a desktop
 conversation-promotion control; dispatch-from-work (creating a run for an
 assignment and linking it through `runs.work_item_id`); artifact attachments and
 artifact storage (no `artifacts` relation yet); assignment release, dependency

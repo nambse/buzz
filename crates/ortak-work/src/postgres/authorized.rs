@@ -6,6 +6,8 @@ use std::time::Duration;
 
 mod authority;
 mod queries;
+mod queue;
+pub use queue::{EmployeeWorkQueueEntry, EmployeeWorkQueuePage};
 mod receipt;
 mod types;
 use receipt::fingerprint;

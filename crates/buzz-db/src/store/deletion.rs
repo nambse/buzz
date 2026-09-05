@@ -70,6 +70,7 @@ pub const EXPECTED_SCOPED_TABLES: &[&str] = &[
     "moderation_reports",
     "office_company_bindings",
     "parameterized_event_watermarks",
+    "project_api_bindings",
     "pubkey_allowlist",
     "push_leases",
     "push_match_queue",
@@ -105,6 +106,7 @@ pub const PURGE_SCOPED_TABLES: &[&str] = &[
     "push_match_queue",
     "push_leases",
     "relay_invites",
+    "project_api_bindings",
     "office_company_bindings",
     "delivery_log",
     "events",
@@ -1728,6 +1730,19 @@ impl DeletionStore {
         validate_catalog_on(&mut tx).await?;
         verify_lease_and_fence(&mut tx, token, DeletionStage::BindingsRemoved, generation).await?;
         set_executor_gucs(&mut tx, token.community_id, generation).await?;
+        // The Work binding has a narrower deletion contract: keep the company
+        // history, but detach API access only under this exact approved lease.
+        // Its deferred guard also checks the final tombstone and live deadline.
+        sqlx::query(
+            "SELECT set_config('buzz.deletion_request_id', $1, true), \
+                    set_config('buzz.deletion_lease_owner', $2, true), \
+                    set_config('buzz.deletion_lease_generation', $3, true)",
+        )
+        .bind(token.request_id.to_string())
+        .bind(&token.owner)
+        .bind(token.generation.to_string())
+        .execute(&mut *tx)
+        .await?;
         // Migration 0011 fences hard deletion of NIP-RS rows against legacy
         // writers. Whole-community deletion is an intentional hard-delete path,
         // and the transaction is already bound to an approved, fenced tenant.
@@ -3416,11 +3431,15 @@ mod tests {
 }
 
 #[cfg(test)]
+#[path = "deletion/ortak_project_tests.rs"]
+mod ortak_project_tests;
+
+#[cfg(test)]
 mod postgres_tests {
     use super::*;
     use crate::{CreateCommunityWithOwnerResult, Db, DbConfig};
 
-    async fn store() -> (Db, DeletionStore) {
+    pub(super) async fn store() -> (Db, DeletionStore) {
         let database_url = std::env::var("BUZZ_TEST_DATABASE_URL")
             .or_else(|_| std::env::var("DATABASE_URL"))
             .unwrap_or_else(|_| "postgres://buzz:buzz_dev@localhost:5432/buzz".to_string()); // sadscan:disable np.postgres.1 -- local test-only credentials
@@ -3448,7 +3467,7 @@ mod postgres_tests {
         }
     }
 
-    fn empty_storage_manifest(community: CommunityId) -> StorageManifest {
+    pub(super) fn empty_storage_manifest(community: CommunityId) -> StorageManifest {
         StorageManifest {
             version: 4,
             prefixes: vec![

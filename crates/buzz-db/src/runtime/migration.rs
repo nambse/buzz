@@ -732,7 +732,7 @@ mod postgres_tests {
         let mut migrations: Vec<_> = MIGRATOR.iter().collect();
         migrations.sort_by_key(|migration| migration.version);
 
-        assert_eq!(migrations.len(), 54);
+        assert_eq!(migrations.len(), 55);
         assert_eq!(migrations[0].version, 1);
         assert_eq!(&*migrations[0].description, "initial schema");
         assert!(migrations[0]
@@ -2475,6 +2475,15 @@ mod postgres_tests {
         let desired = PgPool::connect(&format!("{base_prefix}/{desired_db}"))
             .await
             .expect("connect desired-state probe database");
+        let reconciliation = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../scripts/reconcile-schema-after-pgschema.sql"),
+        )
+        .expect("read post-pgschema reconciliation");
+        sqlx::raw_sql(AssertSqlSafe(reconciliation))
+            .execute(&desired)
+            .await
+            .expect("reconcile desired-state bootstrap after pgschema apply");
         let migrated = PgPool::connect(&format!("{base_prefix}/{migrated_db}"))
             .await
             .expect("connect migrated probe database");
