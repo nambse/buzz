@@ -51,6 +51,9 @@ use crate::runtime::{
     ACTIVATION_REQUIRED_CAPABILITIES,
 };
 
+mod activation;
+pub use activation::ActivationTarget;
+
 /// Operation mode stored in `provisioning_operations.mode`.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -501,6 +504,8 @@ pub enum IdentityReservation {
 /// Everything the repository needs to activate a revision in one transaction.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RevisionActivation {
+    /// Fresh repository-issued authority; absent legacy candidates fail closed.
+    pub target: Option<ActivationTarget>,
     /// Employee definition to persist as the revision manifest (status active).
     pub employee: Employee,
     /// Provisioning mode recorded on the revision and bindings.
@@ -509,11 +514,11 @@ pub struct RevisionActivation {
     pub manifest_fingerprint: [u8; 32],
     /// The succeeded activation step record, persisted in the same commit.
     pub activation_step: StepRecord,
-    /// Time the runtime binding was validated.
+    /// Conservative database issuance time preceding the fresh runtime probe.
     pub runtime_validated_at: DateTime<Utc>,
-    /// Time the memory binding was validated, when bound.
+    /// The same issuance time preceding fresh memory probes, when bound.
     pub memory_validated_at: Option<DateTime<Utc>>,
-    /// Time the signer proved the public key.
+    /// The same issuance time preceding fresh signer and membership proofs.
     pub office_verified_at: DateTime<Utc>,
 }
 
@@ -735,12 +740,15 @@ pub fn evaluate_activation_gates(
 pub struct SagaConfig {
     /// Attempts per step before the operation needs operator action.
     pub max_step_attempts: i32,
+    /// Total fresh-probe and commit admission budget, clamped to 1ms..15s.
+    pub activation_lifetime: std::time::Duration,
 }
 
 impl Default for SagaConfig {
     fn default() -> Self {
         Self {
             max_step_attempts: 3,
+            activation_lifetime: std::time::Duration::from_secs(15),
         }
     }
 }
@@ -1543,7 +1551,7 @@ where
         })
     }
 
-    /// Activation: re-evaluates the gate from the durable probe evidence and
+    /// Activation: obtains a fresh repository target, re-probes every gate, and
     /// commits the revision, bindings, aliases, employee status, the step, and
     /// the operation result in one repository transaction.
     async fn activate(
@@ -1566,20 +1574,6 @@ where
         }
 
         let employee = &operation.effective_employee();
-        let probe = operation.step(ProvisioningStep::ProbeHealth);
-        let evidence: Option<GateEvidence> = probe
-            .filter(|record| record.state == StepState::Succeeded)
-            .and_then(|record| record.receipt("evidence"));
-        let Some(evidence) = evidence else {
-            return Ok(Err(StepFailure::new(
-                "activation requires succeeded probe_health evidence",
-            )));
-        };
-        if let Err(failures) = evaluate_activation_gates(&evidence, employee.memory.is_some()) {
-            return Ok(Err(StepFailure::new(format!(
-                "activation gates failed: {failures:?}"
-            ))));
-        }
         let unfinished = ProvisioningStep::ALL
             .iter()
             .filter(|step| **step != ProvisioningStep::ActivateRevision)
@@ -1597,26 +1591,89 @@ where
             ))));
         }
 
+        // A succeeded historical ProbeHealth step is audit history, never a
+        // reusable activation witness. Every resumed admission probes again.
+        let lifetime = activation::lifetime(self.config.activation_lifetime);
+        let begun = tokio::time::Instant::now();
+        let target = tokio::time::timeout(
+            lifetime,
+            self.repository
+                .prepare_activation(scope, operation.id, running, lifetime),
+        )
+        .await
+        .map_err(|_| ProvisioningError::Superseded {
+            operation_id: operation.id,
+            detail: "activation preparation timed out",
+        })??;
+        let remaining = (target.valid_before() - target.observed_at())
+            .to_std()
+            .map_err(|_| ProvisioningError::Superseded {
+                operation_id: operation.id,
+                detail: "activation authority expired",
+            })?;
+        // Start this monotonic budget before prepare, conservatively accounting
+        // for pool/SQL latency instead of trusting the client wall clock.
+        let deadline = begun + remaining.min(lifetime);
+        let probed = tokio::time::timeout_at(deadline, async {
+            for reference in employee
+                .runtime
+                .credential_refs
+                .iter()
+                .chain(std::iter::once(&employee.office.signer_ref))
+            {
+                match self.credentials.verify_reference(reference).await {
+                    Ok(CredentialReferenceStatus::Resolvable) => {}
+                    Ok(CredentialReferenceStatus::Missing) => {
+                        return Err(StepFailure::new(
+                            "activation credential reference is unavailable",
+                        ))
+                    }
+                    Err(error) => return Err(StepFailure::new(error)),
+                }
+            }
+            self.probe(operation).await
+        })
+        .await;
+        let evidence = match probed {
+            Ok(Ok(evidence)) if tokio::time::Instant::now() < deadline => evidence,
+            Ok(Err(error)) => return Ok(Err(error)),
+            _ => {
+                return Ok(Err(StepFailure::new(
+                    "fresh activation probes exceeded their admission deadline",
+                )))
+            }
+        };
         let mut active = employee.clone();
         active.status = EmployeeStatus::Active;
         let fingerprint: [u8; 32] = Sha256::digest(&serde_json::to_vec(&active)?).into();
-        let now = Utc::now();
         let mut activation_step = running.clone();
         activation_step.state = StepState::Succeeded;
-        activation_step.finished_at = Some(now);
+        activation_step.finished_at = Some(Utc::now());
+        activation_step.result =
+            serde_json::json!({"admission":target.envelope(),"evidence":evidence});
         let activation = RevisionActivation {
+            target: Some(target.clone()),
             employee: active,
             provisioning_mode: operation.resource_mode(),
             manifest_fingerprint: fingerprint,
             activation_step,
-            runtime_validated_at: now,
-            memory_validated_at: employee.memory.as_ref().map(|_| now),
-            office_verified_at: now,
+            runtime_validated_at: target.observed_at(),
+            memory_validated_at: employee.memory.as_ref().map(|_| target.observed_at()),
+            office_verified_at: target.observed_at(),
         };
-        let revision_id = self
-            .repository
-            .activate_revision(scope, operation.id, &activation)
-            .await?;
+        if let Err(error) = target.validate_activation(&activation) {
+            return Ok(Err(StepFailure::new(error)));
+        }
+        let revision_id = tokio::time::timeout_at(
+            deadline,
+            self.repository
+                .activate_revision(scope, operation.id, &activation),
+        )
+        .await
+        .map_err(|_| ProvisioningError::Superseded {
+            operation_id: operation.id,
+            detail: "activation commit timed out; reload operation",
+        })??;
         let mut activated = self.load(scope, operation.id).await?;
         if activated.result_revision_id != Some(revision_id)
             || activated.status != OperationStatus::Succeeded

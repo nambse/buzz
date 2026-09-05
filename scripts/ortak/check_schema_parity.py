@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Probe migration 55 versus real pgschema on disposable port 55432; retain both DBs.
+"""Probe migration 56 versus real pgschema on disposable port 55432; retain both DBs.
 
 Requires Python >=3.11 with psycopg2, the cached pgschema 1.7.4, and an explicitly
 selected compiled buzz-db test binary. Reads only ORTAK_SCHEMA_PARITY_TEST_URL.
@@ -28,9 +28,11 @@ TEST = "runtime::migration::postgres_tests::run_migrations_applies_consolidated_
 MAX_OUTPUT = 4 * 1024 * 1024
 MAX_SECONDS = 300
 MAX_SQL_SECONDS = 30
-TABLES = ["project_api_bindings", "project_access_grants", "work_api_operations", "office_company_bindings"]
+TABLES = ["project_api_bindings", "project_access_grants", "work_api_operations", "office_company_bindings",
+          "provisioning_operations", "provisioning_operation_steps"]
 FUNCTIONS = ["ortak_check_routing_claim_expiry", "ortak_check_work_api_receipt", "ortak_project_access_guard",
-             "ortak_assert_project_binding_purge", "ortak_guard_project_api_binding", "ortak_project_binding_purge_at_commit"]
+             "ortak_assert_project_binding_purge", "ortak_guard_project_api_binding", "ortak_project_binding_purge_at_commit",
+             "ortak_check_activation_admission_at_commit", "ortak_guard_activation_operation", "ortak_guard_activation_receipt"]
 
 # Columns are keyed by name: ALTER versus inline creation can reorder physical
 # attnums. Ordered index/constraint keys, sort/null options and all deferred
@@ -288,12 +290,23 @@ def checked_catalog(value):
             or sorted(row[0] for row in value.get("functions") or []) != sorted(FUNCTIONS)
             or not all(value.get(key) for key in ("columns", "indexes", "constraints", "triggers", "fence_targets"))):
         raise Refused("required_catalog_missing")
-    triggers = {row[1]: row for row in value["triggers"]}
-    for name, trigger_type in (("ortak_routing_claim_expiry_at_commit", 5),
-                               ("work_api_receipt_at_commit", 5),
-                               ("project_api_binding_purge_at_commit", 9)):
-        if name not in triggers or triggers[name][2:6] != ["O", trigger_type, True, True]:
+    triggers = {(row[0], row[1]): row for row in value["triggers"]}
+    for table, name, trigger_type in (
+            ("routing_decisions", "ortak_routing_claim_expiry_at_commit", 5),
+            ("work_api_operations", "work_api_receipt_at_commit", 5),
+            ("project_api_bindings", "project_api_binding_purge_at_commit", 9),
+            ("provisioning_operations", "ortak_activation_admission_at_commit", 21)):
+        row = triggers.get((table, name))
+        if row is None or row[2:6] != ["O", trigger_type, True, True]:
             raise Refused("deferred_commit_guard_missing")
+    for table, name, trigger_type in (
+            ("provisioning_operations", "ortak_activation_operation_immutable", 27),
+            ("provisioning_operation_steps", "ortak_activation_receipt_immutable", 27),
+            ("provisioning_operations", "ortak_activation_operation_no_truncate", 34),
+            ("provisioning_operation_steps", "ortak_activation_receipt_no_truncate", 34)):
+        row = triggers.get((table, name))
+        if row is None or row[2:6] != ["O", trigger_type, False, False]:
+            raise Refused("activation_mutation_guard_missing")
     if not any(row[0] == "project_api_bindings" for row in value["fence_targets"]):
         raise Refused("work_community_fence_missing")
     return value
@@ -324,7 +337,7 @@ def probe(value, binary, receipt_parent, commands_type=Commands, database_type=D
         write_private(directory / name, source)
     receipt = {"format": "ortak-schema-parity/v1", "status": "started", "host": "127.0.0.1", "port": 55432,
                "desired_database": desired, "migrated_database": migrated, "databases_retained": True,
-               "created_at": datetime.now(timezone.utc).isoformat(), "migration_target": 55,
+               "created_at": datetime.now(timezone.utc).isoformat(), "migration_target": 56,
                "migration_test_binary": str(binary), "migration_test_sha256": digest(binary),
                "pgschema_binary": str(PGSCHEMA), "pgschema_sha256": digest(PGSCHEMA),
                "schema_sha256": digest(directory / "schema.sql"),
@@ -354,8 +367,8 @@ def probe(value, binary, receipt_parent, commands_type=Commands, database_type=D
         env["BUZZ_TEST_DATABASE_URL"] = (f"postgres://{selected['user']}:{quote(selected['password'], safe='')}@127.0.0.1:55432/{migrated}")
         commands.run("migration-test", [str(binary), "--exact", TEST, "--ignored", "--test-threads=1"], env)
         versions = db.query(migrated, "SELECT json_agg(version ORDER BY version) FROM _sqlx_migrations WHERE success")
-        if versions != list(range(1, 56)):
-            raise Refused("migration55_not_proven")
+        if versions != list(range(1, 57)):
+            raise Refused("migration56_not_proven")
         migrated_catalog = checked_catalog(db.query(migrated, CATALOG, (TABLES, FUNCTIONS, TABLES)))
         document(directory / "migrated-catalog.json", migrated_catalog)
         different = sorted(key for key in desired_catalog if desired_catalog[key] != migrated_catalog.get(key))

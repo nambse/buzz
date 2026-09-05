@@ -10,10 +10,12 @@ use crate::ids::CompanyScope;
 use crate::office_identity::OfficePublicKey;
 use crate::ports::ProvisioningRepository;
 use crate::provisioning::{
-    IdentityReservation, OperationStatus, OperationUpdate, ProvisioningError,
+    ActivationTarget, IdentityReservation, OperationStatus, OperationUpdate, ProvisioningError,
     ProvisioningOperation, ProvisioningRequest, ProvisioningStep, RevisionActivation, StepRecord,
     StepState,
 };
+
+mod activation;
 
 fn step_from_row(row: &PgRow) -> Result<StepRecord> {
     let name: String = row.try_get("step_name")?;
@@ -375,6 +377,16 @@ impl ProvisioningRepository for PgControlPlane {
         })
     }
 
+    async fn prepare_activation(
+        &self,
+        scope: &CompanyScope,
+        operation_id: Uuid,
+        running: &StepRecord,
+        lifetime: std::time::Duration,
+    ) -> Result<ActivationTarget> {
+        activation::prepare(self, scope, operation_id, running, lifetime).await
+    }
+
     async fn activate_revision(
         &self,
         scope: &CompanyScope,
@@ -386,6 +398,9 @@ impl ProvisioningRepository for PgControlPlane {
         let employee_id = employee.id.as_str();
         let mode = column_value(&activation.provisioning_mode)?;
         let mut tx = self.pool.begin().await?;
+        activation::configure(&mut tx).await?;
+        // Must precede operation/employee/step row locks. Hold through commit.
+        let office = super::lock_office_authority_on(&mut tx, scope).await?;
 
         let operation = sqlx::query(
             "SELECT status, dry_run, result_revision_id FROM provisioning_operations
@@ -418,6 +433,22 @@ impl ProvisioningRepository for PgControlPlane {
             .into());
         }
 
+        activation::validate(&mut tx, scope, operation_id, activation, &office).await?;
+        // Upgrade before the first authority mutation, failing the whole attempt
+        // if another reader prevents it; never wait while holding row locks.
+        let exclusive: bool = sqlx::query_scalar(
+            "SELECT pg_try_advisory_xact_lock(ortak_office_company_lock_key($1))",
+        )
+        .bind(company_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if !exclusive {
+            return Err(ProvisioningError::Superseded {
+                operation_id,
+                detail: "activation mutation fence is busy",
+            }
+            .into());
+        }
         let manifest = serde_json::to_value(employee)?;
         let revision_id: Uuid = sqlx::query(
             "INSERT INTO employee_revisions
@@ -505,10 +536,16 @@ impl ProvisioningRepository for PgControlPlane {
         .await?;
 
         let mut step = activation.activation_step.clone();
+        step.result["result_revision_id"] = serde_json::json!(revision_id);
         step.state = StepState::Succeeded;
         step.finished_at.get_or_insert_with(Utc::now);
         upsert_step(&mut tx, company_id, operation_id, &step).await?;
 
+        // Restore the supported deferred mode immediately before the final
+        // success write; COMMIT is next so its fresh clock covers final waits.
+        sqlx::query("SET CONSTRAINTS ortak_activation_admission_at_commit DEFERRED")
+            .execute(&mut *tx)
+            .await?;
         sqlx::query(
             "UPDATE provisioning_operations
                 SET status = 'succeeded', result_revision_id = $3, current_step = NULL,

@@ -359,3 +359,36 @@ DO $$ BEGIN
         RAISE EXCEPTION 'ortak: project binding purge or retained evidence guard is missing';
     END IF;
 END $$;
+
+-- Migration0056: activation succeeds only with its fresh, immutable admission.
+-- These are live catalog assertions; desired-schema text alone is not proof.
+DO $$
+DECLARE
+    required RECORD;
+BEGIN
+    FOR required IN SELECT * FROM (VALUES
+        ('provisioning_operations'::REGCLASS, 'ortak_activation_admission_at_commit',
+            'ortak_check_activation_admission_at_commit()'::REGPROCEDURE, 21, true, true),
+        ('provisioning_operations'::REGCLASS, 'ortak_activation_operation_immutable',
+            'ortak_guard_activation_operation()'::REGPROCEDURE, 27, false, false),
+        ('provisioning_operation_steps'::REGCLASS, 'ortak_activation_receipt_immutable',
+            'ortak_guard_activation_receipt()'::REGPROCEDURE, 27, false, false),
+        ('provisioning_operations'::REGCLASS, 'ortak_activation_operation_no_truncate',
+            'ortak_reject_row_mutation()'::REGPROCEDURE, 34, false, false),
+        ('provisioning_operation_steps'::REGCLASS, 'ortak_activation_receipt_no_truncate',
+            'ortak_reject_row_mutation()'::REGPROCEDURE, 34, false, false)
+    ) AS guards(relation_id, trigger_name, function_id, trigger_type, deferred, initially_deferred)
+    LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_trigger t
+            WHERE t.tgrelid=required.relation_id AND t.tgname=required.trigger_name
+              AND t.tgfoid=required.function_id AND t.tgenabled='O' AND NOT t.tgisinternal
+              AND t.tgtype=required.trigger_type AND t.tgdeferrable=required.deferred
+              AND t.tginitdeferred=required.initially_deferred
+              AND (NOT required.deferred OR t.tgqual IS NOT NULL)
+        ) THEN
+            RAISE EXCEPTION 'ortak: activation admission guard % is missing or malformed',
+                required.trigger_name;
+        END IF;
+    END LOOP;
+END $$;

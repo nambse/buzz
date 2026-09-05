@@ -156,3 +156,18 @@ The preserved scope contains one project, one completed manual item, eight
 operation receipts, seven history rows and zero runs/dispatches/decisions.
 This is database-only evidence; previous archives and verification databases
 remain retained.
+
+## Migration56 private checkpoint
+
+The11:35 Istanbul backup restored into the new retained verification database
+`ortak_verify_7a359a24f12a4a8795768df594c74f84`. Receipt:
+`/private/tmp/ortak-private-20260905/backups/20260905T083500Z_952d0c34d48f462ba1d3268d872a5438/manifest.json`.
+The537,977-byte archive has SHA256
+`e737171d4fa1177edba41c26d03b98a0dc48ec0a23952550e1ca2948ee6b9154`.
+All103 table counts, successful migration checksums1–56 and the selected schema
+catalog match. Schema SHA256:
+`8c78de1551cd2bba299b7919cdf3e2cccff4749f4113231c46f0050a8c9c42d8`.
+The snapshot preserves one company/draft employee, one project/completed manual
+item, eight operation receipts and seven work history rows. Assignments,
+employee revisions, runs, dispatch outbox and routing decisions remain empty.
+This is database-only recovery evidence; every earlier backup remains retained.

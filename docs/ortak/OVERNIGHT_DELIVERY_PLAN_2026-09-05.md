@@ -117,6 +117,38 @@ state is unchanged; notify on completion, meaningful failure or needed input.
 
 ## Integration checkpoint — 2026-09-05, early morning
 
+### Fresh activation admission — approximately11:36 Istanbul
+
+Migration56 and the provisioning repository now commit activation only against
+a fresh database-issued target, exact running attempt and current Office/employee
+authority. Every activation attempt rechecks real adapter/signer evidence within
+one bounded lifetime; deferred commit-time expiry rolls back the revision,
+bindings and success receipts atomically. Success records are immutable. Reusing
+the same Office identity keeps its original binding provenance.
+
+Verification passed25 saga unit cases,25 control unit cases and14 distinct
+PostgreSQL provisioning cases (13 together, then the new reuse regression).
+Scoped four-crate all-target Clippy, both Rust formatting roots and actual
+pgschema/migrator56 parity passed. No full repository `just ci`, PR or push is
+claimed. Signed previous checkpoints are2eac15f,f23c9fd,d07f55c.
+
+The rebuilt private backend upgraded the selected database through56. All nine
+live signed API checks and the unchanged manual Work replay7→7 passed. The
+11:35 database-only backup restored into a fresh retained database with all103
+table counts, migration checksums and schema matching; see the backup runbook.
+
+The final synthetic Hermes check joins the actual controller, journal, executor,
+pinned Hermes AIAgent and OpenAI SDK with an explicit local synthetic Responses
+endpoint and a test-only OS-header helper. It passed four gate groups: three
+synthetic model requests plus two authenticated catalog404s, zero real-provider
+requests and confirmed fixture cleanup. Eight local tests passed. Exact seams,
+pins and evidence are in `runtime/hermes-bridge/SYNTHETIC_HTTP.md`.
+
+Ada remains draft and routing stays disabled. Real provider selection, production
+provisioning composition and the signed Office roundtrip remain open. A live
+native process alone is not visual UI evidence; native reconnect after backend
+restart is being checked separately. Work continues to the authorized12:00 stop.
+
 ### Employee queue and safe community detach — approximately11:00 Istanbul
 
 The final55 candidate adds scoped read-only employee assignments, with all

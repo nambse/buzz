@@ -20,8 +20,8 @@ use crate::ids::{ClaimGeneration, CompanyScope, MessageId};
 use crate::inbox::{InboxClaim, InboxEvent, InboxInsertOutcome, InboxReleaseOutcome, InboxRow};
 use crate::outbox::{OutboxFailOutcome, OutboxKind, OutboxLease};
 use crate::provisioning::{
-    IdentityReservation, OperationUpdate, ProvisioningOperation, ProvisioningRequest,
-    RevisionActivation, StepRecord,
+    ActivationTarget, IdentityReservation, OperationUpdate, ProvisioningOperation,
+    ProvisioningRequest, RevisionActivation, StepRecord,
 };
 use crate::routing::{
     ChainState, EmployeeRecord, RoutingCommitOutcome, RoutingProposal, ScorerMetadata,
@@ -342,6 +342,17 @@ pub trait ProvisioningRepository {
         scope: &CompanyScope,
         employee_id: &EmployeeId,
     ) -> Result<IdentityReservation>;
+
+    /// Issues bounded activation authority before fresh external probes. The short
+    /// read transaction pins the current operation/employee and Office generation;
+    /// callers release it before network I/O and cannot manufacture its target.
+    async fn prepare_activation(
+        &self,
+        scope: &CompanyScope,
+        operation_id: Uuid,
+        running: &StepRecord,
+        lifetime: Duration,
+    ) -> Result<ActivationTarget>;
 
     /// In one transaction: inserts the immutable revision, its runtime,
     /// memory, and Office bindings with validation timestamps, replaces the

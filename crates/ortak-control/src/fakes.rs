@@ -1285,6 +1285,35 @@ impl ProvisioningRepository for InMemoryProvisioningRepository {
         })
     }
 
+    async fn prepare_activation(
+        &self,
+        scope: &CompanyScope,
+        operation_id: Uuid,
+        running: &StepRecord,
+        lifetime: std::time::Duration,
+    ) -> Result<crate::provisioning::ActivationTarget> {
+        self.check_scope(scope)?;
+        let state = lock(&self.state);
+        let operation = state
+            .operations
+            .get(&operation_id)
+            .ok_or(ProvisioningError::UnknownOperation { operation_id })?;
+        let employee = state
+            .employees
+            .get(&(scope.company_id(), operation.employee_id.to_string()))
+            .ok_or_else(|| ControlError::InvalidData("activation employee is absent".into()))?;
+        crate::provisioning::ActivationTarget::issue(
+            scope,
+            operation,
+            running,
+            employee.status,
+            employee.active_revision_id,
+            crate::office_authority::OfficeAuthority::new(scope.company_id(), 0, None),
+            Utc::now(),
+            lifetime,
+        )
+    }
+
     async fn activate_revision(
         &self,
         scope: &CompanyScope,
@@ -1321,6 +1350,21 @@ impl ProvisioningRepository for InMemoryProvisioningRepository {
                 "activation requires a reserved employee row".to_owned(),
             ));
         }
+        let target = activation.target.as_ref().ok_or_else(|| {
+            ControlError::InvalidData("fresh activation target is required".into())
+        })?;
+        let current = state
+            .employees
+            .get(&employee_key)
+            .ok_or_else(|| ControlError::InvalidData("activation employee is absent".into()))?;
+        target.validate_current(
+            scope,
+            operation,
+            current.status,
+            current.active_revision_id,
+            Utc::now(),
+        )?;
+        target.validate_activation(activation)?;
         // Company-unique aliases (mirrors the employee_aliases primary key).
         let new_aliases = activation.employee.normalized_aliases();
         for (other_key, row) in &state.employees {
@@ -1356,6 +1400,7 @@ impl ProvisioningRepository for InMemoryProvisioningRepository {
                 .find(|record| record.step == ProvisioningStep::ActivateRevision)
             {
                 *record = activation.activation_step.clone();
+                record.result["result_revision_id"] = serde_json::json!(revision_id);
                 record.state = StepState::Succeeded;
                 record.finished_at.get_or_insert(now);
             }

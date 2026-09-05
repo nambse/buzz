@@ -16,7 +16,8 @@ import check_schema_parity as subject
 
 URL = "postgres://fixture:selected-fixture@127.0.0.1:55432/postgres"
 EXPECTED_FUNCTIONS = ["ortak_check_routing_claim_expiry", "ortak_check_work_api_receipt", "ortak_project_access_guard",
-                      "ortak_assert_project_binding_purge", "ortak_guard_project_api_binding", "ortak_project_binding_purge_at_commit"]
+                      "ortak_assert_project_binding_purge", "ortak_guard_project_api_binding", "ortak_project_binding_purge_at_commit",
+                      "ortak_check_activation_admission_at_commit", "ortak_guard_activation_operation", "ortak_guard_activation_receipt"]
 
 
 def catalog():
@@ -25,7 +26,12 @@ def catalog():
             "constraints": [["fixture", "constraint", "FOREIGN KEY (a,b)", True, True]],
             "triggers": [["routing_decisions", "ortak_routing_claim_expiry_at_commit", "O", 5, True, True, "definition"],
                          ["work_api_operations", "work_api_receipt_at_commit", "O", 5, True, True, "definition"],
-                         ["project_api_bindings", "project_api_binding_purge_at_commit", "O", 9, True, True, "definition"]],
+                         ["project_api_bindings", "project_api_binding_purge_at_commit", "O", 9, True, True, "definition"],
+                         ["provisioning_operations", "ortak_activation_admission_at_commit", "O", 21, True, True, "definition"],
+                         ["provisioning_operations", "ortak_activation_operation_immutable", "O", 27, False, False, "definition"],
+                         ["provisioning_operation_steps", "ortak_activation_receipt_immutable", "O", 27, False, False, "definition"],
+                         ["provisioning_operations", "ortak_activation_operation_no_truncate", "O", 34, False, False, "definition"],
+                         ["provisioning_operation_steps", "ortak_activation_receipt_no_truncate", "O", 34, False, False, "definition"]],
             "functions": [[name, "", "plpgsql", "body"] for name in sorted(EXPECTED_FUNCTIONS)],
             "fence_targets": [["project_api_bindings", "fence", "O", 23, False, False, "definition"]]}
 
@@ -54,7 +60,7 @@ class FakeDatabase:
     failure = False
     difference = None
     desired_reads = 0
-    versions = list(range(1, 56))
+    versions = list(range(1, 57))
     def __init__(self, selected, deadline, directory):
         self.selected = selected
     def query(self, database, sql, parameters=None, admin=False):
@@ -107,7 +113,7 @@ class ParityTests(unittest.TestCase):
         FakeDatabase.failure = False
         FakeDatabase.difference = None
         FakeDatabase.desired_reads = 0
-        FakeDatabase.versions = list(range(1, 56))
+        FakeDatabase.versions = list(range(1, 57))
 
     def invoke(self, url=URL):
         return subject.probe(url, self.binary, self.root, FakeCommands, FakeDatabase)
@@ -141,8 +147,8 @@ class ParityTests(unittest.TestCase):
         receipt = json.loads((directory / "receipt.json").read_text())
         self.assertEqual(receipt["status"], "verified")
         self.assertEqual(receipt["reconciliation_passes"], 2)
-        self.assertEqual(receipt["migration_versions"], list(range(1, 56)))
-        self.assertEqual(receipt["migration_target"], 55)
+        self.assertEqual(receipt["migration_versions"], list(range(1, 57)))
+        self.assertEqual(receipt["migration_target"], 56)
         self.assertTrue(receipt["databases_retained"])
         self.assertEqual(receipt["desired_database"], intent["desired_database"])
         self.assertNotEqual(receipt["desired_database"], receipt["migrated_database"])
@@ -183,18 +189,37 @@ class ParityTests(unittest.TestCase):
             with self.assertRaisesRegex(subject.Refused, "deferred_commit_guard"):
                 subject.checked_catalog(value)
         value = catalog()
-        value["triggers"].pop()
+        value["triggers"].pop(2)
         with self.assertRaisesRegex(subject.Refused, "deferred_commit_guard"):
             subject.checked_catalog(value)
 
-    def test_exact55_target_rejects_old54_or_unreviewed56(self):
-        for versions in (list(range(1, 55)), list(range(1, 57))):
+    def test_activation_guards_are_bound_to_exact_table_events_and_deferred_mode(self):
+        for index in range(3, 8):
+            expected = "deferred_commit_guard" if index == 3 else "activation_mutation_guard"
+            for position, changed in ((0, "other_table"), (2, "D"), (3, 5),
+                                      (4, index != 3), (5, index != 3)):
+                value = catalog()
+                value["triggers"][index][position] = changed
+                with self.subTest(index=index, position=position), self.assertRaisesRegex(subject.Refused, expected):
+                    subject.checked_catalog(value)
+            value = catalog()
+            value["triggers"].pop(index)
+            with self.assertRaisesRegex(subject.Refused, expected):
+                subject.checked_catalog(value)
+        for name in EXPECTED_FUNCTIONS[-3:]:
+            value = catalog()
+            value["functions"] = [row for row in value["functions"] if row[0] != name]
+            with self.assertRaisesRegex(subject.Refused, "required_catalog_missing"):
+                subject.checked_catalog(value)
+
+    def test_exact56_target_rejects_old55_or_unreviewed57(self):
+        for versions in (list(range(1, 56)), list(range(1, 58))):
             FakeDatabase.versions = versions
             with self.assertRaises(subject.Refused): self.invoke()
         for directory in self.root.glob("schema-parity-*"):
             receipt = json.loads((directory / "receipt.json").read_text())
-            self.assertEqual(receipt["error_code"], "migration55_not_proven")
-            self.assertEqual(receipt["migration_target"], 55)
+            self.assertEqual(receipt["error_code"], "migration56_not_proven")
+            self.assertEqual(receipt["migration_target"], 56)
 
     def test_direct_sql_hang_hits_wall_deadline_and_kills_owned_worker(self):
         selected = subject.selected_url(URL)

@@ -31,7 +31,12 @@ fn fixture(name: &str) -> EmployeeManifest {
         env!("CARGO_MANIFEST_DIR")
     ))
     .expect("read fixture");
-    serde_yaml::from_str(&yaml).expect("parse fixture")
+    let mut value: EmployeeManifest = serde_yaml::from_str(&yaml).expect("parse fixture");
+    value.employee.runtime.adapter = "fake-runtime".into();
+    if let Some(memory) = &mut value.employee.memory {
+        memory.adapter = "fake-memory".into();
+    }
+    value
 }
 
 /// A disposable `create` employee derived from the Zeynep fixture shape.
@@ -101,6 +106,11 @@ async fn mark_ready_for_activation(
     operation: &ProvisioningOperation,
     evidence: &GateEvidence,
 ) {
+    harness
+        .repo
+        .reserve_employee_identity(&harness.repo.scope(), &operation.employee_id)
+        .await
+        .expect("cached reserve step has its durable employee row");
     for candidate in ProvisioningStep::ALL {
         if candidate == ProvisioningStep::ActivateRevision {
             continue;
@@ -120,7 +130,7 @@ async fn mark_ready_for_activation(
     }
 }
 
-/// The activation another worker would commit for `operation`.
+/// An intentionally unprepared candidate for the terminal-operation refusal test.
 fn committed_activation(manifest: &EmployeeManifest, operation_id: Uuid) -> RevisionActivation {
     let now = chrono::Utc::now();
     let mut employee = manifest.employee.clone();
@@ -131,6 +141,7 @@ fn committed_activation(manifest: &EmployeeManifest, operation_id: Uuid) -> Revi
     activation_step.started_at = Some(now);
     activation_step.finished_at = Some(now);
     RevisionActivation {
+        target: None,
         employee,
         provisioning_mode: ProvisioningMode::Create,
         manifest_fingerprint: [0; 32],
@@ -632,65 +643,44 @@ async fn compensation_deletes_only_resources_created_by_the_operation() {
 }
 
 #[tokio::test]
-async fn activation_reevaluates_gates_from_durable_probe_evidence() {
-    let manifest = disposable();
-    let harness = Harness::creatable(&manifest);
+async fn cached_success_cannot_activate_a_currently_unhealthy_runtime() {
+    let manifest = disposable_adopt();
+    let harness = Harness::adoptable(&manifest);
     let operation = harness
-        .begin(&manifest, OperationMode::Create, false, "ada-tampered")
+        .begin(&manifest, OperationMode::Adopt, false, "ada-stale-runtime")
         .await;
-    // Mark every step before activation as done, but store probe evidence
-    // whose signer proof does not match. The activation path must refuse.
-    for candidate in ProvisioningStep::ALL {
-        if candidate == ProvisioningStep::ActivateRevision {
-            continue;
-        }
-        let mut record = StepRecord::pending(operation.id, candidate);
-        record.state = StepState::Succeeded;
-        record.attempt_count = 1;
-        record.finished_at = Some(chrono::Utc::now());
-        if candidate == ProvisioningStep::ProbeHealth {
-            let key = OfficePublicKey::parse_hex(&"ab".repeat(32)).expect("key");
-            let evidence = GateEvidence {
-                runtime_capabilities: Some(RuntimeCapabilities {
-                    adapter: "fake-runtime".to_owned(),
-                    api_version: "fake/v0".to_owned(),
-                    capabilities: all_runtime_capabilities(),
-                }),
-                runtime_health: Some(HealthReport::healthy("ok")),
-                memory_capabilities: Some(MemoryCapabilities {
-                    adapter: "fake-memory".to_owned(),
-                    api_version: "fake/v0".to_owned(),
-                    capabilities: ortak_control::fakes::all_memory_capabilities(),
-                }),
-                memory_health: Some(MemoryHealthReport {
-                    workspace: HealthReport::healthy("ok"),
-                    user_peer: HealthReport::healthy("ok"),
-                    employee_peer: HealthReport::healthy("ok"),
-                }),
-                office_membership: Some(HealthReport::healthy("member")),
-                signer: Some(SignerVerification {
-                    produced_public_key: key,
-                    matches_expected: false,
-                }),
-            };
-            record.result = serde_json::json!({ "evidence": evidence, "gates": "passed" });
-        }
-        harness
-            .repo
-            .record_step(&harness.repo.scope(), operation.id, &record)
-            .await
-            .expect("record step");
-    }
+    let cached = healthy_evidence(&manifest.employee.office.public_key, true);
+    mark_ready_for_activation(&harness, &operation, &cached).await;
+    let profile = manifest.employee.runtime.profile_ref.as_deref().unwrap();
+    harness.runtime.set_profile_health(profile, false);
+    assert!(!harness
+        .runtime
+        .health(&manifest.employee.runtime)
+        .await
+        .unwrap()
+        .is_healthy());
 
-    let (operation, failed_step, error) = failed(harness.resume(&operation).await);
+    let (failed_operation, failed_step, _) = failed(harness.resume(&operation).await);
     assert_eq!(failed_step, ProvisioningStep::ActivateRevision);
-    assert!(error.contains("SignerKeyMismatch"), "{error}");
     assert_eq!(harness.repo.activations(), 0);
-    assert_eq!(operation.result_revision_id, None);
+    assert_eq!(failed_operation.result_revision_id, None);
     assert_eq!(
-        harness.repo.employee("ada").expect("row").status,
+        harness.repo.employee("ada").unwrap().status,
         EmployeeStatus::Draft
     );
+    assert_eq!(
+        step(&failed_operation, ProvisioningStep::ProbeHealth).result["evidence"],
+        serde_json::to_value(&cached).unwrap(),
+        "the historical successful report remains audit history"
+    );
+
+    // Recovery changes only current adapter health, not the cached report or
+    // completed resource steps. A new fresh activation can now succeed.
+    harness.runtime.set_profile_health(profile, true);
+    let completed = succeeded(harness.resume(&failed_operation).await);
+    assert!(completed.result_revision_id.is_some());
+    assert_eq!(harness.repo.activations(), 1);
+    assert!(harness.runtime.created_profiles().is_empty());
 }
 
 /// A runtime that reports `created` for adopt requests: a port-contract
@@ -993,6 +983,17 @@ impl ProvisioningRepository for RacingRepository<'_> {
             .reserve_employee_identity(scope, employee_id)
             .await
     }
+    async fn prepare_activation(
+        &self,
+        scope: &CompanyScope,
+        operation_id: Uuid,
+        running: &StepRecord,
+        lifetime: std::time::Duration,
+    ) -> ortak_control::Result<ortak_control::provisioning::ActivationTarget> {
+        self.inner
+            .prepare_activation(scope, operation_id, running, lifetime)
+            .await
+    }
     async fn activate_revision(
         &self,
         scope: &CompanyScope,
@@ -1012,18 +1013,24 @@ async fn stale_worker_converges_on_a_committed_activation() {
     let operation = harness
         .begin(&manifest, OperationMode::Create, false, "ada-race")
         .await;
-    mark_ready_for_activation(
-        &harness,
-        &operation,
-        &healthy_evidence(&manifest.employee.office.public_key, true),
-    )
-    .await;
-
-    // Worker B loads the operation, then worker A commits the activation
-    // before B's first write (marking the operation running).
+    let capture = support::Capture::new(&harness.repo);
+    let preparing = ProvisioningSaga::new(
+        &capture,
+        &harness.runtime,
+        &harness.memory,
+        &harness.office,
+        &harness.credentials,
+        SagaConfig::default(),
+    );
+    assert!(preparing
+        .resume(&harness.repo.scope(), operation.id)
+        .await
+        .is_err());
+    // Worker A's exact candidate was produced by real fresh saga probes. Worker
+    // B resumes its running activation while A commits before B's first write.
     let racing = RacingRepository {
         inner: &harness.repo,
-        pending_activation: Mutex::new(Some(committed_activation(&manifest, operation.id))),
+        pending_activation: Mutex::new(Some(capture.take())),
     };
     let stale_worker = ProvisioningSaga::new(
         &racing,
@@ -1418,3 +1425,9 @@ async fn succeeded_steps_cannot_be_regressed_by_a_stale_worker() {
         "{refused:?}"
     );
 }
+
+#[path = "provisioning_support.rs"]
+mod support;
+
+#[path = "provisioning_saga/freshness.rs"]
+mod freshness;

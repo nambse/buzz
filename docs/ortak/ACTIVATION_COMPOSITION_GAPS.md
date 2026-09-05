@@ -1,10 +1,11 @@
 # Private activation composition gaps
 
-Source review: 2026-09-05. This note identifies the remaining composition work
-before a real employee can activate through the production provisioning saga.
-It is not an activation receipt or a command to change any deployment. No
-provider call, Cargo run, database mutation or resource activation was performed
-for this review.
+Source review and isolated regression validation: 2026-09-05. This note identifies
+remaining composition work before a real employee can activate through the
+production provisioning saga. The validation below uses disposable PostgreSQL
+fixtures with fake external adapters. It is not a production activation receipt
+or a command to change a deployment; no provider-backed employee or preserved
+external resource was activated.
 
 The current adapters do not yet form an executable production activation path.
 There are real Hermes execution, Honcho memory, and Office delivery transports,
@@ -91,19 +92,54 @@ existing no-delete guarantee for resources prepared before the saga.
 
 ## Final admission and evidence
 
-Before enabling either path, give activation evidence an exact binding and
-bounded freshness contract. Currently `ProbeHealth` stores `GateEvidence`, and
-`activate` later re-evaluates those stored reports and stamps validation times
-with the activation time. The reports do not carry an enforceable expiry or a
-fresh admission token; a resumed operation can therefore reuse old successful
-probe evidence. Recheck external health outside the database transaction, then
-validate fresh, pinned authority at the atomic revision commit. Do not hold a
-transaction across network calls. Existing dispatch-time memory witnesses and
-Office fences remain required; activation status is not a replacement for them.
+The stale cached-evidence gap is now closed in source. Every new or resumed
+activation attempt obtains a sealed
+[`ActivationTarget`](../../crates/ortak-control/src/provisioning/activation.rs)
+from the repository, then freshly checks runtime and memory capabilities and
+health, Office membership, the actual signer public key, and credential-reference
+availability. A succeeded historical `ProbeHealth` receipt remains audit history;
+it cannot authorize activation. Capability reports must name the prepared
+runtime and memory adapters, and the produced signer key must match the exact
+prepared Office identity.
 
-The minimum acceptance proof must drive the real saga over a fresh disposable
-employee with no fake adapters or hand-inserted active revision. It must cover
-all of the following:
+The saga starts one monotonic prepare/probe/commit budget before preparation,
+clamped to 1 ms–15 seconds. PostgreSQL supplies `observed_at` and `valid_before`,
+with the deadline additionally bounded by Office authority validity. The recorded
+validation times use that original issuance time preceding the fresh probes;
+activation does not restamp old evidence as current. Preparation releases its
+transaction before any external call. The
+[final transaction](../../crates/ortak-control/src/postgres/provisioning/activation.rs)
+rechecks the running operation, exact activation attempt, completed prerequisites,
+original and effective manifests, employee baseline and Office generation before
+its own writes. It then atomically persists the revision, bindings and correlated
+activation receipt.
+
+[Migration 0056](../../migrations/0056_ortak_activation_admission.sql) validates the
+finite admission deadline and exact operation/step/revision correlation at commit,
+and preserves succeeded activation audit rows against later mutation. The
+supported repository transaction explicitly defers its named guard immediately
+before the final success write and commits next. This does not claim protection
+against unrestricted SQL that changes constraint mode after that final write.
+Dispatch-time memory witnesses and Office fences remain required after activation.
+
+Central validation on 2026-09-05 passed all 25 saga tests (including five new
+[freshness cases](../../crates/ortak-control/tests/provisioning_saga/freshness.rs)),
+25 control unit tests, and 14 distinct PostgreSQL provisioning tests: the prior
+13 passed together, followed by one focused
+[same-key reuse case](../../crates/ortak-control/tests/postgres_provisioning/reuse.rs).
+That case drives two actual saga activations over the same fake external resources
+and proves the second revision retains the Office binding ID and original revision
+provenance while refreshing verification to the exact new admission time. The four
+[freshness cases](../../crates/ortak-control/tests/postgres_provisioning/freshness.rs)
+exercise actual fresh commit/replay and audit immutability, changed authority,
+expiry while waiting for an operation row, and expiry at the final success write
+with complete rollback. Migration and desired-schema parity also passed for 0056.
+These are production repository tests using synthetic adapter facts, not proof
+that the missing production provisioning ports are composed or deployed.
+
+The remaining end-to-end acceptance proof must drive the real saga over a fresh
+disposable employee with no fake adapters or hand-inserted active revision. It
+must cover all of the following:
 
 - Missing/wrong signer, changed membership, foreign company/employee binding,
   replaced Honcho native resource and expired memory witness all refuse
