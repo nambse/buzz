@@ -26,9 +26,11 @@ use buzz_pubsub::conn_control::ConnControl;
 use buzz_pubsub::rate_limiter::RedisRateLimiter;
 use buzz_pubsub::{PubSubManager, RedisNip98ReplayGuard};
 use buzz_search::SearchService;
+#[cfg(feature = "legacy-workflow")]
 use buzz_workflow::WorkflowEngine;
 use deadpool_redis;
 
+#[cfg(feature = "legacy-mesh")]
 use crate::audio::AudioRoomManager;
 use crate::config::Config;
 use crate::connection::{ConnectionSubscriptions, RestartClose};
@@ -660,11 +662,13 @@ pub struct AppState {
     /// the whole relay. Bounds resource use; **not** writer
     /// serialization — that's the CAS at the manifest pointer (spec
     /// §Push step 7, `Inv_NoFork`).
+    #[cfg(feature = "legacy-git")]
     pub git_semaphore: Arc<Semaphore>,
     /// Semaphore limiting concurrent media upload parsing/transcoding work.
     pub media_upload_semaphore: Arc<Semaphore>,
 
     /// Workflow engine for background processing.
+    #[cfg(feature = "legacy-workflow")]
     pub workflow_engine: Arc<WorkflowEngine>,
     /// Relay signing keypair — used to sign system messages (kind 40099).
     pub relay_keypair: nostr::Keys,
@@ -673,6 +677,7 @@ pub struct AppState {
     /// A fresh value on every relay start lets desktop clients retire persisted
     /// admissions when an in-memory audio room is recreated at the same roster
     /// revision after a restart. Mesh rooms use their Redis-fenced generation.
+    #[cfg(feature = "legacy-mesh")]
     pub huddle_liveness_generation: Uuid,
 
     /// Recently-published event IDs for local-echo deduplication, keyed by
@@ -710,12 +715,15 @@ pub struct AppState {
     /// Git object-store backend (content-addressed packs/manifests plus
     /// CAS-guarded manifest pointer). This is the durable git source of truth;
     /// see `api::git::store` and `docs/git-on-object-storage.md`.
+    #[cfg(feature = "legacy-git")]
     pub git_store: crate::api::git::store::GitStore,
     /// Process-local, byte-bounded cache of immutable Git pack/index pairs.
     /// Object storage remains authoritative; this only avoids repeated reads
     /// and index generation for content-addressed packs.
+    #[cfg(feature = "legacy-git")]
     pub git_pack_cache: Arc<crate::api::git::pack_cache::GitPackCache>,
     /// Audio relay room manager — tracks active huddle audio rooms.
+    #[cfg(feature = "legacy-mesh")]
     pub audio_rooms: Arc<AudioRoomManager>,
     /// Set to `true` on SIGTERM — readiness probe returns 503.
     pub shutting_down: Arc<AtomicBool>,
@@ -777,6 +785,7 @@ pub struct AppState {
     /// `None`/unset ⇒ mesh-off / single-instance: consumers must behave
     /// byte-identically to a relay without the mesh. Access via
     /// [`AppState::mesh`].
+    #[cfg(feature = "legacy-mesh")]
     pub mesh: Arc<std::sync::OnceLock<crate::mesh_boot::MeshHandle>>,
 }
 
@@ -795,7 +804,7 @@ impl AppState {
         pubsub: Arc<PubSubManager>,
         auth: AuthService,
         search: SearchService,
-        workflow_engine: Arc<WorkflowEngine>,
+        #[cfg(feature = "legacy-workflow")] workflow_engine: Arc<WorkflowEngine>,
         relay_keypair: nostr::Keys,
         media_storage: MediaStorage,
     ) -> (Self, AuditShutdownHandle) {
@@ -842,8 +851,10 @@ impl AppState {
             tracing::warn!("audit log worker exited (expected on shutdown)");
         });
 
+        #[cfg(feature = "legacy-git")]
         let git_max_concurrent_ops = config.git_max_concurrent_ops;
         let media_max_concurrent_uploads = config.media_max_concurrent_uploads;
+        #[cfg(feature = "legacy-git")]
         let git_store = crate::api::git::store::GitStore::new(
             &config.media.s3_endpoint,
             &config.media.s3_access_key,
@@ -853,6 +864,7 @@ impl AppState {
             config.media.s3_addressing_style,
         )
         .expect("media storage was already constructed with this S3 config");
+        #[cfg(feature = "legacy-git")]
         let git_pack_cache = Arc::new(
             crate::api::git::pack_cache::GitPackCache::new(
                 &config.git_pack_cache_path,
@@ -881,10 +893,13 @@ impl AppState {
             community_disconnect_publish_attempts: Arc::new(AtomicU64::new(0)),
             conn_semaphore: Arc::new(Semaphore::new(max_connections)),
             handler_semaphore: Arc::new(Semaphore::new(max_concurrent_handlers)),
+            #[cfg(feature = "legacy-git")]
             git_semaphore: Arc::new(Semaphore::new(git_max_concurrent_ops)),
             media_upload_semaphore: Arc::new(Semaphore::new(media_max_concurrent_uploads)),
+            #[cfg(feature = "legacy-workflow")]
             workflow_engine,
             relay_keypair,
+            #[cfg(feature = "legacy-mesh")]
             huddle_liveness_generation: Uuid::new_v4(),
 
             local_event_ids: Arc::new(
@@ -919,8 +934,11 @@ impl AppState {
             storage_sweep: Arc::new(tokio::sync::Mutex::new(
                 crate::storage_sweep::StorageSweepState::default(),
             )),
+            #[cfg(feature = "legacy-git")]
             git_store,
+            #[cfg(feature = "legacy-git")]
             git_pack_cache,
+            #[cfg(feature = "legacy-mesh")]
             audio_rooms: Arc::new(AudioRoomManager::new()),
             shutting_down: Arc::new(AtomicBool::new(false)),
             readiness: Arc::new(crate::readiness::ReadinessCoordinator::default()),
@@ -954,6 +972,7 @@ impl AppState {
             // construction (see test helpers in
             // `crates/buzz-test-client` once those land).
             tracer: Arc::new(crate::conformance::NoopTracer),
+            #[cfg(feature = "legacy-mesh")]
             mesh: Arc::new(std::sync::OnceLock::new()),
         };
         (
@@ -984,6 +1003,7 @@ impl AppState {
 
     /// Inter-relay mesh handle. `None` ⇒ mesh-off / single-instance: callers
     /// must no-op to today's behavior. Set once by `main.rs` after boot.
+    #[cfg(feature = "legacy-mesh")]
     pub fn mesh(&self) -> Option<&crate::mesh_boot::MeshHandle> {
         self.mesh.get()
     }
@@ -1472,6 +1492,7 @@ pub(crate) mod tests {
         let audit = buzz_audit::AuditService::new(pool.clone());
         let auth = buzz_auth::AuthService::new(config.auth.clone());
         let search = buzz_search::SearchService::new(pool.clone());
+        #[cfg(feature = "legacy-workflow")]
         let workflow_engine = Arc::new(buzz_workflow::WorkflowEngine::new(
             db.clone(),
             buzz_workflow::WorkflowConfig::default(),
@@ -1485,6 +1506,7 @@ pub(crate) mod tests {
             pubsub,
             auth,
             search,
+            #[cfg(feature = "legacy-workflow")]
             workflow_engine,
             nostr::Keys::generate(),
             media_storage,

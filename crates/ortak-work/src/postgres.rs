@@ -126,10 +126,11 @@ const DEPENDENCIES_SQL: &str = "SELECT d.depends_on_work_item_id, t.state
        FROM work_dependencies d
        JOIN work_items t
          ON t.company_id = d.company_id AND t.id = d.depends_on_work_item_id
-      WHERE d.company_id = $1 AND d.work_item_id = $2
+      WHERE d.company_id = $1 AND d.work_item_id = $2 AND d.released_at IS NULL
       ORDER BY d.created_at, d.depends_on_work_item_id";
 
-const ATTACHMENTS_SQL: &str = "SELECT id, kind, message_id, routing_decision_id, run_id, label
+const ATTACHMENTS_SQL: &str =
+    "SELECT id, kind, message_id, routing_decision_id, run_id, artifact_id, label
        FROM work_attachments
       WHERE company_id = $1 AND work_item_id = $2
       ORDER BY attached_at, kind, id";
@@ -143,6 +144,8 @@ const HISTORY_SQL: &str = "SELECT sequence, version, actor_type, actor_id, paylo
 const UPDATE_ITEM_SQL: &str = "UPDATE work_items
         SET state = $3,
             version = $4,
+            title = $6,
+            description = $7,
             updated_at = now(),
             completed_at = CASE WHEN $3 = 'completed' THEN coalesce(completed_at, now()) ELSE completed_at END,
             cancelled_at = CASE WHEN $3 = 'cancelled' THEN coalesce(cancelled_at, now()) ELSE cancelled_at END
@@ -300,6 +303,9 @@ fn attachment_from_row(row: &PgRow) -> Result<WorkAttachment> {
         "run" => AttachmentRef::Run {
             run_id: row.try_get("run_id")?,
         },
+        "artifact" => AttachmentRef::Artifact {
+            artifact_id: row.try_get("artifact_id")?,
+        },
         other => return Err(invalid(format!("work_attachments.kind holds {other:?}"))),
     };
     Ok(WorkAttachment {
@@ -419,6 +425,13 @@ async fn attachment_target_exists(
             sqlx::query("SELECT 1 FROM runs WHERE company_id = $1 AND id = $2")
                 .bind(scope.company_id())
                 .bind(run_id)
+                .fetch_optional(&mut *connection)
+                .await?
+        }
+        AttachmentRef::Artifact { artifact_id } => {
+            sqlx::query("SELECT 1 FROM artifacts WHERE company_id=$1 AND id=$2")
+                .bind(scope.company_id())
+                .bind(artifact_id)
                 .fetch_optional(&mut *connection)
                 .await?
         }
@@ -720,6 +733,8 @@ async fn persist_event(
         .bind(item.state.as_str())
         .bind(item.version)
         .bind(expected_version)
+        .bind(&item.title)
+        .bind(&item.description)
         .execute(&mut *connection)
         .await?
         .rows_affected();
@@ -765,18 +780,19 @@ async fn insert_attachment(
     attachment: &WorkAttachment,
     actor: &WorkActor,
 ) -> Result<()> {
-    let (message_id, decision_id, run_id) = match &attachment.reference {
+    let (message_id, decision_id, run_id, artifact_id) = match &attachment.reference {
         AttachmentRef::OfficeMessage { message_id } => {
-            (Some(MessageId::parse_hex(message_id)?), None, None)
+            (Some(MessageId::parse_hex(message_id)?), None, None, None)
         }
-        AttachmentRef::RoutingDecision { decision_id } => (None, Some(*decision_id), None),
-        AttachmentRef::Run { run_id } => (None, None, Some(*run_id)),
+        AttachmentRef::RoutingDecision { decision_id } => (None, Some(*decision_id), None, None),
+        AttachmentRef::Run { run_id } => (None, None, Some(*run_id), None),
+        AttachmentRef::Artifact { artifact_id } => (None, None, None, Some(*artifact_id)),
     };
     sqlx::query(
         "INSERT INTO work_attachments
              (company_id, work_item_id, id, kind, message_id, routing_decision_id, run_id,
-              label, attached_by_type, attached_by_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+              label, attached_by_type, attached_by_id, artifact_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
     )
     .bind(scope.company_id())
     .bind(work_item_id)
@@ -788,6 +804,7 @@ async fn insert_attachment(
     .bind(attachment.label.as_deref())
     .bind(actor.type_str())
     .bind(actor.id_str())
+    .bind(artifact_id)
     .execute(&mut *connection)
     .await?;
     Ok(())
@@ -852,8 +869,45 @@ async fn replayed_promotion(
     input: &NewWorkItem,
     message_id: MessageId,
 ) -> Result<WorkItemCreation> {
+    // Definition edits make the text mutable. Read creation provenance and the
+    // current aggregate coherently in the existing project-before-item order.
+    let project: Uuid = sqlx::query_scalar(ITEM_PROJECT_SQL)
+        .bind(scope.company_id())
+        .bind(existing)
+        .fetch_one(&mut *connection)
+        .await?;
+    sqlx::query(PROJECT_FOR_SHARE_SQL)
+        .bind(scope.company_id())
+        .bind(project)
+        .fetch_one(&mut *connection)
+        .await?;
+    sqlx::query("SELECT id FROM work_items WHERE company_id=$1 AND id=$2 FOR SHARE")
+        .bind(scope.company_id())
+        .bind(existing)
+        .fetch_one(&mut *connection)
+        .await?;
     let item = require_aggregate(connection, scope, existing).await?;
-    if !is_promotion_replay(&item.item, input) {
+    let original: Option<serde_json::Value> = sqlx::query_scalar(
+        "SELECT payload FROM work_item_history WHERE company_id=$1 AND work_item_id=$2
+         AND event_type='work.definition_edited' ORDER BY sequence LIMIT 1",
+    )
+    .bind(scope.company_id())
+    .bind(existing)
+    .fetch_optional(&mut *connection)
+    .await?;
+    let matches = match original {
+        Some(payload) => match serde_json::from_value::<WorkEvent>(payload)
+            .map_err(|_| invalid("unreadable original definition history"))?
+        {
+            WorkEvent::DefinitionEdited {
+                previous_definition_hash,
+                ..
+            } => previous_definition_hash == input.definition_fingerprint(),
+            _ => return Err(invalid("original definition history has wrong event type")),
+        },
+        None => is_promotion_replay(&item.item, input),
+    };
+    if !matches {
         return Err(WorkError::PromotionConflict {
             message_id: message_id.to_hex(),
             work_item_id: existing,
@@ -867,9 +921,11 @@ async fn replayed_promotion(
 
 // ── Repository ───────────────────────────────────────────────────────────────
 
+mod assignment;
 mod authorized;
 mod commands;
 mod creation;
+mod definition;
 mod reads;
 pub use authorized::*;
 

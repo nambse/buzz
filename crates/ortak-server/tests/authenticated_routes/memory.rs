@@ -9,7 +9,7 @@ const SECRET: &str = "sk-live-abcdef1234567890";
 /// Add real relational pins to the parent fixture's intentionally minimal run.
 /// The full stored wire contains private configuration to falsify broad JSON
 /// serialization, but only its narrow source/provenance projection is public.
-async fn snapshot(f: &Fixture, run: Uuid, channel: Uuid) -> Value {
+pub(super) async fn snapshot(f: &Fixture, run: Uuid, channel: Uuid) -> Value {
     let message: Vec<u8> =
         sqlx::query_scalar("SELECT message_id FROM runs WHERE company_id=$1 AND id=$2")
             .bind(f.company)
@@ -66,7 +66,7 @@ async fn snapshot(f: &Fixture, run: Uuid, channel: Uuid) -> Value {
     })
 }
 
-async fn store(f: &Fixture, run: Uuid, value: &Value, correct_hash: bool) {
+pub(super) async fn store(f: &Fixture, run: Uuid, value: &Value, correct_hash: bool) {
     let bytes = serde_json::to_vec(value).expect("snapshot bytes");
     let hash = if correct_hash {
         Sha256::digest(&bytes).to_vec()
@@ -79,7 +79,7 @@ async fn store(f: &Fixture, run: Uuid, value: &Value, correct_hash: bool) {
 
 /// Seed only persisted projection rows; the separate runtime PG tests exercise
 /// the actual delivery-to-memory scheduling service and immutable receipt path.
-async fn pending_write(f: &Fixture, run: Uuid, wire: &Value, channel: Uuid) {
+pub(super) async fn pending_write(f: &Fixture, run: Uuid, wire: &Value, channel: Uuid) {
     let content = format!("Published scoped answer; token={SECRET}");
     let event = EventBuilder::new(Kind::Custom(9), content.clone())
         .tags([Tag::parse(["h", &channel.to_string()]).expect("channel tag")])
@@ -126,7 +126,7 @@ async fn signed_memory_projection_is_bounded_redacted_audience_scoped_and_fail_c
     assert_eq!(
         body["memory"],
         json!({"scope":"run_scratch","run_id":run,
-        "recall":{"status":"not_prepared","records":[],"truncated":false,"prepared_at":null},"write":null})
+        "recall":{"status":"not_prepared","records":[],"truncated":false,"prepared_at":null},"write":null,"reviewed":[]})
     );
 
     let wire = snapshot(&f, run, f.channel).await;

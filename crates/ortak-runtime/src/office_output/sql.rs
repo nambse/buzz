@@ -30,7 +30,8 @@ SELECT r.status,r.delivery_intent,r.employee_id,r.employee_revision_id,r.routing
     c.status AS company_status,i.state AS inbox_state,i.event_kind,i.channel_id,
     i.event_created_at,i.author_pubkey,d.office_input_hash,
     (r.message_id=d.message_id AND r.root_message_id=d.root_message_id
-     AND rr.employee_revision_id=r.employee_revision_id AND rr.action='wake') AS pinned,
+     AND rr.employee_revision_id=r.employee_revision_id AND rr.action='wake'
+     AND r.employee_lifecycle_epoch=e.lifecycle_epoch) AS pinned,
     (rev.manifest #>> '{office,public_key}' IS NOT NULL
      AND lower(rev.manifest #>> '{office,public_key}')=lower(active.manifest #>> '{office,public_key}')
      AND rev.manifest #>> '{office,signer_ref}'=active.manifest #>> '{office,signer_ref}') AS same_identity,

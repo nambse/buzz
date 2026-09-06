@@ -58,6 +58,21 @@ impl Http {
         path: &str,
         body: Option<Value>,
     ) -> Result<(StatusCode, Value), MemoryError> {
+        self.request_limited(method, path, body, MAX_REQUEST, MAX_BODY).await
+    }
+
+    /// A stricter family can lower both limits without changing legacy callers.
+    pub(crate) async fn request_limited(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+        request_limit: usize,
+        response_limit: usize,
+    ) -> Result<(StatusCode, Value), MemoryError> {
+        if request_limit == 0 || request_limit > MAX_REQUEST || response_limit == 0 || response_limit > MAX_BODY {
+            return Err(invalid("invalid memory wire ceiling"));
+        }
         let url = self
             .origin
             .join(path)
@@ -72,7 +87,7 @@ impl Http {
         if let Some(value) = body {
             let bytes = serde_json::to_vec(&value)
                 .map_err(|_| invalid("invalid memory request encoding"))?;
-            if bytes.len() > MAX_REQUEST {
+            if bytes.len() > request_limit {
                 return Err(invalid("memory request exceeds wire ceiling"));
             }
             request = request.header(CONTENT_TYPE, "application/json").body(bytes);
@@ -101,7 +116,7 @@ impl Http {
         }
         if response
             .content_length()
-            .is_some_and(|n| n > MAX_BODY as u64)
+            .is_some_and(|n| n > response_limit as u64)
         {
             return Err(rejected("memory response exceeds wire ceiling"));
         }
@@ -111,7 +126,7 @@ impl Http {
             .await
             .map_err(|_| unavailable("memory response interrupted"))?
         {
-            if bytes.len().saturating_add(chunk.len()) > MAX_BODY {
+            if bytes.len().saturating_add(chunk.len()) > response_limit {
                 return Err(rejected("memory response exceeds wire ceiling"));
             }
             bytes.extend_from_slice(&chunk);

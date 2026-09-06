@@ -25,6 +25,7 @@ mod fixture;
 use fixture::*;
 mod canonical;
 use canonical::*;
+mod cohort;
 mod delivery;
 mod fencing;
 mod identity;

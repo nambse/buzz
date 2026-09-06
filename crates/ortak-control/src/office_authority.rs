@@ -8,7 +8,7 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-/// Server-read authority generation and the next time-based binding transition.
+/// Server-read authority generation and the next binding or selected-DM expiry.
 ///
 /// Fields are private: callers carry a repository witness instead of inventing
 /// an authorization generation from a message or runtime response.
@@ -42,7 +42,7 @@ impl OfficeAuthority {
         self.generation
     }
 
-    /// First future binding validity transition; equality is already expired.
+    /// First future binding/selected-DM transition; equality is already expired.
     pub fn valid_before(&self) -> Option<DateTime<Utc>> {
         self.valid_before
     }

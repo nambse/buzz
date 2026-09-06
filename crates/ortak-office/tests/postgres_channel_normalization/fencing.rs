@@ -54,6 +54,8 @@ async fn mutation_after_normalization_cannot_reserve_a_visit_or_dispatch() {
         ("UPDATE channel_members SET removed_at = now() WHERE $1::uuid IS NOT NULL AND community_id = $2 AND channel_id = $3 AND pubkey = $4", true),
         ("UPDATE employee_office_bindings SET valid_until = now() WHERE company_id = $1 AND $2::uuid IS NOT NULL AND $3::uuid IS NOT NULL AND public_key = $4", false),
         ("UPDATE channels SET archived_at = now() WHERE $1::uuid IS NOT NULL AND community_id = $2 AND id = $3 AND $4::bytea IS NOT NULL", false),
+        ("DELETE FROM office_routing_employees WHERE company_id=$1 AND $2::uuid IS NOT NULL AND $3::uuid IS NOT NULL AND $4::bytea IS NOT NULL", false),
+        ("DELETE FROM office_routing_channels WHERE company_id=$1 AND community_id=$2 AND channel_id=$3 AND $4::bytea IS NOT NULL", false),
     ] {
         let fixture = Fixture::new().await;
         fixture.set_visibility("private").await;

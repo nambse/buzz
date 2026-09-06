@@ -8,7 +8,7 @@
 //!
 //! - [`persist_with_office_inbox`] composes the inherited event-insert
 //!   transaction ([`buzz_db::event::EventInsertTxHook`]) with
-//!   [`ortak_control::postgres::insert_accepted_event_on`], so both rows
+//!   [`ortak_control::postgres::insert_selected_accepted_event_on`], so selected rows
 //!   commit or neither does.
 //! - Company scope is derived inside that statement from the authenticated
 //!   community through `office_company_bindings`. The signed event carries no
@@ -23,8 +23,10 @@
 //! Selection is gated by [`central_routing_applies`]: the
 //! `ORTAK_CENTRAL_ROUTING_ENABLED` flag defaults to off, and the disabled path
 //! in `ingest.rs` is the untouched inherited call. Routing workers, the
-//! outbox dispatcher, and the reconciliation scan for stored events that
-//! predate this seam are not part of this module.
+//! outbox dispatcher live outside this module. The server-owned database
+//! cohort is consulted inside the event transaction; absent/off/unselected
+//! channels are stored without routing input. Capture mode fills the inbox
+//! while its bounded stored-event reconciliation completes before dispatch.
 //!
 //! Remaining wiring point: `ingest_event_inner` in `handlers/ingest.rs`
 //! reaches this seam only for the non-replaceable persistent-event branch.
@@ -40,7 +42,7 @@ use buzz_core::{CommunityId, StoredEvent};
 use buzz_db::event::{EventInsertTxHook, ThreadMetadataParams};
 use buzz_db::{Db, DbError};
 use ortak_control::inbox::{InboxEvent, InboxInsertOutcome};
-use ortak_control::postgres::insert_accepted_event_on;
+use ortak_control::postgres::insert_selected_accepted_event_on;
 use ortak_control::{ControlError, MessageId};
 
 use super::ingest::IngestError;
@@ -51,8 +53,9 @@ use crate::config::Config;
 /// Channel messages (both stream-message kinds) and NIP-17 DM wraps are the
 /// only client-submitted persistent kinds a company router may act on.
 /// Reactions, edits, pins, channel metadata, and every other kind never
-/// enter the inbox; the router would drop them regardless. A reconciler that
-/// backfills inbox rows for stored events must use this same predicate.
+/// enter the inbox; the router would drop them regardless. Historical cohort
+/// reconciliation covers the two supported channel kinds; newly accepted DM
+/// wraps enter only the explicit unsupported-input audit path.
 pub fn is_office_routable_kind(kind: u32) -> bool {
     matches!(
         kind,
@@ -141,7 +144,7 @@ pub struct OfficeIngressOutcome {
     pub stored_event: StoredEvent,
     /// `false` when the event id was already stored (sender replay).
     pub was_inserted: bool,
-    /// Whether this transaction wrote the inbox row or found it present.
+    /// Whether this transaction captured the row, found it, or declined its cohort.
     pub inbox: InboxInsertOutcome,
 }
 
@@ -166,9 +169,10 @@ pub async fn persist_with_office_inbox(
     let hook: EventInsertTxHook<'_, InboxInsertOutcome> = Box::new(move |mut tx, receipt| {
         Box::pin(async move {
             let inbox_event = office_inbox_event(event, channel_id, receipt.created_at);
-            let outcome = insert_accepted_event_on(&mut tx, *community.as_uuid(), &inbox_event)
-                .await
-                .map_err(|error| DbError::TransactionHook(Box::new(error)))?;
+            let outcome =
+                insert_selected_accepted_event_on(&mut tx, *community.as_uuid(), &inbox_event)
+                    .await
+                    .map_err(|error| DbError::TransactionHook(Box::new(error)))?;
             Ok((tx, outcome))
         })
     });

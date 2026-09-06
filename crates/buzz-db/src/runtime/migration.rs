@@ -463,8 +463,9 @@ mod postgres_tests {
             .iter()
             .filter_map(|definition| {
                 let column = column_definition_name(definition)?;
+                let normalized = normalize_sql(definition);
                 (TENANT_KEY_COLUMNS.contains(&column.as_str())
-                    && normalize_sql(definition).contains("not null"))
+                    && (normalized.contains("not null") || normalized.contains("primary key")))
                 .then_some(column)
             })
             .collect()
@@ -609,9 +610,17 @@ mod postgres_tests {
                 }
 
                 let add_pos = normalized.find(" add ")?;
-                let definition = normalized[add_pos + " add ".len()..].trim();
-                constraint_lint_for_definition(&table, definition)
+                let actions = split_top_level_csv(&normalized[add_pos + 1..]);
+                Some(actions.into_iter().filter_map(move |action| {
+                    let definition = action.strip_prefix("add ")?.trim();
+                    let definition = definition.strip_prefix("column ").unwrap_or(definition);
+                    let definition = definition
+                        .strip_prefix("if not exists ")
+                        .unwrap_or(definition);
+                    constraint_lint_for_definition(&table, definition)
+                }))
             })
+            .flatten()
             .collect()
     }
 
@@ -732,7 +741,7 @@ mod postgres_tests {
         let mut migrations: Vec<_> = MIGRATOR.iter().collect();
         migrations.sort_by_key(|migration| migration.version);
 
-        assert_eq!(migrations.len(), 56);
+        assert_eq!(migrations.len(), 77);
         assert_eq!(migrations[0].version, 1);
         assert_eq!(&*migrations[0].description, "initial schema");
         assert!(migrations[0]
@@ -1688,6 +1697,38 @@ mod postgres_tests {
     }
 
     #[test]
+    fn migration_lint_handles_inline_tenant_primary_key_and_each_alter_action() {
+        let sql = r#"
+            CREATE TABLE widgets (
+                company_id UUID PRIMARY KEY,
+                community_id UUID NOT NULL,
+                UNIQUE (company_id, community_id)
+            );
+            ALTER TABLE widgets
+                ADD COLUMN artifact_id UUID,
+                ADD CONSTRAINT scoped_artifact FOREIGN KEY(company_id, artifact_id) REFERENCES artifacts(company_id,id),
+                ADD COLUMN id UUID NOT NULL DEFAULT gen_random_uuid() CHECK(id<>'00000000-0000-0000-0000-000000000000'),
+                ADD CONSTRAINT scoped_id UNIQUE(company_id,id),
+                ADD CONSTRAINT bad_id UNIQUE(id),
+                ADD CONSTRAINT bad_artifact FOREIGN KEY(artifact_id) REFERENCES artifacts(id);
+        "#;
+        let violations = scoped_constraint_violations(sql);
+        assert_eq!(violations.len(), 2, "{violations:?}");
+        assert!(violations
+            .iter()
+            .any(|item| item.kind == ConstraintKind::Unique && item.columns == ["id"]));
+        assert!(
+            violations
+                .iter()
+                .any(|item| item.kind == ConstraintKind::ForeignKey
+                    && item.columns == ["artifact_id"])
+        );
+        assert!(!table_has_not_null_tenant_key(&[
+            "company_id UUID".to_owned()
+        ]));
+    }
+
+    #[test]
     fn all_non_operator_global_tables_have_not_null_community_id() {
         let sql = migration_sql();
         let sql = sql.as_str();
@@ -1971,12 +2012,6 @@ mod postgres_tests {
             .expect("embedded migration 0029")
             .sql
             .as_ref();
-        let migration_0054: &str = MIGRATOR
-            .iter()
-            .find(|migration| migration.version == 54)
-            .expect("embedded migration 0054")
-            .sql
-            .as_ref();
         let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .and_then(std::path::Path::parent)
@@ -2042,15 +2077,18 @@ mod postgres_tests {
                 "schema.sql is missing operator-global registry row {row:?}"
             );
         }
-        let mut expected_fences = migration.fence_attachments.clone();
+        // Include every additive immutable migration, not only the original
+        // deletion migration and the first Work binding. Dynamic attachments
+        // are separately verified by the live migration/desired catalog gate.
+        let mut expected_fences: BTreeSet<String> = MIGRATOR
+            .iter()
+            .flat_map(|migration| surface(migration.sql.as_ref()).fence_attachments)
+            .collect();
         expected_fences.remove("product_feedback");
         expected_fences.remove("rate_limit_violations");
-        // Work's immutable Office binding remains community-scoped. Fold its
-        // actual migration attachment into the exact desired-state target set.
-        expected_fences.extend(surface(migration_0054).fence_attachments);
         assert_eq!(
             expected_fences, schema.fence_attachments,
-            "write-fence attachment targets differ after recovery policy and Work API bindings"
+            "write-fence attachment targets differ from the complete immutable migration chain"
         );
 
         // 0029's ALTER TABLE additions are expressed inline by the

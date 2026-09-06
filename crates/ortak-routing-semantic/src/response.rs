@@ -24,7 +24,7 @@ struct Output {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Score {
+pub(crate) struct Score {
     employee_id: EmployeeId,
     score: f64,
     evidence: String,
@@ -80,18 +80,40 @@ pub(crate) fn parse(
         return Err("refused_or_incomplete_response");
     }
     let output: Output = serde_json::from_str(&message.content).map_err(|_| "invalid_scores")?;
+    let scores = validate_scores(output.scores, input)?;
+    let usage = value.usage;
+    Ok(Parsed {
+        scores,
+        prompt_tokens: bounded_tokens(usage.as_ref().and_then(|u| u.prompt_tokens))?,
+        completion_tokens: bounded_tokens(usage.as_ref().and_then(|u| u.completion_tokens))?,
+        total_tokens: bounded_tokens(usage.as_ref().and_then(|u| u.total_tokens))?,
+        response_bytes: bytes.len(),
+    })
+}
+
+pub(crate) fn bounded_tokens(value: Option<u64>) -> Result<Option<u64>, &'static str> {
+    if value.is_some_and(|n| n > 1_000_000) {
+        return Err("invalid_usage");
+    }
+    Ok(value)
+}
+
+pub(crate) fn validate_scores(
+    output: Vec<Score>,
+    input: &SemanticScoringInput,
+) -> Result<Vec<SemanticScore>, &'static str> {
     let expected: BTreeSet<_> = input
         .request()
         .candidates()
         .iter()
         .map(|c| c.employee_id())
         .collect();
-    if output.scores.len() != expected.len() {
+    if output.len() != expected.len() {
         return Err("candidate_coverage");
     }
     let mut seen = BTreeSet::new();
-    let mut scores = Vec::with_capacity(output.scores.len());
-    for item in output.scores {
+    let mut scores = Vec::with_capacity(output.len());
+    for item in output {
         if !expected.contains(&item.employee_id)
             || !seen.insert(item.employee_id.clone())
             || !item.score.is_finite()
@@ -107,18 +129,5 @@ pub(crate) fn parse(
         });
     }
     scores.sort_by(|a, b| a.employee_id.cmp(&b.employee_id));
-    let tokens = |value: Option<u64>| -> Result<Option<u64>, &'static str> {
-        if value.is_some_and(|n| n > 1_000_000) {
-            return Err("invalid_usage");
-        }
-        Ok(value)
-    };
-    let usage = value.usage;
-    Ok(Parsed {
-        scores,
-        prompt_tokens: tokens(usage.as_ref().and_then(|u| u.prompt_tokens))?,
-        completion_tokens: tokens(usage.as_ref().and_then(|u| u.completion_tokens))?,
-        total_tokens: tokens(usage.as_ref().and_then(|u| u.total_tokens))?,
-        response_bytes: bytes.len(),
-    })
+    Ok(scores)
 }

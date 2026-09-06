@@ -15,14 +15,15 @@ async fn baseline(
     c: &mut PgConnection,
     scope: &CompanyScope,
     employee: &EmployeeId,
-) -> Result<(EmployeeStatus, Option<Uuid>)> {
-    let row=sqlx::query("SELECT e.status,e.active_revision_id FROM employees e JOIN companies co ON co.id=e.company_id WHERE e.company_id=$1 AND e.id=$2 AND co.status='active' FOR SHARE OF e")
+) -> Result<(EmployeeStatus, Option<Uuid>, i64)> {
+    let row=sqlx::query("SELECT e.status,e.active_revision_id,e.lifecycle_epoch FROM employees e JOIN companies co ON co.id=e.company_id WHERE e.company_id=$1 AND e.id=$2 AND co.status='active' FOR SHARE OF e")
         .bind(scope.company_id()).bind(employee.as_str()).fetch_optional(c).await?
         .ok_or_else(||ControlError::InvalidData("activation employee/company is unavailable".into()))?;
     let status: String = row.try_get("status")?;
     Ok((
         parse_column("employees.status", &status)?,
         row.try_get("active_revision_id")?,
+        row.try_get("lifecycle_epoch")?,
     ))
 }
 async fn current(
@@ -48,6 +49,9 @@ pub(super) async fn prepare(
     let mut tx = control.pool.begin().await?;
     configure(&mut tx).await?;
     let office = super::super::lock_office_authority_on(&mut tx, scope).await?;
+    control
+        .provisioning_guard_on(&mut tx, scope, Some(id))
+        .await?;
     sqlx::query("SELECT id FROM provisioning_operations WHERE company_id=$1 AND id=$2 FOR SHARE")
         .bind(scope.company_id())
         .bind(id)
@@ -55,12 +59,22 @@ pub(super) async fn prepare(
         .await?
         .ok_or(ProvisioningError::UnknownOperation { operation_id: id })?;
     let operation = current(&mut tx, scope, id).await?;
-    let (status, revision) = baseline(&mut tx, scope, &operation.employee_id).await?;
+    let (status, revision, epoch) = baseline(&mut tx, scope, &operation.employee_id).await?;
+    let reenable = control.reenable_operation_on(&mut tx, scope, id).await?;
     let now = sqlx::query_scalar("SELECT clock_timestamp()")
         .fetch_one(&mut *tx)
         .await?;
-    let target = ActivationTarget::issue(
-        scope, &operation, running, status, revision, office, now, lifetime,
+    let target = ActivationTarget::issue_with_lifecycle(
+        scope,
+        &operation,
+        running,
+        status,
+        revision,
+        office,
+        now,
+        lifetime,
+        reenable,
+        Some(epoch),
     )?;
     tx.commit().await?;
     Ok(target)
@@ -85,8 +99,29 @@ pub(super) async fn validate(
         }
         .into());
     }
+    let employee = &activation.employee;
+    if employee.runtime.adapter == "hermes"
+        && crate::workspace::validate_hermes_policy(&employee.runtime, &employee.permissions)
+            .map_err(|_| {
+                ControlError::InvalidData("unsupported activation workspace policy".into())
+            })?
+    {
+        let available: bool =
+            sqlx::query_scalar("SELECT ortak_workspace_profile_available($1,$2,$3)")
+                .bind(scope.company_id())
+                .bind(employee.id.as_str())
+                .bind(&employee.runtime.workspace_ref)
+                .fetch_one(&mut *c)
+                .await?;
+        if !available {
+            return Err(ControlError::InvalidData(
+                "selected workspace registry is not current at activation".into(),
+            ));
+        }
+    }
     let operation = current(&mut *c, scope, id).await?;
-    let (status, revision) = baseline(&mut *c, scope, &operation.employee_id).await?;
+    let (status, revision, epoch) = baseline(&mut *c, scope, &operation.employee_id).await?;
+    target.validate_lifecycle_epoch(epoch)?;
     let now = sqlx::query_scalar("SELECT clock_timestamp()")
         .fetch_one(&mut *c)
         .await?;

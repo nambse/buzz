@@ -51,6 +51,31 @@ use crate::conformance::{
     state_for_request, EmitGuard, TraceAction, Verdict,
 };
 
+/// NIP-59 backdates the outer envelope by up to two days. This only widens
+/// kind1059's past window; future skew and every ordinary kind stay at 15 minutes.
+fn validate_event_timestamp(event: &Event, now: i64) -> Result<(), IngestError> {
+    const CLOCK_SKEW_SECONDS: u64 = 900;
+    const GIFT_WRAP_BACKDATE_SECONDS: u64 = 48 * 60 * 60;
+    let now = u64::try_from(now)
+        .map_err(|_| IngestError::Internal("error: invalid server clock".into()))?;
+    let past = if event_kind_u32(event) == KIND_GIFT_WRAP {
+        GIFT_WRAP_BACKDATE_SECONDS + CLOCK_SKEW_SECONDS
+    } else {
+        CLOCK_SKEW_SECONDS
+    };
+    let timestamp = event.created_at.as_secs();
+    if timestamp < now.saturating_sub(past) || timestamp > now.saturating_add(CLOCK_SKEW_SECONDS) {
+        return Err(IngestError::Rejected(
+            "invalid: event timestamp too far from server time".into(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "ingest_timestamp_tests.rs"]
+mod timestamp_tests;
+
 fn huddle_backing_channel_id(event: &Event) -> Result<Uuid, IngestError> {
     let content: serde_json::Value = serde_json::from_str(&event.content).map_err(|_| {
         IngestError::Rejected("invalid: Huddle event content must be a JSON object".into())
@@ -932,7 +957,7 @@ pub(crate) async fn resolve_nip10_thread_meta(
 /// a top-level reply.
 ///
 /// Shared by [`resolve_nip10_thread_meta`] (client path) and
-/// [`resolve_relay_reply_thread_meta`] (workflow path) so the two cannot
+/// `resolve_relay_reply_thread_meta` (workflow path) so the two cannot
 /// diverge. Returns `(root_event_id, root_event_created_at, depth)`.
 async fn derive_ancestry_from_parent_tags(
     community_id: CommunityId,
@@ -972,6 +997,7 @@ async fn derive_ancestry_from_parent_tags(
 /// Carries the parent and root identifiers plus the reply's depth, so the
 /// caller can both emit matching NIP-10 `root`/`reply` tags and persist thread
 /// metadata for the signed reply event.
+#[cfg(feature = "legacy-workflow")]
 pub(crate) struct ReplyAncestry {
     pub parent_event_id: Vec<u8>,
     pub parent_event_created_at: chrono::DateTime<Utc>,
@@ -980,6 +1006,7 @@ pub(crate) struct ReplyAncestry {
     pub depth: i32,
 }
 
+#[cfg(feature = "legacy-workflow")]
 impl ReplyAncestry {
     /// Root event ID as lowercase hex, for the NIP-10 `root` tag.
     pub fn root_hex(&self) -> String {
@@ -1018,6 +1045,7 @@ impl ReplyAncestry {
 /// `e` tags, this derives ancestry from a known `parent_hex` (the triggering
 /// event) and *computes* the correct root and depth. Enforces the same-channel
 /// invariant and the depth limit that the ingest path applies.
+#[cfg(feature = "legacy-workflow")]
 pub(crate) async fn resolve_relay_reply_thread_meta(
     community_id: CommunityId,
     parent_hex: &str,
@@ -2178,6 +2206,9 @@ async fn ingest_event_inner(
     let event_id_hex = event.id.to_hex();
     let kind_u32 = event_kind_u32(&event);
     debug!(event_id = %event_id_hex, kind = kind_u32, "ingest_event");
+    if let Some(reason) = crate::legacy::unavailable_event(kind_u32) {
+        return Err(IngestError::Rejected(reason.to_string()));
+    }
 
     // Durable community write fence: persistent ingest is a DB write the
     // deletion engine cannot exclude via serving-write leases (those cover
@@ -2232,14 +2263,8 @@ async fn ingest_event_inner(
     }
     let event = std::sync::Arc::try_unwrap(event).unwrap_or_else(|arc| (*arc).clone());
 
-    const MAX_TIMESTAMP_DRIFT_SECS: i64 = 900; // ±15 minutes
-    let now = chrono::Utc::now().timestamp();
-    let event_ts = event.created_at.as_secs() as i64;
-    if (event_ts - now).abs() > MAX_TIMESTAMP_DRIFT_SECS {
-        return Err(IngestError::Rejected(
-            "invalid: event timestamp too far from server time".into(),
-        ));
-    }
+    let now = Utc::now().timestamp();
+    validate_event_timestamp(&event, now)?;
 
     const MAX_EVENT_CONTENT_BYTES: usize = 256 * 1024; // 256 KB
     if event.content.len() > MAX_EVENT_CONTENT_BYTES {

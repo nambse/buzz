@@ -37,6 +37,16 @@ pub struct OfficeSignerBinding {
     pub secret_env: String,
 }
 
+impl OfficeSignerBinding {
+    /// Validates this public selection without reading its environment value.
+    pub fn validate(&self) -> Result<(), OfficeTransportConfigError> {
+        if self.company_id.is_nil() || !valid_env_name(&self.secret_env) {
+            return Err(OfficeTransportConfigError::InvalidConfiguration);
+        }
+        Ok(())
+    }
+}
+
 /// Closed configuration errors never include secret values or parser input.
 #[derive(Debug, thiserror::Error)]
 pub enum OfficeTransportConfigError {
@@ -78,7 +88,7 @@ impl EnvOfficeSigner {
         })
     }
 
-    fn load(
+    pub(crate) fn load(
         bindings: Vec<OfficeSignerBinding>,
         mut read: impl FnMut(&str) -> Result<String, OfficeTransportConfigError>,
     ) -> Result<Self, OfficeTransportConfigError> {
@@ -89,14 +99,12 @@ impl EnvOfficeSigner {
         let mut public_keys = HashSet::new();
         let mut entries = Vec::with_capacity(bindings.len());
         for binding in bindings {
-            if binding.company_id.is_nil()
-                || !valid_env_name(&binding.secret_env)
-                || !identities.insert((
-                    binding.company_id,
-                    binding.employee_id.clone(),
-                    binding.signer_ref.as_str().to_owned(),
-                ))
-                || !public_keys.insert(binding.public_key.to_hex())
+            binding.validate()?;
+            if !identities.insert((
+                binding.company_id,
+                binding.employee_id.clone(),
+                binding.signer_ref.as_str().to_owned(),
+            )) || !public_keys.insert(binding.public_key.to_hex())
             {
                 return Err(OfficeTransportConfigError::InvalidConfiguration);
             }
@@ -122,7 +130,7 @@ impl EnvOfficeSigner {
         })
     }
 
-    fn keys(
+    pub(crate) fn keys(
         &self,
         company: Uuid,
         employee: &EmployeeId,
@@ -155,34 +163,41 @@ impl EnvOfficeSigner {
             reference,
             event.public_key(),
         )?;
-        let raw = vec![
-            vec!["u".to_owned(), url.to_owned()],
-            vec!["method".to_owned(), "POST".to_owned()],
-            vec![
-                "payload".to_owned(),
-                hex::encode(Sha256::digest(event.signed_bytes())),
-            ],
-            vec!["nonce".to_owned(), Uuid::new_v4().to_string()],
-        ];
-        let tags = raw
-            .into_iter()
-            .map(nostr::Tag::parse)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| signing_failed())?;
-        let signed = nostr::UnsignedEvent::new(
-            keys.public_key(),
-            nostr::Timestamp::now(),
-            nostr::Kind::from_u16(27235),
-            tags,
-            String::new(),
-        )
-        .sign_with_keys(keys)
-        .map_err(|_| signing_failed())?;
-        Ok(format!(
-            "Nostr {}",
-            base64::engine::general_purpose::STANDARD.encode(signed.as_json())
-        ))
+        http_authorization(keys, event.signed_bytes(), url)
     }
+}
+
+/// Shared NIP-98 construction; only owning, independently authorized adapters
+/// supply keys and the exact bounded body they are about to publish.
+pub(crate) fn http_authorization(
+    keys: &nostr::Keys,
+    bytes: &[u8],
+    url: &str,
+) -> Result<String, OfficeSignerError> {
+    let raw = vec![
+        vec!["u".to_owned(), url.to_owned()],
+        vec!["method".to_owned(), "POST".to_owned()],
+        vec!["payload".to_owned(), hex::encode(Sha256::digest(bytes))],
+        vec!["nonce".to_owned(), Uuid::new_v4().to_string()],
+    ];
+    let tags = raw
+        .into_iter()
+        .map(nostr::Tag::parse)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| signing_failed())?;
+    let signed = nostr::UnsignedEvent::new(
+        keys.public_key(),
+        nostr::Timestamp::now(),
+        nostr::Kind::from_u16(27235),
+        tags,
+        String::new(),
+    )
+    .sign_with_keys(keys)
+    .map_err(|_| signing_failed())?;
+    Ok(format!(
+        "Nostr {}",
+        base64::engine::general_purpose::STANDARD.encode(signed.as_json())
+    ))
 }
 
 impl OfficeSigner for EnvOfficeSigner {
@@ -349,7 +364,7 @@ impl OfficePublisher for HttpOfficePublisher {
     }
 }
 
-fn valid_origin(origin: &str) -> bool {
+pub(crate) fn valid_origin(origin: &str) -> bool {
     if origin.len() > 2048 {
         return false;
     }

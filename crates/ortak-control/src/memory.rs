@@ -15,6 +15,9 @@ use uuid::Uuid;
 
 use crate::adapter::{Detail, HealthReport, ResourceOutcome};
 
+pub mod conversation;
+pub mod employee;
+
 /// Memory operations an adapter may support.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]

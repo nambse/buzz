@@ -10,7 +10,7 @@ use ortak_control::runtime::{
     RuntimeCapabilities, RuntimeCapability, RuntimeCursor, RuntimeError, RuntimeEvent,
     RuntimeEventBatch, RuntimeResourceRequest, RuntimeRunRef,
 };
-use ortak_domain::{ProvisioningMode, RuntimeBinding};
+use ortak_domain::{CredentialRef, ProvisioningMode, RuntimeBinding};
 use reqwest::{
     header::{HeaderMap, HeaderValue, AUTHORIZATION},
     Method, StatusCode,
@@ -20,6 +20,12 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use url::Url;
 use uuid::Uuid;
+
+mod probe;
+mod workspace;
+mod confidential;
+pub use confidential::{ConfidentialEvent, ConfidentialEventBatch, ConfidentialFailure, ConfidentialRunReceipt, ConfidentialRunStatus};
+pub use probe::ProfileProbeStatus;
 
 /// A bridge connection fixed to one company and one configured origin.
 #[derive(Clone)]
@@ -49,24 +55,53 @@ fn invalid() -> RuntimeError {
 }
 
 impl HermesAdapter {
+    /// Validates the fixed origin before the caller resolves any credential.
+    pub fn validate_connection_origin(origin: &str) -> Result<(), RuntimeError> {
+        parse_origin(origin).map(|_| ())
+    }
+
+    /// Reads only the owning bridge's current credential availability for this
+    /// exact profile. No credential value, refresh or provider request occurs.
+    pub async fn resolvable_credential_references(
+        &self,
+        binding: &RuntimeBinding,
+    ) -> Result<Vec<CredentialRef>, RuntimeError> {
+        if binding.adapter != "hermes" || binding.credential_refs.len() > 128 {
+            return Err(invalid());
+        }
+        let profile: Option<WireProfile> = self
+            .request(
+                Method::POST,
+                "/v1/profiles/inspect",
+                Some(json!({"company_id": self.company_id, "binding": binding})),
+            )
+            .await?;
+        let Some(profile) = profile else {
+            return Ok(Vec::new());
+        };
+        if Some(&profile.profile_ref) != binding.profile_ref.as_ref()
+            || profile.credential_references.len() > binding.credential_refs.len()
+            || profile
+                .credential_references
+                .iter()
+                .any(|r| !binding.credential_refs.contains(r))
+            || profile
+                .credential_references
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                != profile.credential_references.len()
+        {
+            return Err(invalid());
+        }
+        Ok(profile.credential_references)
+    }
+
     /// Creates a bounded client. Redirects, proxy environment variables, URL
     /// credentials and non-loopback plaintext endpoints are refused.
     pub fn new(company_id: Uuid, origin: &str, bearer_token: &str) -> Result<Self, RuntimeError> {
-        let origin = Url::parse(origin).map_err(|_| invalid())?;
-        let loopback = origin.host_str().is_some_and(|h| {
-            h == "localhost"
-                || h.parse::<std::net::IpAddr>()
-                    .is_ok_and(|ip| ip.is_loopback())
-        });
-        if !origin.username().is_empty()
-            || origin.password().is_some()
-            || origin.query().is_some()
-            || origin.fragment().is_some()
-            || origin.path() != "/"
-            || !(origin.scheme() == "https" || (origin.scheme() == "http" && loopback))
-            || bearer_token.is_empty()
-            || bearer_token.len() > 4096
-        {
+        let origin = parse_origin(origin)?;
+        if bearer_token.is_empty() || bearer_token.len() > 4096 {
             return Err(invalid());
         }
         let mut authorization =
@@ -164,6 +199,28 @@ impl HermesAdapter {
     }
 }
 
+fn parse_origin(origin: &str) -> Result<Url, RuntimeError> {
+    let origin = Url::parse(origin).map_err(|_| invalid())?;
+    let loopback = match origin.host() {
+        Some(url::Host::Domain("localhost")) => true,
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        _ => false,
+    };
+    if origin.host().is_none()
+        || !origin.username().is_empty()
+        || origin.password().is_some()
+        || origin.query().is_some()
+        || origin.fragment().is_some()
+        || origin.path() != "/"
+        || origin.port() == Some(0)
+        || !(origin.scheme() == "https" || origin.scheme() == "http" && loopback)
+    {
+        return Err(invalid());
+    }
+    Ok(origin)
+}
+
 #[derive(Deserialize)]
 struct WireReceipt {
     runtime_run_ref: RuntimeRunRef,
@@ -189,6 +246,8 @@ struct WireEvent {
 struct WireProfile {
     profile_ref: String,
     healthy: bool,
+    #[serde(default)]
+    credential_references: Vec<CredentialRef>,
 }
 
 impl RuntimeAdapter for HermesAdapter {
@@ -259,20 +318,15 @@ impl RuntimeAdapter for HermesAdapter {
     }
 
     async fn start_run(&self, spec: &RunSpec) -> Result<RunStartReceipt, RuntimeError> {
-        spec.validate()?;
-        let run_id = self.run_id(&spec.idempotency_key)?;
-        if run_id != spec.run_id || spec.binding.adapter != self.adapter_name() {
-            return Err(invalid());
-        }
-        let receipt = self
-            .request(
-                Method::POST,
-                "/v1/runs",
-                Some(json!({"company_id": self.company_id, "spec": spec})),
-            )
-            .await?
-            .ok_or_else(unavailable)?;
-        self.receipt(run_id, receipt)
+        self.start_selected(spec, None).await
+    }
+
+    async fn start_run_with_workspace(
+        &self,
+        spec: &RunSpec,
+        workspace: Option<&ortak_control::workspace::WorkspaceGrant>,
+    ) -> Result<RunStartReceipt, RuntimeError> {
+        self.start_selected(spec, workspace).await
     }
 
     async fn lookup_start(

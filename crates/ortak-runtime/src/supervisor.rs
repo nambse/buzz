@@ -50,6 +50,7 @@ use crate::repository::{
     AppendOutcome, CorrelationOutcome, DispatchAuthorization, PrepareOutcome, RunDispatchRepository,
 };
 use crate::state::{status_after, RunStatus};
+use crate::workspace_tools::{NoRunWorkspace, RunWorkspace};
 
 /// Stable code recorded when the runtime reports the run terminal without
 /// emitting a terminal event.
@@ -197,11 +198,12 @@ pub enum CancellationOutcome {
 
 /// Dispatches, pumps, and cancels runs over one runtime adapter.
 #[derive(Clone, Debug)]
-pub struct RunSupervisor<R, A, M = NoRunMemory> {
+pub struct RunSupervisor<R, A, M = NoRunMemory, W = NoRunWorkspace> {
     repository: R,
     adapter: A,
     config: SupervisorConfig,
     memory: M,
+    workspace: W,
 }
 
 impl<R, A> RunSupervisor<R, A, NoRunMemory>
@@ -216,11 +218,12 @@ where
             adapter,
             config,
             memory: NoRunMemory,
+            workspace: NoRunWorkspace,
         }
     }
 }
 
-impl<R, A, M> RunSupervisor<R, A, M>
+impl<R, A, M, W> RunSupervisor<R, A, M, W>
 where
     R: RunDispatchRepository + OutboxRepository,
     A: RuntimeAdapter,
@@ -230,12 +233,36 @@ where
     pub fn with_memory<'a, N: ortak_control::memory::MemoryAdapter>(
         self,
         memory: &'a N,
-    ) -> RunSupervisor<R, A, AdapterRunMemory<'a, N>> {
+    ) -> RunSupervisor<R, A, AdapterRunMemory<'a, N>, W> {
         RunSupervisor {
             repository: self.repository,
             adapter: self.adapter,
             config: self.config,
             memory: AdapterRunMemory::new(memory),
+            workspace: self.workspace,
+        }
+    }
+
+    /// Composes an explicit provider that preserves canonical snapshot admission.
+    pub fn with_run_memory<N: RunMemory>(self, memory: N) -> RunSupervisor<R, A, N, W> {
+        RunSupervisor {
+            repository: self.repository,
+            adapter: self.adapter,
+            config: self.config,
+            memory,
+            workspace: self.workspace,
+        }
+    }
+
+    /// Composes an explicitly selected workspace adapter. Empty policy remains
+    /// independent from workspace availability.
+    pub fn with_workspace<N: RunWorkspace>(self, workspace: N) -> RunSupervisor<R, A, M, N> {
+        RunSupervisor {
+            repository: self.repository,
+            adapter: self.adapter,
+            config: self.config,
+            memory: self.memory,
+            workspace,
         }
     }
 
@@ -253,8 +280,12 @@ where
     where
         R: RunContextRepository,
         M: RunMemory,
+        W: RunWorkspace,
     {
-        if lease.kind != OutboxKind::RunDispatch {
+        if !matches!(
+            lease.kind,
+            OutboxKind::RunDispatch | OutboxKind::WorkRunDispatch
+        ) {
             return Err(RunSupervisionError::WrongKind { found: lease.kind });
         }
 
@@ -359,7 +390,30 @@ where
             }
         };
         let spec = frozen.spec();
-        let receipt = match self.adapter.start_run(spec).await {
+        let workspace = match self
+            .workspace
+            .prepare(scope, lease, &authority, prepared.run_id)
+            .await
+        {
+            Ok(workspace) => workspace,
+            Err(_) => {
+                let error = "workspace preparation or current admission failed";
+                let retry = self.record_failure(scope, lease, error).await?;
+                return Ok(match retry {
+                    OutboxFailOutcome::Stale => DispatchOutcome::StaleLease,
+                    retry => DispatchOutcome::RuntimeFailed {
+                        run_id: prepared.run_id,
+                        error: error.into(),
+                        retry,
+                    },
+                });
+            }
+        };
+        let receipt = match self
+            .adapter
+            .start_run_with_workspace(spec, workspace.as_ref())
+            .await
+        {
             Ok(receipt) => receipt,
             Err(error) => {
                 let retry = self

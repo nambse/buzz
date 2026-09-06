@@ -39,20 +39,29 @@ pub async fn reconcile_office_runs(
     limit: usize,
 ) -> Result<ReconciliationReport> {
     let due = sqlx::query(
-        "SELECT r.id,
+        "SELECT r.id, r.work_item_id IS NOT NULL AS is_work,
                 c.status = 'active' AND cm.deletion_state = 'active'
                     AND cm.deleted_at IS NULL AS office_active
            FROM runs r
            JOIN companies c ON c.id = r.company_id
+           JOIN employees employee ON employee.company_id=r.company_id AND employee.id=r.employee_id
            LEFT JOIN office_company_bindings b ON b.company_id = c.id
            LEFT JOIN communities cm ON cm.id = b.community_id
            LEFT JOIN office_authority_generations g ON g.company_id = c.id
-          WHERE r.company_id = $1 AND r.status IN ('queued','running','waiting')
+           LEFT JOIN work_executions wx ON wx.company_id=r.company_id AND wx.run_id=r.id
+           LEFT JOIN work_authority_generations wg ON wg.company_id=wx.company_id AND wg.project_id=wx.project_id
+          WHERE r.company_id = $1 AND r.payload_mode='ordinary' AND r.status IN ('queued','running','waiting')
             AND NOT EXISTS (SELECT 1 FROM runtime_cancellations x
                             WHERE x.company_id = r.company_id AND x.run_id = r.id)
             AND (r.office_admission_generation IS NULL
+                 OR r.employee_lifecycle_epoch<>employee.lifecycle_epoch
+                 OR employee.status='disabled'
                  OR r.office_admission_generation <> coalesce(g.generation, 0)
                  OR r.office_admission_valid_before <= clock_timestamp()
+                 OR NOT ortak_run_reviewed_memory_current(r.company_id,r.id)
+                 OR (r.runtime_run_ref IS NOT NULL AND NOT ortak_run_workspace_current(r.company_id,r.id))
+                 OR (r.work_item_id IS NOT NULL AND (wx.run_id IS NULL OR wg.project_id IS NULL
+                     OR r.work_admission_generation IS DISTINCT FROM wg.generation))
                  OR c.status <> 'active' OR cm.id IS NULL
                  OR cm.deletion_state <> 'active' OR cm.deleted_at IS NOT NULL)
           ORDER BY r.updated_at, r.id LIMIT $2",
@@ -95,7 +104,15 @@ pub async fn reconcile_office_runs(
         };
         if !authorized
             && control
-                .enqueue_cancellation(scope, run_id, CancellationReason::OfficeRevoked)
+                .enqueue_cancellation(
+                    scope,
+                    run_id,
+                    if row.try_get::<bool, _>("is_work")? {
+                        CancellationReason::WorkRevoked
+                    } else {
+                        CancellationReason::OfficeRevoked
+                    },
+                )
                 .await?
         {
             report.revocations += 1;

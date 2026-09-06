@@ -6,7 +6,7 @@ use ortak_control::memory::{
     MemoryBudget, MemoryCapability, MemoryFact, MemoryProvenance, MemoryRecallRequest, MemoryScope,
     MemoryWriteReceipt, MemoryWriteRequest,
 };
-use ortak_domain::{EmployeeId, MemoryBinding, ProvisioningMode};
+use ortak_domain::{EmployeeId, MemoryBinding};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -47,8 +47,9 @@ pub struct MemoryRoundtripReceipt {
 impl HonchoMemoryAdapter {
     /// Writes one diagnostic fact and validates an exact, nonempty scoped recall.
     ///
-    /// This explicit operation is allowed only for fresh extension-owned bundles.
-    /// It is never called by health, capability probing or adoption. Persist the
+    /// This explicit operation requires a verified extension-owned bundle, from
+    /// creation or explicit receipt recovery. It is never called by health,
+    /// capability probing or adoption. Persist the
     /// supplied diagnostic run/time before calling; retries use the same receipt.
     pub async fn validate_memory_roundtrip(
         &self,
@@ -56,8 +57,7 @@ impl HonchoMemoryAdapter {
     ) -> Result<MemoryRoundtripReceipt, MemoryError> {
         self.bounded(async {
             let allowed = self.allowed(Some(&request.employee_id), &request.binding)?;
-            if allowed.mode != ProvisioningMode::Create
-                || request.run_id.is_nil()
+            if request.run_id.is_nil()
                 || !self
                     .creation_receipts
                     .lock()

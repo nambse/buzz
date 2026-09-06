@@ -26,7 +26,11 @@ impl SemanticScorer for PendingScorer {
             usage: None,
         }
     }
-    async fn score(&self, _: &SemanticScoringInput) -> ScoringOutcome {
+    async fn score(
+        &self,
+        _: &SemanticScoringInput,
+        _budget: crate::ScoringBudget,
+    ) -> ScoringOutcome {
         self.calls.fetch_add(1, Ordering::SeqCst);
         let _held = PendingCall(self.drops.clone());
         std::future::pending().await
@@ -90,7 +94,11 @@ impl SemanticScorer for BlockingScorer {
         .metadata()
     }
 
-    async fn score(&self, input: &SemanticScoringInput) -> ScoringOutcome {
+    async fn score(
+        &self,
+        input: &SemanticScoringInput,
+        _budget: crate::ScoringBudget,
+    ) -> ScoringOutcome {
         // Intentionally block one poll: Tokio cannot preempt a misbehaving
         // adapter, so its completed result must be checked against the deadline.
         std::thread::sleep(Duration::from_millis(20));
@@ -125,4 +133,40 @@ async fn a_completed_score_returned_after_blocking_one_poll_is_still_too_late() 
         "removing the post-poll deadline check would accept late high scores"
     );
     assert_eq!(outcome.metadata.model, Some("pinned-model".to_owned()));
+}
+
+struct BudgetScorer(std::sync::Mutex<Vec<Instant>>);
+impl SemanticScorer for BudgetScorer {
+    fn metadata(&self) -> ScorerMetadata {
+        BlockingScorer.metadata()
+    }
+    async fn score(
+        &self,
+        _: &SemanticScoringInput,
+        budget: crate::ScoringBudget,
+    ) -> ScoringOutcome {
+        self.0.lock().unwrap().push(budget.deadline());
+        ScoringOutcome {
+            result: Err(SemanticScoringFailure::Unavailable),
+            metadata: self.metadata(),
+        }
+    }
+}
+
+#[tokio::test]
+async fn every_rescore_receives_the_original_control_deadline() {
+    let fixture = Fixture::new(MessageId::from_bytes([23; 32]), "General routing question");
+    let scorer = BudgetScorer(std::sync::Mutex::new(Vec::new()));
+    let deadline = Instant::now() + Duration::from_millis(100);
+    score_before_deadline(&scorer, &fixture.input(), deadline).await;
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    score_before_deadline(&scorer, &fixture.input(), deadline).await;
+    assert_eq!(*scorer.0.lock().unwrap(), vec![deadline, deadline]);
+    assert!(crate::ScoringBudget::for_duration(Duration::ZERO)
+        .remaining()
+        .is_zero());
+    assert!(
+        crate::ScoringBudget::for_duration(Duration::from_secs(60)).remaining()
+            <= Duration::from_secs(5)
+    );
 }

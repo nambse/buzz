@@ -6,18 +6,20 @@
 //! The control layer owns deadlines, current authority and durable silent outcomes.
 
 mod config;
+mod hermes;
 mod request;
 mod response;
 mod state;
 
 pub use config::{SemanticConfig, SemanticToken};
+pub use hermes::{HermesCodexConfig, HermesCodexScorer};
 
 use ortak_control::{
     ports::{ScoringOutcome, SemanticScorer},
     routing::ScorerMetadata,
     run_event::RedactionPolicy,
     semantic::SemanticScoringInput,
-    CompanyScope,
+    CompanyScope, ScoringBudget,
 };
 use ortak_router::SemanticScoringFailure;
 use reqwest::{
@@ -187,8 +189,11 @@ impl SemanticScorer for ChatCompletionsScorer {
         }
     }
 
-    async fn score(&self, input: &SemanticScoringInput) -> ScoringOutcome {
+    async fn score(&self, input: &SemanticScoringInput, budget: ScoringBudget) -> ScoringOutcome {
         let started = Instant::now();
+        if budget.remaining().is_zero() {
+            return self.outcome(Err("request_timeout"), started, None, false);
+        }
         if input.company_id() != self.company {
             return self.outcome(Err("company_mismatch"), started, None, false);
         }
@@ -207,9 +212,14 @@ impl SemanticScorer for ChatCompletionsScorer {
             Ok(attempt) => attempt,
             Err(code) => return self.outcome(Err(code), started, Some(&request), false),
         };
-        let result = tokio::time::timeout(Duration::from_secs(5), self.remote(&request, input))
+        let result = tokio::time::timeout_at(budget.deadline(), self.remote(&request, input))
             .await
             .unwrap_or(Err("request_timeout"));
+        let result = if budget.remaining().is_zero() {
+            Err("request_timeout")
+        } else {
+            result
+        };
         attempt.finish(result.is_ok());
         if let Ok(parsed) = &result {
             self.state.insert(request.key, parsed.clone());

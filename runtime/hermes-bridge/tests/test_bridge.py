@@ -6,12 +6,13 @@ import tempfile
 import unittest
 from types import SimpleNamespace
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from pathlib import Path
 from uuid import uuid4
 
 from ortak_hermes_bridge.journal import BridgeError, Journal, identity, reference
 from ortak_hermes_bridge.service import Bridge, EMPTY_POLICY
-from ortak_hermes_bridge.hermes_candidate import execute_candidate, guarded_agent_class, ToolDenied, agent_constructor_kwargs
+from ortak_hermes_bridge.hermes_candidate import execute_candidate, guarded_agent_class, ToolDenied, CredentialDenied, agent_constructor_kwargs
 
 class Fixture(unittest.TestCase):
     def setUp(self):
@@ -219,6 +220,82 @@ class Fixture(unittest.TestCase):
         execute_candidate(self.spec, self.journal, Agent, 'openai', 'selected-fixture-key')
         self.assertEqual(calls, ['hello'])
         self.assertEqual(self.journal.lookup(self.key)['status'], 'completed')
+
+    def test_work_candidate_retains_complete_text_but_never_requests_office_publication(self):
+        self.spec['context']['work_item_id'] = str(uuid4())
+        Bridge(self.journal, self.company, self.profiles).validate(self.body)
+        calls = []
+        class Agent:
+            tools = []
+            def _get_transport(inner):
+                return None
+            def __init__(inner, **kwargs):
+                pass
+            def run_conversation(inner, text, **kwargs):
+                calls.append(kwargs['system_message'])
+                return {'completed': True, 'final_response': 'Verifiable work deliverable'}
+        for name in ('_invoke_tool', '_execute_tool_calls', '_execute_tool_calls_sequential', '_execute_tool_calls_concurrent', '_dispatch_delegate_task'):
+            setattr(Agent, name, lambda *args: None)
+        self.journal.reserve(self.spec)
+        execute_candidate(self.spec, self.journal, Agent, 'openai', 'selected-fixture-key')
+        execute_candidate(self.spec, self.journal, Agent, 'openai', 'selected-fixture-key')
+        payloads = [event['payload'] for event in Journal(self.path).events(self.key)['events']]
+        self.assertEqual(len(calls), 1)
+        self.assertIn('human review', calls[0])
+        self.assertEqual(payloads[1]['delta']['text'], 'Verifiable work deliverable')
+        self.assertEqual(payloads[2]['intent'], 'silent')
+        self.assertEqual(payloads[3]['delivery_intent'], 'silent')
+        self.assertEqual(self.journal.lookup(self.key)['status'], 'completed')
+
+    def test_candidate_records_only_closed_failure_classes_without_partial_output(self):
+        cases = [
+            ({'completed': False, 'final_response': 'sensitive unfinished text'}, 'provider_incomplete'),
+            (['sensitive malformed response'], 'provider_response_invalid'),
+            ({'completed': True, 'final_response': 42}, 'provider_response_invalid'),
+            ({'completed': True, 'final_response': 'sensitive oversized text' * 1000}, 'invalid_output'),
+            (CredentialDenied('sensitive credential detail'), 'credential_denied'),
+            (RuntimeError('sensitive provider exception'), 'provider_failed'),
+        ]
+        for result, code in cases:
+            with self.subTest(code=code):
+                spec = copy.deepcopy(self.spec)
+                spec['run_id'] = str(uuid4())
+                spec['idempotency_key'] = f"ortak-run:{self.company}:{spec['run_id']}"
+                key = spec['idempotency_key']
+                class Agent:
+                    tools = []
+                    def _get_transport(inner):
+                        return None
+                    def __init__(inner, **kwargs):
+                        pass
+                    def run_conversation(inner, *args, **kwargs):
+                        if isinstance(result, BaseException):
+                            raise result
+                        return result
+                for name in ('_invoke_tool', '_execute_tool_calls', '_execute_tool_calls_sequential', '_execute_tool_calls_concurrent', '_dispatch_delegate_task'):
+                    setattr(Agent, name, lambda *args: None)
+                self.journal.reserve(spec)
+                with (nullcontext() if code == 'credential_denied' else self.assertRaisesRegex(BridgeError, f'^{code}$')):
+                    execute_candidate(spec, self.journal, Agent, 'openai', 'selected-fixture-key')
+                events = self.journal.events(key)['events']
+                self.assertEqual([e['payload']['event_type'] for e in events], ['run.started', 'run.failed'])
+                self.assertEqual(events[-1]['payload']['code'], code)
+                self.assertNotIn('sensitive', json.dumps(events))
+                self.assertNotIn('selected-fixture-key', json.dumps(events))
+
+    def test_work_context_cannot_also_supply_an_office_destination(self):
+        bridge = Bridge(self.journal, self.company, self.profiles)
+        for context in (
+            {'work_item_id': 'not-a-work-id'},
+            {'work_item_id': '00000000-0000-0000-0000-000000000000'},
+            {'work_item_id': str(uuid4()), 'conversation_ref': str(uuid4())},
+            {'work_item_id': str(uuid4()), 'reply_to_message_id': 'a' * 64},
+        ):
+            with self.subTest(context=context), self.assertRaisesRegex(BridgeError, 'invalid_context'):
+                body = copy.deepcopy(self.body)
+                body['spec']['context'].update(context)
+                bridge.validate(body)
+        self.assertIsNone(self.journal.lookup(self.key))
 
     def test_response_tool_intent_denies_before_validation_normalization_or_retry(self):
         boundaries = ('_invoke_tool', '_execute_tool_calls', '_execute_tool_calls_sequential',

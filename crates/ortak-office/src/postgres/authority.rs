@@ -44,7 +44,7 @@ pub(super) async fn channel(
          JOIN communities cm ON cm.id=cb.community_id
              AND cm.deletion_state='active' AND cm.deleted_at IS NULL
          JOIN employees e ON e.company_id=r.company_id AND e.id=r.employee_id
-             AND e.status='active'
+             AND e.status='active' AND e.lifecycle_epoch=r.employee_lifecycle_epoch
          JOIN employee_revisions current_rev ON current_rev.company_id=e.company_id
              AND current_rev.employee_id=e.id AND current_rev.id=e.active_revision_id
          JOIN routing_decisions d ON d.company_id=r.company_id AND d.id=r.routing_decision_id
@@ -135,10 +135,13 @@ pub(super) async fn channel(
         }
     }
     if intent == "reply" {
-        if normalized.root_message_id != inbox.event_id {
+        let thread_root = super::reply_root_on(connection, scope, &inbox)
+            .await?
+            .ok_or_else(denied)?;
+        if thread_root != inbox.event_id {
             tags.push(vec![
                 "e".to_owned(),
-                normalized.root_message_id.to_hex(),
+                thread_root.to_hex(),
                 String::new(),
                 "root".to_owned(),
             ]);

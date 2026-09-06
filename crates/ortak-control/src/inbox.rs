@@ -50,6 +50,8 @@ pub enum InboxInsertOutcome {
     Inserted,
     /// The row already existed; the accepted event was replayed.
     AlreadyPresent,
+    /// Signed event was stored, but this company/channel is outside capture.
+    OutsideCohort,
 }
 
 /// Lifecycle state of an inbox row.

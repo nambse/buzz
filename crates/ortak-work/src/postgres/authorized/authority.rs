@@ -189,6 +189,27 @@ impl AuthorizedWork {
             Err(WorkError::AccessDenied)
         }
     }
+    pub(super) async fn execution_employee_on(
+        &self,
+        c: &mut PgConnection,
+        channel: Uuid,
+        id: &EmployeeId,
+    ) -> Result<()> {
+        self.employee_on(c, channel, id).await?;
+        let selected: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM office_routing_cohorts cohort
+            JOIN office_routing_channels h ON h.company_id=cohort.company_id AND h.community_id=cohort.community_id
+            JOIN office_routing_employees e ON e.company_id=cohort.company_id
+            WHERE cohort.company_id=$1 AND cohort.community_id=$2 AND cohort.state='enabled'
+            AND h.channel_id=$3 AND e.employee_id=$4)")
+            .bind(self.scope.company_id()).bind(self.principal.community_id).bind(channel)
+            .bind(id.as_str()).fetch_one(c).await?;
+        if !selected {
+            return Err(WorkError::EmployeeNotAssignable {
+                employee_id: id.clone(),
+            });
+        }
+        Ok(())
+    }
     pub(super) fn review(&self, role: ProjectRole) -> Result<()> {
         if self.principal.operator && role.reviews() {
             Ok(())

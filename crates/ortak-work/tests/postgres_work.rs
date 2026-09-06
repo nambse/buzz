@@ -28,6 +28,9 @@ use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
+#[path = "../../ortak-control/tests/cohort_support.rs"]
+mod cohort_support;
+
 const DEFAULT_DATABASE_URL: &str = "postgres://ortak:ortak@127.0.0.1:55432/ortak"; // sadscan:disable np.postgres.1 -- local disposable test database
 
 fn database_url() -> String {
@@ -147,6 +150,22 @@ impl Company {
             .await
             .expect("resolve scope");
         assert_eq!(scope.company_id(), company_id);
+        let channel: Uuid = sqlx::query_scalar(
+            "INSERT INTO channels(community_id,name,created_by) VALUES ($1,$2,$3) RETURNING id",
+        )
+        .bind(community_id)
+        .bind(format!("work-cohort-{company_id}"))
+        .bind([7u8; 32].as_slice())
+        .fetch_one(pool)
+        .await
+        .expect("work cohort channel");
+        cohort_support::select_and_reconcile(
+            &control,
+            &scope,
+            &[channel],
+            &[employee("cem"), employee("zeynep")],
+        )
+        .await;
         Self {
             pool: pool.clone(),
             service: WorkService::new(control.clone()),

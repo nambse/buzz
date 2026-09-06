@@ -220,8 +220,10 @@ pub struct Config {
     /// deployment sets this `false` and the relay surfaces a clear, client-
     /// handleable "huddle audio unavailable" signal on join.
     ///
-    /// Defaults to `true` so single-pod deployments (the N=1 case) keep today's
-    /// behavior unchanged. Operators running multiple relay pods MUST set
+    /// With `legacy-mesh`, defaults to `true` so single-pod deployments (the
+    /// N=1 case) keep today's behavior unchanged. Without that feature it is
+    /// always false and an explicit activation request is a configuration error.
+    /// Operators running multiple relay pods MUST set
     /// `BUZZ_HUDDLE_AUDIO_AVAILABLE=false` until the out-of-relay media/SFU
     /// service lands.
     pub huddle_audio_available: bool,
@@ -231,6 +233,7 @@ pub struct Config {
     /// (absent/off) is exact single-instance behavior — no bind, no Redis
     /// registry write — so an image upgrade with untouched env is a strict
     /// no-regression rollout.
+    #[cfg(feature = "legacy-mesh")]
     pub mesh: buzz_relay_mesh::MeshConfig,
 
     /// Testbed-only reliable-stream echo consumer (`BUZZ_MESH_DEMO_ECHO`).
@@ -330,27 +333,36 @@ pub struct Config {
     /// this path.
     /// Repo-name uniqueness lives in Postgres (`git_repo_names`), not on disk,
     /// so this directory need not be persistent or shared across replicas.
+    #[cfg(feature = "legacy-git")]
     pub git_repo_path: std::path::PathBuf,
     /// Parent directory for process-isolated immutable pack cache sessions.
+    #[cfg(feature = "legacy-git")]
     pub git_pack_cache_path: std::path::PathBuf,
     /// Maximum pack file size for git push (bytes). Default: 500 MB.
+    #[cfg(feature = "legacy-git")]
     pub git_max_pack_bytes: u64,
     /// Maximum total bytes materialized for one git repo request. Default: 1 GB.
     ///
     /// This bounds clone/fetch hydration work across a repo's historical pack
     /// set rather than only bounding one incoming push body.
+    #[cfg(feature = "legacy-git")]
     pub git_max_repo_bytes: u64,
     /// Maximum bytes retained in the process-local immutable pack/index cache.
     /// Zero disables retention while preserving request-local hydration.
+    #[cfg(feature = "legacy-git")]
     pub git_pack_cache_max_bytes: u64,
     /// Maximum pack digests populated concurrently in one relay process.
+    #[cfg(feature = "legacy-git")]
     pub git_pack_cache_max_concurrent_populations: usize,
     /// Maximum number of repos per pubkey. Default: 100.
+    #[cfg(feature = "legacy-git")]
     pub git_max_repos_per_pubkey: u32,
     /// Maximum concurrent git subprocess operations. Default: 20.
+    #[cfg(feature = "legacy-git")]
     pub git_max_concurrent_ops: usize,
     /// HMAC secret for git pre-receive hook callbacks.
     /// Used to authenticate internal policy endpoint requests.
+    #[cfg(feature = "legacy-git")]
     pub git_hook_hmac_secret: String,
 
     /// Whether NIP-PL push discovery, lease acceptance, matching, and delivery
@@ -503,12 +515,14 @@ fn parse_optional_bool(name: &str) -> Result<bool, ConfigError> {
     parse_bool(name, false)
 }
 
+#[cfg(feature = "legacy-git")]
 fn ensure_git_repo_path(
     raw: impl Into<std::path::PathBuf>,
 ) -> Result<std::path::PathBuf, ConfigError> {
     ensure_git_path("BUZZ_GIT_REPO_PATH", raw)
 }
 
+#[cfg(feature = "legacy-git")]
 fn ensure_git_path(
     setting: &str,
     raw: impl Into<std::path::PathBuf>,
@@ -562,6 +576,39 @@ impl Config {
 
     /// Loads configuration from environment variables, falling back to development defaults.
     pub fn from_env() -> Result<Self, ConfigError> {
+        // An artifact without the legacy transport cannot honor its activation
+        // flags. Check before startup I/O instead of silently ignoring intent.
+        #[cfg(not(feature = "legacy-mesh"))]
+        {
+            for name in [
+                "BUZZ_MESH",
+                "BUZZ_MESH_DEMO_ECHO",
+                "BUZZ_HUDDLE_AUDIO_AVAILABLE",
+            ] {
+                if let Some(value) = std::env::var_os(name) {
+                    if !matches!(value.to_str(), Some("false" | "off" | "0")) {
+                        return Err(ConfigError::InvalidValue(format!(
+                            "{name} requires the legacy-mesh build feature"
+                        )));
+                    }
+                }
+            }
+            if std::env::var_os("BUZZ_MESH_BIND_ADDR").is_some() {
+                return Err(ConfigError::InvalidValue(
+                    "BUZZ_MESH_BIND_ADDR requires the legacy-mesh build feature".to_string(),
+                ));
+            }
+        }
+        #[cfg(not(feature = "legacy-git"))]
+        for name in ["BUZZ_SERVE_GIT_WEB_GUI", "BUZZ_GIT_CONFORMANCE_PROBE"] {
+            if let Some(value) = std::env::var_os(name) {
+                if !matches!(value.to_str(), Some("false" | "off" | "0")) {
+                    return Err(ConfigError::InvalidValue(format!(
+                        "{name} requires the legacy-git build feature"
+                    )));
+                }
+            }
+        }
         let bind_addr_raw =
             std::env::var("BUZZ_BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:3000".to_string());
         let bind_addr = parse_bind_addr(&bind_addr_raw)?;
@@ -696,18 +743,23 @@ impl Config {
 
         // Defaults true → single-pod (N=1) keeps today's huddle behavior. A
         // horizontally-scaled deployment sets this false; see the field doc.
+        #[cfg(feature = "legacy-mesh")]
         let huddle_audio_available = std::env::var("BUZZ_HUDDLE_AUDIO_AVAILABLE")
             .map(|v| !(v == "false" || v == "0"))
             .unwrap_or(true);
+        #[cfg(not(feature = "legacy-mesh"))]
+        let huddle_audio_available = false;
 
         // Mesh opt-in: default OFF. Strict rollout no-regression — an image
         // upgrade with untouched env must not bind a new UDP port or write a
         // new Redis key. Horizontally-scaled deployments explicitly set
         // `BUZZ_MESH=on`; anything else (absent, `off`, other values) keeps
         // exact single-instance behavior.
+        #[cfg(feature = "legacy-mesh")]
         let mesh_enabled = std::env::var("BUZZ_MESH")
             .map(|v| v.eq_ignore_ascii_case("on") || v == "true" || v == "1")
             .unwrap_or(false);
+        #[cfg(feature = "legacy-mesh")]
         let mesh_bind_addr = std::env::var("BUZZ_MESH_BIND_ADDR")
             .map(|raw| {
                 raw.parse::<SocketAddr>().map_err(|e| {
@@ -715,6 +767,7 @@ impl Config {
                 })
             })
             .unwrap_or_else(|_| Ok("0.0.0.0:3478".parse().expect("static default parses")))?;
+        #[cfg(feature = "legacy-mesh")]
         let mesh = buzz_relay_mesh::MeshConfig {
             enabled: mesh_enabled,
             bind_addr: mesh_bind_addr,
@@ -723,9 +776,12 @@ impl Config {
 
         // Demo echo opt-in: same strict pattern as BUZZ_MESH — explicit
         // `on`/`true`/`1` only, anything else (absent, `off`, typos) is off.
+        #[cfg(feature = "legacy-mesh")]
         let mesh_demo_echo = std::env::var("BUZZ_MESH_DEMO_ECHO")
             .map(|v| v.eq_ignore_ascii_case("on") || v == "true" || v == "1")
             .unwrap_or(false);
+        #[cfg(not(feature = "legacy-mesh"))]
+        let mesh_demo_echo = false;
 
         let allow_nip_oa_auth = std::env::var("BUZZ_ALLOW_NIP_OA_AUTH")
             .map(|v| v == "true" || v == "1")
@@ -943,41 +999,50 @@ impl Config {
         }
 
         // Git server config
+        #[cfg(feature = "legacy-git")]
         let git_repo_path = ensure_git_repo_path(
             std::env::var("BUZZ_GIT_REPO_PATH").unwrap_or_else(|_| "./repos".to_string()),
         )?;
+        #[cfg(feature = "legacy-git")]
         let git_pack_cache_path = ensure_git_path(
             "BUZZ_GIT_PACK_CACHE_PATH",
             std::env::var("BUZZ_GIT_PACK_CACHE_PATH")
                 .map(std::path::PathBuf::from)
                 .unwrap_or_else(|_| git_repo_path.join(".pack-cache")),
         )?;
+        #[cfg(feature = "legacy-git")]
         let git_max_pack_bytes: u64 = std::env::var("BUZZ_GIT_MAX_PACK_BYTES")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(500 * 1024 * 1024); // 500 MB
+        #[cfg(feature = "legacy-git")]
         let git_max_repo_bytes: u64 = std::env::var("BUZZ_GIT_MAX_REPO_BYTES")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or_else(|| git_max_pack_bytes.saturating_mul(2)); // 1 GB at defaults
+        #[cfg(feature = "legacy-git")]
         let git_pack_cache_max_bytes: u64 = std::env::var("BUZZ_GIT_PACK_CACHE_MAX_BYTES")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or_else(|| git_max_repo_bytes.saturating_mul(5)); // 5 GB at defaults
+        #[cfg(feature = "legacy-git")]
         let git_pack_cache_max_concurrent_populations: usize =
             std::env::var("BUZZ_GIT_PACK_CACHE_MAX_CONCURRENT_POPULATIONS")
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .filter(|value| *value > 0)
                 .unwrap_or(2);
+        #[cfg(feature = "legacy-git")]
         let git_max_repos_per_pubkey: u32 = std::env::var("BUZZ_GIT_MAX_REPOS_PER_PUBKEY")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(100);
+        #[cfg(feature = "legacy-git")]
         let git_max_concurrent_ops: usize = std::env::var("BUZZ_GIT_MAX_CONCURRENT_OPS")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(20);
+        #[cfg(feature = "legacy-git")]
         let git_hook_hmac_secret: String = std::env::var("BUZZ_GIT_HOOK_HMAC_SECRET")
             .unwrap_or_else(|_| {
                 // Generate a random secret if not configured (dev mode).
@@ -1200,9 +1265,12 @@ impl Config {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .map(std::path::PathBuf::from);
+        #[cfg(feature = "legacy-git")]
         let serve_git_web_gui = std::env::var("BUZZ_SERVE_GIT_WEB_GUI")
             .map(|value| value == "true" || value == "1")
             .unwrap_or(false);
+        #[cfg(not(feature = "legacy-git"))]
+        let serve_git_web_gui = false;
 
         if let Some(ref dir) = web_dir {
             if !dir.join("index.html").is_file() {
@@ -1217,6 +1285,7 @@ impl Config {
         // Reject explicitly-configured secrets that are too short.
         // The auto-generated fallback is always 64 hex chars (32 bytes), so this
         // only fires when someone sets BUZZ_GIT_HOOK_HMAC_SECRET to a weak value.
+        #[cfg(feature = "legacy-git")]
         if std::env::var("BUZZ_GIT_HOOK_HMAC_SECRET").is_ok() && git_hook_hmac_secret.len() < 32 {
             return Err(ConfigError::InvalidValue(
                 "BUZZ_GIT_HOOK_HMAC_SECRET must be at least 32 characters (16 bytes hex)"
@@ -1251,6 +1320,7 @@ impl Config {
             pubkey_allowlist_enabled,
             require_relay_membership,
             huddle_audio_available,
+            #[cfg(feature = "legacy-mesh")]
             mesh,
             mesh_demo_echo,
             relay_owner_pubkey,
@@ -1265,14 +1335,23 @@ impl Config {
             audit_enabled,
             ortak_central_routing_enabled,
             ephemeral_ttl_override,
+            #[cfg(feature = "legacy-git")]
             git_repo_path,
+            #[cfg(feature = "legacy-git")]
             git_pack_cache_path,
+            #[cfg(feature = "legacy-git")]
             git_max_pack_bytes,
+            #[cfg(feature = "legacy-git")]
             git_max_repo_bytes,
+            #[cfg(feature = "legacy-git")]
             git_pack_cache_max_bytes,
+            #[cfg(feature = "legacy-git")]
             git_pack_cache_max_concurrent_populations,
+            #[cfg(feature = "legacy-git")]
             git_max_repos_per_pubkey,
+            #[cfg(feature = "legacy-git")]
             git_max_concurrent_ops,
+            #[cfg(feature = "legacy-git")]
             git_hook_hmac_secret,
             push_enabled,
             push_executor_key_id,
@@ -1425,10 +1504,149 @@ mod tests {
             config.join_policy.is_none(),
             "join_policy should default to None so policy prompts and acceptance receipts are opt-in"
         );
-        assert!(
+        assert_eq!(
             config.huddle_audio_available,
-            "huddle_audio_available should default to true so single-pod (N=1) keeps today's huddle behavior"
+            cfg!(feature = "legacy-mesh"),
+            "huddle audio defaults on only when its legacy transport is compiled"
         );
+    }
+
+    #[test]
+    #[cfg(not(feature = "legacy-mesh"))]
+    fn private_build_rejects_legacy_transport_configuration() {
+        const CHILD_ENV: &str = "ORTAK_PRIVATE_RELAY_CONFIG_CHILD";
+        if std::env::var_os(CHILD_ENV).is_none() {
+            crate::test_support::run_exact_test_child(
+                "config::tests::private_build_rejects_legacy_transport_configuration",
+                CHILD_ENV,
+            );
+            return;
+        }
+        let _guard = ENV_MUTEX.lock().expect("env mutex");
+        const KEYS: [&str; 4] = [
+            "BUZZ_MESH",
+            "BUZZ_MESH_DEMO_ECHO",
+            "BUZZ_HUDDLE_AUDIO_AVAILABLE",
+            "BUZZ_MESH_BIND_ADDR",
+        ];
+        let previous: Vec<_> = KEYS
+            .iter()
+            .map(|key| (*key, std::env::var_os(key)))
+            .collect();
+        for key in KEYS {
+            std::env::remove_var(key);
+        }
+        let absent = Config::from_env();
+        for key in &KEYS[..3] {
+            std::env::set_var(key, "false");
+        }
+        let disabled = Config::from_env();
+        let mut rejected = Vec::new();
+        for (name, value) in [
+            ("BUZZ_MESH", "on"),
+            ("BUZZ_MESH", "true"),
+            ("BUZZ_MESH", "1"),
+            ("BUZZ_MESH_DEMO_ECHO", "on"),
+            ("BUZZ_HUDDLE_AUDIO_AVAILABLE", "true"),
+            ("BUZZ_HUDDLE_AUDIO_AVAILABLE", "1"),
+            ("BUZZ_HUDDLE_AUDIO_AVAILABLE", "typo"),
+            ("BUZZ_MESH_BIND_ADDR", "127.0.0.1:3478"),
+        ] {
+            std::env::set_var(name, value);
+            rejected.push((name, Config::from_env()));
+            if name == "BUZZ_MESH_BIND_ADDR" {
+                std::env::remove_var(name);
+            } else {
+                std::env::set_var(name, "false");
+            }
+        }
+        for (key, value) in previous {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+        for result in [absent, disabled] {
+            let config = result.expect("absent or disabled legacy config is accepted");
+            assert!(!config.huddle_audio_available);
+            assert!(!config.mesh_demo_echo);
+        }
+        for (name, result) in rejected {
+            assert!(matches!(
+                result,
+                Err(ConfigError::InvalidValue(message))
+                    if message.contains(name) && message.contains("legacy-mesh")
+            ));
+        }
+    }
+
+    #[test]
+    #[cfg(not(feature = "legacy-git"))]
+    fn private_build_rejects_git_activation_without_creating_storage() {
+        const CHILD_ENV: &str = "ORTAK_PRIVATE_RELAY_GIT_CONFIG_CHILD";
+        if std::env::var_os(CHILD_ENV).is_none() {
+            crate::test_support::run_exact_test_child(
+                "config::tests::private_build_rejects_git_activation_without_creating_storage",
+                CHILD_ENV,
+            );
+            return;
+        }
+        let _guard = ENV_MUTEX.lock().expect("env mutex");
+        const KEYS: [&str; 5] = [
+            "BUZZ_SERVE_GIT_WEB_GUI",
+            "BUZZ_GIT_CONFORMANCE_PROBE",
+            "BUZZ_GIT_REPO_PATH",
+            "BUZZ_GIT_PACK_CACHE_PATH",
+            "BUZZ_GIT_HOOK_HMAC_SECRET",
+        ];
+        let previous: Vec<_> = KEYS
+            .iter()
+            .map(|key| (*key, std::env::var_os(key)))
+            .collect();
+        for key in KEYS {
+            std::env::remove_var(key);
+        }
+        let scratch =
+            std::env::temp_dir().join(format!("ortak-omitted-git-{}", uuid::Uuid::new_v4()));
+        std::env::set_var("BUZZ_GIT_REPO_PATH", scratch.join("repos"));
+        std::env::set_var("BUZZ_GIT_PACK_CACHE_PATH", scratch.join("cache"));
+        // This obsolete secret setting must not be loaded or validated by a
+        // build without the git hook; it is synthetic, not credential material.
+        std::env::set_var("BUZZ_GIT_HOOK_HMAC_SECRET", "unused");
+        let absent = Config::from_env();
+        for key in &KEYS[..2] {
+            std::env::set_var(key, "false");
+        }
+        let disabled = Config::from_env();
+        let mut rejected = Vec::new();
+        for name in &KEYS[..2] {
+            for value in ["true", "1", "on", "typo"] {
+                std::env::set_var(name, value);
+                rejected.push((*name, Config::from_env()));
+            }
+            std::env::set_var(name, "false");
+        }
+        for (key, value) in previous {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+        for result in [absent, disabled] {
+            assert!(
+                !result
+                    .expect("no git activation is accepted")
+                    .serve_git_web_gui
+            );
+        }
+        assert!(
+            !scratch.exists(),
+            "omitted git must not create repo/cache directories"
+        );
+        for (name, result) in rejected {
+            assert!(matches!(result, Err(ConfigError::InvalidValue(message))
+                if message.contains(name) && message.contains("legacy-git")));
+        }
     }
 
     /// Run `Config::from_env()` with the admin variables forced to `values`,
@@ -2397,6 +2615,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-git")]
     fn git_repo_path_is_created_if_missing() {
         let _guard = ENV_MUTEX.lock().unwrap();
         // Pick a path under temp_dir that definitely doesn't exist yet.
@@ -2428,6 +2647,7 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
+    #[cfg(feature = "legacy-git")]
     fn git_repo_path_unwritable_returns_error() {
         // Try to create a path under a regular file — must fail.
         // Using /dev/null as the parent guarantees create_dir_all fails on unix.

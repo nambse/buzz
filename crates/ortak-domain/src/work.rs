@@ -27,6 +27,13 @@ use uuid::Uuid;
 use crate::employee::{require_bounded_text, require_stable_code};
 use crate::{DomainError, EmployeeId};
 
+mod assignment;
+mod decomposition;
+mod definition;
+mod execution;
+pub use decomposition::{NewChildWork, MAX_WORK_CHILDREN, MAX_WORK_DEPTH};
+pub use definition::{CriterionEdit, EditWorkDefinition};
+
 /// Ceiling for a project or work item title.
 pub const MAX_WORK_TITLE_BYTES: usize = 200;
 /// Ceiling for a project or work item description.
@@ -568,7 +575,7 @@ pub struct AcceptanceCriterion {
     pub id: Uuid,
     /// Stable order on the item.
     pub position: u16,
-    /// Bounded criterion text; immutable once created.
+    /// Bounded criterion text; amendable only before review evidence exists.
     pub text: String,
     /// Current state.
     pub status: CriterionStatus,
@@ -654,6 +661,11 @@ pub enum AttachmentRef {
         /// Run id.
         run_id: Uuid,
     },
+    /// Immutable text output of an authorized Work execution.
+    Artifact {
+        /// Same-company, same-item artifact identifier.
+        artifact_id: Uuid,
+    },
 }
 
 impl AttachmentRef {
@@ -663,6 +675,7 @@ impl AttachmentRef {
             Self::OfficeMessage { .. } => "office_message",
             Self::RoutingDecision { .. } => "routing_decision",
             Self::Run { .. } => "run",
+            Self::Artifact { .. } => "artifact",
         }
     }
 
@@ -681,7 +694,12 @@ impl AttachmentRef {
                 }
                 Ok(())
             }
-            Self::RoutingDecision { .. } | Self::Run { .. } => Ok(()),
+            Self::Artifact { artifact_id } if artifact_id.is_nil() => {
+                Err(DomainError::InvalidField {
+                    field: "attachment.artifact_id",
+                })
+            }
+            Self::RoutingDecision { .. } | Self::Run { .. } | Self::Artifact { .. } => Ok(()),
         }
     }
 }
@@ -704,6 +722,35 @@ pub struct WorkAttachment {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum WorkEvent {
+    /// One human request atomically queued a run and attached its provenance.
+    ExecutionRequested {
+        /// Durable run.
+        run_id: Uuid,
+        /// Assigned executor.
+        employee_id: EmployeeId,
+        /// State before the request.
+        from: WorkState,
+    },
+    /// A complete run output was saved and offered for human review.
+    ExecutionResultReady {
+        /// Executed run.
+        run_id: Uuid,
+        /// Immutable, bounded text artifact.
+        artifact_id: Uuid,
+    },
+    /// One atomic definition edit; bounded metadata rather than full text snapshots.
+    DefinitionEdited {
+        /// Canonical prior creation-definition hash, preserving original promotion retries.
+        previous_definition_hash: String,
+        /// Whether the title changed.
+        title_changed: bool,
+        /// Whether the description changed.
+        description_changed: bool,
+        /// Existing criteria whose text changed, in retained order.
+        edited_criterion_ids: Vec<Uuid>,
+        /// Newly appended criteria, in position order.
+        added_criterion_ids: Vec<Uuid>,
+    },
     /// The item was created (possibly promoted from a message).
     Created {
         /// Title at creation.
@@ -727,10 +774,40 @@ pub enum WorkEvent {
         /// Role.
         role: AssignmentRole,
     },
+    /// An active assignment was released without removing its provenance.
+    AssignmentReleased {
+        /// Previously assigned employee.
+        employee_id: EmployeeId,
+        /// Human supplied bounded reason.
+        reason: String,
+    },
+    /// One atomic reassignment or role change, retaining the previous assignment.
+    AssignmentReassigned {
+        /// Previously assigned employee.
+        employee_id: EmployeeId,
+        /// Currently eligible replacement (may be the same employee for a role change).
+        replacement_employee_id: EmployeeId,
+        /// New assignment role, independent of human approval permission.
+        role: AssignmentRole,
+        /// Human supplied bounded reason.
+        reason: String,
+    },
     /// A same-project dependency was added.
     DependencyAdded {
         /// Target item.
         depends_on: Uuid,
+    },
+    /// An active dependency was released; its storage identity and history remain.
+    DependencyRemoved {
+        /// Previously blocking item.
+        depends_on: Uuid,
+        /// Bounded human explanation.
+        reason: String,
+    },
+    /// One independently defined child was created atomically with this version.
+    ChildCreated {
+        /// New child; visibility must be checked separately before projection.
+        child_id: Uuid,
     },
     /// A criterion was satisfied.
     CriterionSatisfied {
@@ -760,9 +837,16 @@ impl WorkEvent {
     pub fn event_type(&self) -> &'static str {
         match self {
             Self::Created { .. } => "work.created",
+            Self::ExecutionRequested { .. } => "work.execution_requested",
+            Self::ExecutionResultReady { .. } => "work.execution_result_ready",
+            Self::DefinitionEdited { .. } => "work.definition_edited",
             Self::StateChanged { .. } => "work.state_changed",
             Self::Assigned { .. } => "work.assigned",
+            Self::AssignmentReleased { .. } => "work.assignment_released",
+            Self::AssignmentReassigned { .. } => "work.assignment_reassigned",
             Self::DependencyAdded { .. } => "work.dependency_added",
+            Self::DependencyRemoved { .. } => "work.dependency_removed",
+            Self::ChildCreated { .. } => "work.child_created",
             Self::CriterionSatisfied { .. } => "work.criterion_satisfied",
             Self::ApprovalResolved { .. } => "work.approval_resolved",
             Self::Attached { .. } => "work.attached",
@@ -773,6 +857,10 @@ impl WorkEvent {
     pub fn state_change(&self) -> Option<(WorkState, WorkState)> {
         match self {
             Self::StateChanged { from, to, .. } => Some((*from, *to)),
+            Self::ExecutionRequested { from, .. } if *from != WorkState::InProgress => {
+                Some((*from, WorkState::InProgress))
+            }
+            Self::ExecutionResultReady { .. } => Some((WorkState::InProgress, WorkState::Review)),
             _ => None,
         }
     }
@@ -1158,6 +1246,30 @@ impl WorkItem {
         });
         self.version += 1;
         Ok(WorkEvent::DependencyAdded { depends_on })
+    }
+
+    /// Remove one active blocker without changing work status or human acceptance.
+    pub fn remove_dependency(
+        &mut self,
+        depends_on: Uuid,
+        reason: String,
+    ) -> Result<WorkEvent, DomainError> {
+        self.ensure_mutable()?;
+        let reason = validate_reason(Some(reason))?.ok_or(DomainError::InvalidField {
+            field: "work.dependency.reason",
+        })?;
+        if !self.dependencies.iter().any(|d| d.depends_on == depends_on) {
+            return Err(DomainError::UnknownWorkDependency);
+        }
+        let version = self
+            .version
+            .checked_add(1)
+            .ok_or(DomainError::InvalidField {
+                field: "work.version",
+            })?;
+        self.dependencies.retain(|d| d.depends_on != depends_on);
+        self.version = version;
+        Ok(WorkEvent::DependencyRemoved { depends_on, reason })
     }
 
     /// Marks a pending criterion satisfied.

@@ -3,12 +3,20 @@
 //! Every statement is scoped by the resolved company id and uses runtime
 //! `sqlx::query` (no compile-time database), matching the inherited crates.
 
+mod cohort;
 mod company;
+mod confidential_recovery;
+pub mod conversation_memory;
+mod direct_channel;
 mod inbox;
 mod memory_jobs;
 mod office_authority;
 mod outbox;
 mod provisioning;
+mod provisioning_execution;
+mod provisioning_probe;
+pub use provisioning_probe::ProvisioningRuntimeProbe;
+mod reconciliation;
 mod routing;
 mod run_events;
 
@@ -18,7 +26,9 @@ use sqlx::PgPool;
 
 use crate::error::{ControlError, Result};
 
-pub use inbox::insert_accepted_event_on;
+pub use cohort::routing_channel_enabled_on;
+pub use direct_channel::{direct_channel_on, DirectChannel};
+pub use inbox::{insert_accepted_event_on, insert_selected_accepted_event_on};
 pub use memory_jobs::prepare_memory_write_on;
 pub use office_authority::{lock_office_authority_on, office_authority_matches_on};
 
@@ -26,12 +36,16 @@ pub use office_authority::{lock_office_authority_on, office_authority_matches_on
 #[derive(Clone, Debug)]
 pub struct PgControlPlane {
     pool: PgPool,
+    provisioning_execution: Option<provisioning_execution::Execution>,
 }
 
 impl PgControlPlane {
     /// Wraps a connection pool.
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            provisioning_execution: None,
+        }
     }
 
     /// Returns the underlying pool.

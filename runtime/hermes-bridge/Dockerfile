@@ -1,6 +1,8 @@
-# syntax=docker/dockerfile:1
+# Uses the selected BuildKit's built-in frontend; record its version with the
+# artifact receipt. No floating frontend image is fetched during this build.
 # Build with --build-context hermes_source=<verified extracted pinned archive>.
-# This is a private API-key, tool-less image; it contains no upstream init/gateway.
+# This private tool-less image supports explicit API-key or access-only OAuth
+# execution; it contains no running upstream init/gateway.
 FROM ghcr.io/astral-sh/uv:0.11.6-python3.13-trixie@sha256:b3c543b6c4f23a5f2df22866bd7857e5d304b67a564f4feab6ac22044dde719b AS sqlite_build
 USER root
 RUN apt-get -o Acquire::Retries=3 update && \
@@ -25,6 +27,7 @@ COPY --from=sqlite_build /opt/sqlite-fixed /opt/sqlite-fixed
 WORKDIR /opt/hermes
 COPY --from=hermes_source . /opt/hermes
 COPY ortak_hermes_bridge /opt/bridge/ortak_hermes_bridge
+COPY checks/run_loop_check.py checks/codex_oauth_check.py checks/codex_sdk_fixture.py checks/semantic_transport_check.py checks/semantic_lifecycle_check.py checks/workspace_tool_check.py /opt/bridge/checks/
 COPY hermes-source-lock.json /opt/bridge/hermes-source-lock.json
 RUN python -m ortak_hermes_bridge.verify_source --write-marker && \
     uv sync --python /usr/local/bin/python --frozen --no-dev --no-install-project && \

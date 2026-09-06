@@ -5,7 +5,7 @@ import os
 import sqlite3
 from pathlib import Path
 from .journal import BridgeError, Journal
-from .service import Bridge, serve
+from .service import Bridge, profile_registry, serve
 
 
 def configured_bridge(config, journal, enable_docker=False):
@@ -14,17 +14,35 @@ def configured_bridge(config, journal, enable_docker=False):
     if enable_docker:
         from .docker_executor import DockerEngine, DockerExecutor
         settings = config.get('executor', {})
-        if set(settings) - {'image', 'network', 'validated_digest', 'docker_binary'}:
+        if set(settings) - {'image', 'network', 'validated_digest', 'workspace_validated_digest', 'confidential_validated_digest', 'docker_binary', 'journal_volume'}:
             raise BridgeError('invalid_executor_configuration')
         try:
             engine = DockerEngine(settings.get('docker_binary', '/usr/bin/docker'))
-            executor = DockerExecutor(journal, config['company_id'], config['profiles'],
+            executor = DockerExecutor(journal, config['company_id'], bridge.profiles,
                                       settings['image'], settings['network'], engine,
-                                      validated_digest=settings['validated_digest'])
+                                      validated_digest=settings['validated_digest'],
+                                      workspace_validated_digest=settings.get('workspace_validated_digest'),
+                                      confidential_validated_digest=settings.get('confidential_validated_digest'),
+                                      journal_volume=settings.get('journal_volume'))
         except KeyError:
             raise BridgeError('executor_validation_required', 503) from None
         bridge.executor = executor
     return bridge
+
+
+def configured_journal(config, path, enable_docker=False):
+    """A selected volume must be owned and mounted before Journal can create or change it."""
+    settings = config.get('executor', {})
+    if settings.get('journal_volume') is not None:
+        if not enable_docker:
+            raise BridgeError('executor_validation_required', 503)
+        if set(settings) - {'image', 'network', 'validated_digest', 'workspace_validated_digest', 'confidential_validated_digest', 'docker_binary', 'journal_volume'}:
+            raise BridgeError('invalid_executor_configuration')
+        from .docker_executor import DockerEngine
+        from .journal_volume import mount
+        mount(DockerEngine(settings.get('docker_binary', '/usr/bin/docker')),
+              settings['journal_volume'], config['company_id'], path)
+    return Journal(path)
 
 
 def main():
@@ -44,11 +62,13 @@ def main():
     if path.stat().st_size > 256 * 1024:
         raise BridgeError('configuration_too_large')
     config = json.loads(path.read_text())
+    config['profiles'] = profile_registry(config['profiles'], config['company_id'])
     with open(args.token_file) as token_file:
         token = token_file.read(4097).strip()
     if not 32 <= len(token) <= 4096:
         raise BridgeError('invalid_service_credential')
-    bridge = configured_bridge(config, Journal(args.journal), args.enable_validated_docker_executor)
+    journal = configured_journal(config, args.journal, args.enable_validated_docker_executor)
+    bridge = configured_bridge(config, journal, args.enable_validated_docker_executor)
     try:
         serve(bridge, token, args.port, args.listen_address)
     finally:

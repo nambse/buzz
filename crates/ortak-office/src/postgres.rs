@@ -26,6 +26,8 @@ use sqlx::{PgConnection, Row};
 
 mod authority;
 pub(crate) use authority::before_publish;
+mod reply;
+pub use reply::reply_root_on;
 use uuid::Uuid;
 
 use crate::error::{BindingRejection, OfficeDeliveryError, Result};
@@ -184,6 +186,16 @@ async fn authorize(
     outbox_id: Uuid,
     draft: &OfficePublishDraft,
 ) -> Result<AuthorizedOfficePublish> {
+    // This path grants signing/publication authority; receipt-only ACKs do not
+    // call it. Reviewed input must remain current before provenance locks run.
+    let current: bool = sqlx::query_scalar("SELECT ortak_lock_run_reviewed_memory($1,$2)")
+        .bind(scope.company_id())
+        .bind(draft.run_id)
+        .fetch_one(&mut *connection)
+        .await?;
+    if !current {
+        return Err(authority::denied());
+    }
     let provenance = derive_provenance(connection, scope.company_id(), draft.run_id).await?;
     authority::channel(connection, scope, draft, &provenance).await?;
     let intent = draft

@@ -16,6 +16,7 @@ pub struct ActivationTarget {
     step: StepRecord,
     baseline_status: EmployeeStatus,
     baseline_revision: Option<Uuid>,
+    lifecycle_epoch: Option<i64>,
     office: OfficeAuthority,
     observed_at: DateTime<Utc>,
     valid_before: DateTime<Utc>,
@@ -64,6 +65,33 @@ impl ActivationTarget {
         observed_at: DateTime<Utc>,
         duration: Duration,
     ) -> Result<Self> {
+        Self::issue_with_lifecycle(
+            scope,
+            operation,
+            running,
+            baseline_status,
+            baseline_revision,
+            office,
+            observed_at,
+            duration,
+            false,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn issue_with_lifecycle(
+        scope: &CompanyScope,
+        operation: &ProvisioningOperation,
+        running: &StepRecord,
+        baseline_status: EmployeeStatus,
+        baseline_revision: Option<Uuid>,
+        office: OfficeAuthority,
+        observed_at: DateTime<Utc>,
+        duration: Duration,
+        reenable: bool,
+        lifecycle_epoch: Option<i64>,
+    ) -> Result<Self> {
         let current = operation
             .step(ProvisioningStep::ActivateRevision)
             .ok_or_else(|| refused(operation.id, "activation step is missing"))?;
@@ -72,7 +100,7 @@ impl ActivationTarget {
             || operation.status != OperationStatus::Running
             || operation.current_step != Some(ProvisioningStep::ActivateRevision)
             || !same_attempt(current, running)
-            || baseline_status == EmployeeStatus::Disabled
+            || (baseline_status == EmployeeStatus::Disabled && !reenable)
             || (operation.mode == OperationMode::Create && baseline_status != EmployeeStatus::Draft)
             || operation
                 .step(ProvisioningStep::ProbeHealth)
@@ -112,6 +140,7 @@ impl ActivationTarget {
             step: current.clone(),
             baseline_status,
             baseline_revision,
+            lifecycle_epoch,
             office,
             observed_at,
             valid_before,
@@ -127,6 +156,12 @@ impl ActivationTarget {
     }
     pub(crate) fn office(&self) -> &OfficeAuthority {
         &self.office
+    }
+    pub(crate) fn validate_lifecycle_epoch(&self, epoch: i64) -> Result<()> {
+        if self.lifecycle_epoch != Some(epoch) {
+            return Err(refused(self.operation_id, "activation lifecycle changed"));
+        }
+        Ok(())
     }
     pub(crate) fn validate_current(
         &self,

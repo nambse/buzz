@@ -219,7 +219,11 @@ pub trait SemanticScorer {
 
     /// Scores sealed company/revision inputs under the control layer's deadline.
     /// Implementations must not detach work that can outlive this future.
-    async fn score(&self, input: &SemanticScoringInput) -> ScoringOutcome;
+    async fn score(
+        &self,
+        input: &SemanticScoringInput,
+        budget: crate::semantic::ScoringBudget,
+    ) -> ScoringOutcome;
 }
 
 /// Transport-independent message produced by the Office adapter.
@@ -286,6 +290,26 @@ pub trait MessageNormalizer {
 /// Durable provisioning saga state (Architecture v0 §6).
 #[allow(async_fn_in_trait)]
 pub trait ProvisioningRepository {
+    /// Rechecks optional delegated execution authority immediately before a
+    /// step may call an adapter. Operator-only repositories need no delegation.
+    async fn check_provisioning_authority(
+        &self,
+        _scope: &CompanyScope,
+        _operation: Uuid,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    /// Only a repository sealed to the current re-enable command can resume a
+    /// disabled identity. Ordinary operator repositories fail closed.
+    async fn allow_reenable_operation(
+        &self,
+        _scope: &CompanyScope,
+        _operation: Uuid,
+    ) -> Result<bool> {
+        Ok(false)
+    }
+
     /// Creates the operation with every step `pending`, or returns the
     /// existing operation for the idempotency key when its manifest
     /// fingerprint, mode, and dry-run flag all match; any difference is a

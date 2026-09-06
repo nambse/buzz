@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 description = "Ortak Office delivery foundation: verified employee signing port, frozen signed events, and the idempotent office_publish outbox slice"
 
+[features]
+encrypted-dm = ["nostr/nip59", "dep:tokio", "dep:tokio-tungstenite", "dep:futures-util"]
+
 [dependencies]
 buzz-core.workspace = true
 ortak-control.workspace = true
@@ -24,6 +27,9 @@ base64.workspace = true
 reqwest.workspace = true
 url.workspace = true
 zeroize.workspace = true
+tokio = { workspace = true, optional = true }
+tokio-tungstenite = { workspace = true, optional = true }
+futures-util = { workspace = true, optional = true }
 
 [dev-dependencies]
 buzz-auth.workspace = true

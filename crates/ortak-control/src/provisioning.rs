@@ -53,6 +53,8 @@ use crate::runtime::{
 
 mod activation;
 pub use activation::ActivationTarget;
+mod compensation;
+pub use compensation::compensate_adopted;
 
 /// Operation mode stored in `provisioning_operations.mode`.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -982,6 +984,9 @@ where
                 .record_step(scope, operation_id, &running)
                 .await?;
             replace_step(&mut operation, running.clone());
+            self.repository
+                .check_provisioning_authority(scope, operation.id)
+                .await?;
 
             if step == ProvisioningStep::ActivateRevision {
                 match self.activate(scope, &operation, &running).await? {
@@ -1082,6 +1087,9 @@ where
         operation_id: Uuid,
     ) -> Result<SagaOutcome> {
         let mut operation = self.load(scope, operation_id).await?;
+        if operation.resource_mode() == ProvisioningMode::Adopt {
+            return compensate_adopted(self.repository, scope, operation_id).await;
+        }
         if operation.result_revision_id.is_some() {
             return Err(ProvisioningError::InvalidTransition {
                 status: operation.status,
@@ -1272,6 +1280,13 @@ where
         let employee = &operation.effective_employee();
         let mode = operation.resource_mode();
         let key = record.idempotency_key.as_str();
+        if self.runtime.adapter_name() == "hermes" {
+            if let Err(error) =
+                crate::workspace::validate_hermes_policy(&employee.runtime, &employee.permissions)
+            {
+                return Ok(Err(StepFailure::new(error)));
+            }
+        }
         let outcome = match step {
             ProvisioningStep::ValidateManifest => match operation.manifest.validate() {
                 Ok(()) => StepSuccess::ok(
@@ -1301,11 +1316,19 @@ where
                     (IdentityReservation::Existing { status }, _)
                         if status == EmployeeStatus::Disabled =>
                     {
-                        Err(StepFailure::new(ProvisioningError::EmployeeState {
-                            employee_id: employee.id.clone(),
-                            status,
-                            detail: "disabled employees cannot be provisioned",
-                        }))
+                        if self
+                            .repository
+                            .allow_reenable_operation(scope, operation.id)
+                            .await?
+                        {
+                            StepSuccess::ok(&IdentityReservation::Existing { status }, true)
+                        } else {
+                            Err(StepFailure::new(ProvisioningError::EmployeeState {
+                                employee_id: employee.id.clone(),
+                                status,
+                                detail: "disabled employees cannot be provisioned",
+                            }))
+                        }
                     }
                     (reservation, _) => StepSuccess::ok(
                         &reservation,
@@ -1362,7 +1385,13 @@ where
                     Ok(capabilities) => capabilities,
                     Err(error) => return Ok(Err(StepFailure::new(error))),
                 };
-                let missing = capabilities.missing(&ACTIVATION_REQUIRED_CAPABILITIES);
+                let mut required = ACTIVATION_REQUIRED_CAPABILITIES.to_vec();
+                if self.runtime.adapter_name() == "hermes"
+                    && !crate::workspace::empty_policy(&employee.permissions)
+                {
+                    required.push(RuntimeCapability::WorkspaceTextRead);
+                }
+                let missing = capabilities.missing(&required);
                 if !missing.is_empty() {
                     return Ok(Err(StepFailure::new(format!(
                         "runtime lacks required capabilities: {missing:?}"
@@ -1512,6 +1541,16 @@ where
             .probe_capabilities()
             .await
             .map_err(StepFailure::new)?;
+        if self.runtime.adapter_name() == "hermes" {
+            let workspace =
+                crate::workspace::validate_hermes_policy(&employee.runtime, &employee.permissions)
+                    .map_err(StepFailure::new)?;
+            if workspace && !runtime_capabilities.supports(RuntimeCapability::WorkspaceTextRead) {
+                return Err(StepFailure::new(
+                    "runtime lacks selected workspace text-read capability",
+                ));
+            }
+        }
         let runtime_health = self
             .runtime
             .health(&employee.runtime)

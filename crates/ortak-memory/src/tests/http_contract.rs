@@ -13,6 +13,9 @@ struct State {
     create_body: Value,
     records: BTreeMap<String, Value>,
     fault: Option<&'static str>,
+    reviewed_reply: Option<Value>,
+    employee_diagnostics: BTreeMap<String, Value>,
+    employee_reply: Option<Value>,
 }
 struct Server {
     origin: String,
@@ -49,9 +52,11 @@ impl Server {
                 let mut parts = line.split_whitespace();
                 let method = parts.next().unwrap().to_owned();
                 let path = parts.next().unwrap().to_owned();
-                assert!(headers
-                    .to_ascii_lowercase()
-                    .contains("authorization: bearer fresh-test-token"));
+                assert!(
+                    headers
+                        .to_ascii_lowercase()
+                        .contains("authorization: bearer fresh-test-token")
+                );
                 let length = headers
                     .lines()
                     .find_map(|line| {
@@ -84,7 +89,10 @@ impl Server {
                     tokio::time::sleep(Duration::from_millis(250)).await;
                 }
                 let body = serde_json::to_vec(&body).unwrap();
-                let response=format!("HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{extra}\r\n",declared.unwrap_or(body.len()));
+                let response = format!(
+                    "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{extra}\r\n",
+                    declared.unwrap_or(body.len())
+                );
                 let _ = socket.write_all(response.as_bytes()).await;
                 let _ = socket.write_all(&body).await;
             }
@@ -171,6 +179,13 @@ fn respond(
             "workspace_id":"private_employee_one","user_peer":"operator","employee_peer":"employee",
             "ownership":"created","request_hash":wire::fingerprint(&state.create_body).unwrap(),
             "native_ids":{"workspace":workspace_id,"peers":{"operator":"native_operator","employee":"native_employee"}}})
+    } else if path.contains("/reviewed-employees/") {
+        return employee::respond(state, path, body);
+    } else if path.contains("/reviewed-projects/") {
+        state
+            .reviewed_reply
+            .clone()
+            .expect("explicit reviewed response fixture")
     } else if path.ends_with("/remember") {
         assert_eq!(method, "POST");
         assert_eq!(body["company_id"], json!(company));
@@ -249,13 +264,15 @@ async fn http_contract_roundtrip_gates_binding_and_propagates_scoped_receipts() 
     let before = service.probe_capabilities(binding).await.unwrap();
     assert!(!before.capabilities.contains(&MemoryCapability::Remember));
     assert!(!service.health(binding).await.unwrap().is_healthy());
-    assert!(!server
-        .state
-        .lock()
-        .unwrap()
-        .calls
-        .iter()
-        .any(|(_, p, _)| p.ends_with("/remember")));
+    assert!(
+        !server
+            .state
+            .lock()
+            .unwrap()
+            .calls
+            .iter()
+            .any(|(_, p, _)| p.ends_with("/remember"))
+    );
     let result = service
         .validate_memory_roundtrip(&gate(&config))
         .await
@@ -278,12 +295,14 @@ async fn http_contract_roundtrip_gates_binding_and_propagates_scoped_receipts() 
     assert_eq!(writes.len(), 2);
     assert_eq!(writes[0], writes[1]);
     assert!(service.health(binding).await.unwrap().is_healthy());
-    assert!(service
-        .probe_capabilities(binding)
-        .await
-        .unwrap()
-        .capabilities
-        .contains(&MemoryCapability::Recall));
+    assert!(
+        service
+            .probe_capabilities(binding)
+            .await
+            .unwrap()
+            .capabilities
+            .contains(&MemoryCapability::Recall)
+    );
     let query = MemoryRecallRequest {
         employee_id: config.employees[0].employee_id.clone(),
         binding: binding.clone(),
@@ -334,17 +353,21 @@ async fn http_contract_adoption_is_list_only_and_never_get_or_create() {
         .await
         .unwrap();
     assert!(result.outcomes().iter().all(|r| r.ownership.is_adopted()));
-    assert!(service
-        .validate_memory_roundtrip(&gate(&config))
-        .await
-        .is_err());
-    assert!(server
-        .state
-        .lock()
-        .unwrap()
-        .calls
-        .iter()
-        .all(|(_, p, _)| p == "/v3/ortak/protocol" || p.contains("/list?")));
+    assert!(
+        service
+            .validate_memory_roundtrip(&gate(&config))
+            .await
+            .is_err()
+    );
+    assert!(
+        server
+            .state
+            .lock()
+            .unwrap()
+            .calls
+            .iter()
+            .all(|(_, p, _)| p == "/v3/ortak/protocol" || p.contains("/list?"))
+    );
 }
 
 #[tokio::test]
@@ -383,3 +406,12 @@ async fn http_contract_bounds_bodies_rejects_redirect_and_sanitizes_server_error
 
 #[path = "http_gates.rs"]
 mod gates;
+
+#[path = "http_recovery.rs"]
+mod recovery;
+
+#[path = "http_reviewed.rs"]
+mod reviewed;
+
+#[path = "http_employee.rs"]
+mod employee;

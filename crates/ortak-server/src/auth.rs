@@ -10,6 +10,7 @@ use buzz_auth::DEFAULT_REPLAY_TTL_SECS;
 use nostr::{Event, PublicKey, TagKind};
 use ortak_control::{ports::CompanyDirectory, CompanyScope};
 use sqlx::Row;
+use std::sync::Arc;
 
 use crate::{
     config::HumanGrant,
@@ -24,6 +25,14 @@ pub(crate) struct Principal {
     pub(crate) auth_event_id: Vec<u8>,
     pub(crate) grant: HumanGrant,
 }
+
+// Ordinary Activity handlers borrow the existing middleware transaction so Work
+// project ACL fences survive response construction without a third connection.
+// Stream bodies own fresh short transactions after this one has committed.
+#[derive(Clone)]
+pub(crate) struct RequestAuthority(
+    pub(crate) Arc<tokio::sync::Mutex<Option<sqlx::Transaction<'static, sqlx::Postgres>>>>,
+);
 
 pub(crate) async fn authenticate(
     State(state): State<ApiState>,
@@ -58,9 +67,13 @@ pub(crate) async fn authenticate(
         return Err(ApiError::invalid());
     }
     let expected_url = format!("{}{path}", state.config.origin);
-    // Work descriptions and criteria need a larger, still fixed total bound.
-    // Other endpoints retain their existing 4KiB body contract.
-    let body_limit = if request.uri().path() == "/api/v1/projects"
+    // Employee review permits escaped 4KiB edited text in its exact POST DTOs.
+    // Work retains 16KiB; other endpoints retain their existing 4KiB contract.
+    let body_limit = if method == axum::http::Method::POST
+        && crate::employee_memory::has_review_body(request.uri().path())
+    {
+        32_768
+    } else if request.uri().path() == "/api/v1/projects"
         || request.uri().path().starts_with("/api/v1/projects/")
         || request.uri().path().starts_with("/api/v1/work-items/")
     {
@@ -89,7 +102,12 @@ pub(crate) async fn authenticate(
         .control
         .resolve_company_for_community(state.config.community_id)
         .await
-        .map_err(|_| ApiError::unavailable())?;
+        .map_err(|error| match error {
+            // Purge intentionally retires this transient binding. Retained
+            // product records cannot turn its absence into a retryable outage.
+            ortak_control::ControlError::UnknownCompanyBinding { .. } => ApiError::not_found(),
+            _ => ApiError::unavailable(),
+        })?;
     if !state
         .replay
         .try_mark_in_scope(
@@ -137,7 +155,9 @@ pub(crate) async fn authenticate(
         return Err(ApiError(StatusCode::FORBIDDEN, "forbidden"));
     }
     let grant = grant.cloned().ok_or_else(unauthorized)?;
+    let authority = RequestAuthority(Arc::new(tokio::sync::Mutex::new(Some(authority))));
     let mut request = Request::from_parts(parts, Body::from(body));
+    request.extensions_mut().insert(authority.clone());
     request.extensions_mut().insert(Principal {
         scope,
         public_key,
@@ -145,7 +165,14 @@ pub(crate) async fn authenticate(
         grant,
     });
     let response = next.run(request).await;
-    authority.commit().await?;
+    authority
+        .0
+        .lock()
+        .await
+        .take()
+        .ok_or_else(ApiError::unavailable)?
+        .commit()
+        .await?;
     Ok(response)
 }
 

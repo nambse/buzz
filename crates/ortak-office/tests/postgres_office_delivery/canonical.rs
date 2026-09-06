@@ -9,6 +9,9 @@ use ortak_domain::{
     EmployeeId, RecipientAction, RecipientDecision, RoutingDecision, RoutingMode, RoutingReason,
 };
 
+#[path = "../../../ortak-control/tests/cohort_support.rs"]
+mod cohort_support;
+
 pub(super) async fn insert_canonical_run(
     pool: &PgPool,
     company_id: Uuid,
@@ -54,6 +57,22 @@ pub(super) async fn insert_canonical_run(
         .await
         .expect("canonical channel member");
     }
+    let mut channels = control
+        .routing_cohort(&scope)
+        .await
+        .expect("cohort")
+        .map(|cohort| cohort.channel_ids)
+        .unwrap_or_default();
+    if !channels.contains(&channel) {
+        channels.push(channel);
+    }
+    cohort_support::select_and_reconcile(
+        &control,
+        &scope,
+        &channels,
+        &[EmployeeId::parse("cem").expect("id")],
+    )
+    .await;
     let mut raw = [0u8; 32];
     raw[..16].copy_from_slice(Uuid::new_v4().as_bytes());
     raw[16..].copy_from_slice(Uuid::new_v4().as_bytes());

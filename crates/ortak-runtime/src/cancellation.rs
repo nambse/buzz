@@ -19,6 +19,8 @@ mod sql;
 pub enum CancellationReason {
     /// Office facts no longer authorize this execution.
     OfficeRevoked,
+    /// Project, source, assignment or execution version revoked delegated Work.
+    WorkRevoked,
     /// An authorized human requested cancellation.
     HumanRequested,
 }
@@ -28,6 +30,7 @@ impl CancellationReason {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::OfficeRevoked => "office_revoked",
+            Self::WorkRevoked => "work_revoked",
             Self::HumanRequested => "human_requested",
         }
     }
@@ -35,6 +38,7 @@ impl CancellationReason {
     fn parse(value: &str) -> Result<Self> {
         match value {
             "office_revoked" => Ok(Self::OfficeRevoked),
+            "work_revoked" => Ok(Self::WorkRevoked),
             "human_requested" => Ok(Self::HumanRequested),
             _ => Err(invalid("unknown cancellation reason")),
         }
@@ -145,7 +149,7 @@ impl RuntimeCancellationRepository for PgControlPlane {
     ) -> Result<bool> {
         let inserted = sqlx::query(
             "INSERT INTO runtime_cancellations (company_id,run_id,reason)
-             SELECT company_id,id,$3 FROM runs WHERE company_id=$1 AND id=$2
+             SELECT company_id,id,$3 FROM runs WHERE company_id=$1 AND id=$2 AND payload_mode='ordinary'
              ON CONFLICT (company_id,run_id) DO NOTHING",
         )
         .bind(scope.company_id())
@@ -236,7 +240,7 @@ impl RuntimeCancellationRepository for PgControlPlane {
         let mut tx = self.pool().begin().await?;
         let row = sqlx::query(
             "SELECT status,runtime_run_ref FROM runs
-            WHERE company_id=$1 AND id=$2 FOR UPDATE",
+            WHERE company_id=$1 AND id=$2 AND payload_mode='ordinary' FOR UPDATE",
         )
         .bind(scope.company_id())
         .bind(lease.run_id)
@@ -303,8 +307,8 @@ impl RuntimeCancellationRepository for PgControlPlane {
             "UPDATE outbox o SET state='delivered',delivered_at=clock_timestamp(),
             lease_owner=NULL,lease_token=NULL,lease_expires_at=NULL,updated_at=clock_timestamp()
             FROM runs r WHERE r.company_id=$1 AND r.id=$2
-              AND o.company_id=r.company_id AND o.run_id=r.id AND o.kind='run_dispatch'
-              AND o.routing_decision_id=r.routing_decision_id AND o.employee_id=r.employee_id
+              AND o.company_id=r.company_id AND o.run_id=r.id AND o.kind IN('run_dispatch','work_run_dispatch')
+              AND o.routing_decision_id IS NOT DISTINCT FROM r.routing_decision_id AND o.employee_id=r.employee_id
               AND o.state='pending'",
         )
         .bind(scope.company_id())
@@ -335,7 +339,8 @@ impl RuntimeCancellationRepository for PgControlPlane {
             next_attempt_at=clock_timestamp()+LEAST(power(2,attempt_count-1),300)*interval '1 second',
             lease_token=NULL,lease_expires_at=NULL,last_error_code=$4
             WHERE company_id=$1 AND run_id=$2 AND state='pending' AND lease_token=$3
-              AND lease_expires_at>clock_timestamp() RETURNING state")
+              AND lease_expires_at>clock_timestamp()
+              AND EXISTS(SELECT 1 FROM runs r WHERE r.company_id=$1 AND r.id=$2 AND r.payload_mode='ordinary') RETURNING state")
             .bind(scope.company_id()).bind(lease.run_id).bind(lease.lease_token).bind(error_code)
             .fetch_optional(&mut *tx).await?;
         let Some(state) = state else {

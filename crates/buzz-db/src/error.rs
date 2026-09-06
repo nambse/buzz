@@ -70,6 +70,18 @@ pub enum DbError {
         operations: Vec<String>,
     },
 
+    /// External reviewed-memory cleanup must complete while the community is
+    /// still active. A retry never invents cleanup acknowledgement or fences it.
+    #[error("community {community_id} reviewed memory cleanup is not drained: {unacknowledged_exports} export(s) lack erasure acknowledgement, {leased_publications} publication lease(s) remain")]
+    ReviewedMemoryExportsNotDrained {
+        /// Community whose irreversible deletion transition must wait.
+        community_id: uuid::Uuid,
+        /// Exported facts without an exact durable withdrawal acknowledgement.
+        unacknowledged_exports: i64,
+        /// Pending publication leases, including expired uncertain attempts.
+        leased_publications: i64,
+    },
+
     /// A deletion safety invariant is structurally violated and requires
     /// operator/code remediation rather than blind retry.
     #[error("deletion safety error: {0}")]

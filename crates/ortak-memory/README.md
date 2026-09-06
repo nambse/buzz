@@ -48,19 +48,38 @@ full configured binding; the extension pins their native identities atomically.
    the extension. Every read/write rechecks its witness immediately after the
    awaited ownership inspection and before HTTP dispatch. A newer validation
    generation invalidates an older in-flight admission or validation result.
-4. On worker restart, call `resume_created_resources` with the original durable
-   create key and binding, then the same journaled diagnostic roundtrip (or a
-   new persisted diagnostic run). Resume uses only read-only inspection and
-   fails for absent/replaced/mismatched resources; it never creates anything.
+4. After creation, export `created_resources_receipt` with the original create
+   request and durably persist its `HonchoCreatedResourcesReceipt`. On activation
+   or worker restart, call `recover_created_resources` with that same receipt,
+   then the same journaled diagnostic roundtrip (or a new persisted diagnostic
+   run). Recovery uses only read-only inspection and fails for
+   absent/replaced/mismatched resources; it never creates anything.
    Deserialized `MemoryRoundtripReceipt` objects cannot restore execution rights.
    Retry orchestration belongs to the caller's durable journal; no hidden retry
    loop or destructive cleanup runs in this library.
 
-Adopt mode calls only native workspace and peer list endpoints with `{}` bodies.
-It reports adopted outcomes and can inspect resource existence; it never creates
-sessions, writes probe facts, deletes resources or obtains Recall/Remember.
-Existing unowned workspaces cannot be activated by this increment. ResourceDelete
-always returns Unsupported, including for resources created by Ortak.
+Ordinary Adopt mode calls only native workspace and peer list endpoints with
+`{}` bodies. It reports adopted outcomes and can inspect resource existence;
+it never creates sessions, writes probe facts or obtains Recall/Remember.
+An explicitly prepared extension-owned bundle can be recovered separately with
+its original `HonchoCreatedResourcesReceipt`. The receipt preserves company,
+deployment, complete binding, employee, create key/hash, original created outcome
+and frozen native IDs. The caller must authorize its selection. Recovery checks
+all of those fields against the configured selection and the actual extension's
+current ownership inspection; a deserialized or self-asserted receipt alone
+cannot grant access. The adapter also rejects replacing a retained identity.
+
+When the configuration's acquisition mode is Adopt, recovery and all subsequent
+`ensure_resources(Adopt)` calls return **Adopted** outcomes. Original extension
+ownership is preserved separately and never becomes saga-created ownership.
+Recovery itself grants no I/O witness. Only a subsequent explicit
+`validate_memory_roundtrip` can permit bounded scoped I/O; health, probing and
+resource inspection never call that method. Activation and the worker must use
+the exact same durable receipt, original diagnostic request and full binding;
+neither may rewrite the other operation's acquisition history. Existing unowned
+workspaces remain inspect-only. ResourceDelete always returns Unsupported,
+including for resources created by Ortak, so Adopt compensation cannot delete
+the prepared resources.
 
 ## Bounds and validation
 
@@ -111,7 +130,8 @@ cargo test -p ortak-memory live_extension_create -- --ignored --test-threads=1
 
 That command requires `ORTAK_HONCHO_TEST_URL` and `ORTAK_HONCHO_TEST_TOKEN`. It
 checks real create/write replay, scoped recall, empty other-project scope,
-read-only adoption, and explicit revalidation after a new adapter instance. It
+read-only adoption, frozen receipt recovery, adopted ownership after explicit
+I/O validation, and revalidation after a new adapter instance. It
 establishes neither provider credential health nor external model quality.
 
 The worker/provisioning composition, durable validation journal, Memory UI,
@@ -137,9 +157,41 @@ newer failed refresh. Their central socket/PG execution receipts must accompany
 the rebuilt candidate; previous successful runs predate these fixes.
 
 
-`resume_created_resources(&MemoryResourceRequest)` returns the original owned
-resource outcome while reconstructing the in-process frozen identity from the
-extension's durable receipt. It validates the expected canonical original
-creation-request hash, does not grant an I/O witness, and requires a subsequent
-explicit diagnostic roundtrip. This is the worker restart path; normal health,
-capability probing and adoption remain read-only without implicit validation.
+`resume_created_resources(&MemoryResourceRequest)` remains available for the
+older Create-only caller. It reconstructs an in-process identity from the
+extension's durable create receipt by the original request hash, grants no I/O
+witness, and requires explicit roundtrip validation. New activation and worker
+composition should use `recover_created_resources` instead, preserving original
+native IDs in their own durable journal as well as in the extension's receipt.
+
+The `http_contract::recovery` tests exercise the production recovery, adoption,
+health, capabilities and actual I/O methods. They cover unchanged Adopt outcomes,
+absence of implicit witnesses/writes, restart and identical diagnostic retries,
+replacement native IDs across restart, foreign company/deployment/employee/full
+binding, altered create keys/hashes/outcomes, plausible forged receipt data checked
+against the real HTTP inspection seam, and expiry during an awaited ownership
+check. These use synthetic local HTTP responses, not real Honcho or provider
+evidence. Run the separate live extension check for a newly selected artifact.
+
+## Explicit reviewed project record family
+
+The additive `publish_reviewed_project`, `inspect_reviewed_project`,
+`recall_reviewed_project`, and `remove_reviewed_project` methods target only
+`reviewed-project/1`. This is a dedicated extension store inside the selected
+Honcho database, structurally outside native messages, embeddings, derivation
+queues and peer representations. Current configured project/employee bindings,
+frozen native resource identity and a current I/O witness are all required.
+Ordinary adoption or health inspection cannot grant these rights.
+
+The caller must authorize the human approval and persist its stable record UUID
+and operation key. Publication receipts contain hashes and exact provenance;
+withdrawal or expiry proves absence only from the referenced current extension
+text store. It does not erase native resources, legacy RunScratch, original Office
+or Work evidence, approval registry records or backups. Runtime admission of
+reviewed facts is separate integration work and must recheck revocation/expiry.
+
+`reviewed_operations_never_turn_read_only_adoption_into_io_authority` is a default
+no-infrastructure regression. `http_contract_reviewed` exercises the real HTTP
+client's identity/digest/shape/budget and delayed-ownership/witness boundary. The
+separate extension PostgreSQL suite proves actual storage lifecycle atomicity;
+HTTP fixture responses alone do not establish physical erasure.

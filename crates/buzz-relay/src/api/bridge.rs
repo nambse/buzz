@@ -5,8 +5,10 @@
 
 use std::sync::Arc;
 
+#[cfg(feature = "legacy-workflow")]
+use axum::extract::Path;
 use axum::{
-    extract::{Path, Query, RawQuery, State},
+    extract::{Query, RawQuery, State},
     http::{HeaderMap, StatusCode},
     response::Json,
 };
@@ -19,7 +21,9 @@ use buzz_core::TenantContext;
 use crate::handlers::ingest::{IngestAuth, IngestError};
 use crate::state::AppState;
 
-use super::{api_error, internal_error, not_found};
+#[cfg(feature = "legacy-workflow")]
+use super::not_found;
+use super::{api_error, internal_error};
 
 pub(crate) async fn enforce_http_admission(
     state: &AppState,
@@ -2053,6 +2057,7 @@ async fn handle_bridge_search(
 }
 
 /// Query parameters for the webhook trigger endpoint.
+#[cfg(feature = "legacy-workflow")]
 #[derive(serde::Deserialize)]
 pub struct WebhookQuery {
     /// Webhook secret for authentication. Prefer the `X-Webhook-Secret` header instead.
@@ -2063,6 +2068,7 @@ pub struct WebhookQuery {
 ///
 /// Prefers `X-Webhook-Secret` header over `?secret=` query param (headers aren't logged
 /// by most proxies). Returns 202 Accepted; execution is async.
+#[cfg(feature = "legacy-workflow")]
 pub async fn workflow_webhook(
     State(state): State<Arc<AppState>>,
     Path(id_str): Path<String>,
@@ -3864,6 +3870,7 @@ mod postgres_tests {
         let audit = buzz_audit::AuditService::new(pool.clone());
         let auth = buzz_auth::AuthService::new(config.auth.clone());
         let search = buzz_search::SearchService::new(pool.clone());
+        #[cfg(feature = "legacy-workflow")]
         let workflow_engine = Arc::new(buzz_workflow::WorkflowEngine::new(
             db.clone(),
             buzz_workflow::WorkflowConfig::default(),
@@ -3878,6 +3885,7 @@ mod postgres_tests {
             pubsub,
             auth,
             search,
+            #[cfg(feature = "legacy-workflow")]
             workflow_engine,
             Keys::generate(),
             media_storage,

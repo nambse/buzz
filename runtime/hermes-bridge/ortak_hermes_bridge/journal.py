@@ -5,8 +5,10 @@ import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
+import time
 from pathlib import Path
 from uuid import UUID
+from .failure_diagnostics import validate_diagnostic
 
 TERMINAL = {'completed', 'failed', 'cancelled'}
 MAX_RUNS = 100_000
@@ -68,18 +70,32 @@ class Journal:
                     status TEXT NOT NULL, started_at TEXT NOT NULL,
                     sequence INTEGER NOT NULL DEFAULT 0
                 );
+                CREATE TABLE IF NOT EXISTS profile_probes (
+                    start_key TEXT PRIMARY KEY REFERENCES runs(start_key),
+                    selection TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS profile_probe_selection ON profile_probes(selection);
                 CREATE TABLE IF NOT EXISTS events (
                     start_key TEXT NOT NULL REFERENCES runs(start_key),
                     sequence INTEGER NOT NULL, occurred_at TEXT NOT NULL,
                     payload TEXT NOT NULL,
                     PRIMARY KEY(start_key,sequence)
                 );
+                CREATE TABLE IF NOT EXISTS private_failure_diagnostics (
+                    start_key TEXT PRIMARY KEY REFERENCES runs(start_key),
+                    recorded_at TEXT NOT NULL,
+                    diagnostic TEXT NOT NULL CHECK(length(diagnostic)<=2048)
+                );
             ''')
+            from .journal_tools import SCHEMA
+            db.executescript(SCHEMA)
+            from .confidential.journal import install
+            install(db)
 
     @contextmanager
-    def connection(self):
+    def connection(self, timeout=3):
         """Fully durable storage with bounded lock wait; connections always close."""
-        db = sqlite3.connect(self.path, timeout=3, isolation_level=None)
+        db = sqlite3.connect(self.path, timeout=timeout, isolation_level=None)
         db.row_factory = sqlite3.Row
         try:
             db.execute('PRAGMA journal_mode=WAL')
@@ -90,9 +106,9 @@ class Journal:
             db.close()
 
     @contextmanager
-    def transaction(self):
+    def transaction(self, timeout=3):
         """Registry and event transitions commit as one atomic operation."""
-        with self.connection() as db:
+        with self.connection(timeout) as db:
             db.execute('BEGIN IMMEDIATE')
             try:
                 yield db
@@ -121,22 +137,54 @@ class Journal:
             row = db.execute('SELECT fingerprint FROM runs WHERE start_key=?', (key,)).fetchone()
             return row is not None and row[0] is not None
 
-    def reserve(self, spec):
+    def reserve(self, spec, *, probe_selection=None, workspace=None):
         """Persist execution identity before an executor may be invoked."""
         key = spec['idempotency_key']
         identity(key)
-        digest = hashlib.sha256(json.dumps(spec, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        # Preserve the original empty-policy fingerprint; workspace starts bind
+        # the separate explicit grant as well as every immutable RunSpec field.
+        pinned = spec if workspace is None else {'spec': spec, 'workspace': workspace}
+        digest = hashlib.sha256(json.dumps(pinned, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        selection = json.dumps(probe_selection, sort_keys=True, separators=(',', ':')) if probe_selection is not None else None
         with self.transaction() as db:
+            from .confidential.journal import is_confidential_on
+            if is_confidential_on(db, key):
+                raise BridgeError('start_conflict', 409)
             row = db.execute('SELECT * FROM runs WHERE start_key=?', (key,)).fetchone()
             if row:
+                if selection is not None:
+                    probe = db.execute('SELECT selection FROM profile_probes WHERE start_key=?', (key,)).fetchone()
+                    if probe is None or probe[0] != selection:
+                        raise BridgeError('probe_conflict', 409)
                 if row['fingerprint'] is not None and row['fingerprint'] != digest:
                     raise BridgeError('start_conflict', 409)
                 return self.receipt(row), False
             if db.execute('SELECT count(*) FROM runs').fetchone()[0] >= MAX_RUNS:
                 raise BridgeError('journal_capacity', 503)
             db.execute('INSERT INTO runs VALUES (?,?,?,?,0)', (key, digest, 'accepted', now()))
+            if workspace is not None:
+                from .workspace_contract import canonical
+                db.execute('INSERT INTO workspace_runs VALUES (?,?)', (key, canonical(workspace)))
+            if selection is not None:
+                db.execute('INSERT INTO profile_probes VALUES (?,?)', (key, selection))
             row = db.execute('SELECT * FROM runs WHERE start_key=?', (key,)).fetchone()
             return self.receipt(row), True
+
+    def recent_profile_probe(self, selection, ttl_seconds=120):
+        """Return only a completed explicit probe bound to the current exact selection."""
+        encoded = json.dumps(selection, sort_keys=True, separators=(',', ':'))
+        with self.connection() as db:
+            row = db.execute("""
+                SELECT r.start_key,e.occurred_at,e.payload FROM profile_probes p
+                JOIN runs r ON r.start_key=p.start_key
+                JOIN events e ON e.start_key=r.start_key AND e.sequence=r.sequence
+                WHERE p.selection=? AND r.status='completed'
+                ORDER BY e.occurred_at DESC LIMIT 1
+            """, (encoded,)).fetchone()
+        if row is None or json.loads(row['payload']).get('event_type') != 'run.completed':
+            return None
+        age = time.time() - datetime.fromisoformat(row['occurred_at'].replace('Z', '+00:00')).timestamp()
+        return row['start_key'] if 0 <= age < ttl_seconds else None
 
     @staticmethod
     def append(db, key, payload):
@@ -160,30 +208,46 @@ class Journal:
             db.execute("UPDATE runs SET status='running' WHERE start_key=?", (key,))
             return True
 
-    def complete(self, key, text, secrets=()):
+    def complete(self, key, text, secrets=(), *, work_output=False):
         """Store a previously redacted bounded reply and terminal state atomically."""
-        if not isinstance(text, str) or len(text.encode()) > 8192 or any(ord(c) < 32 and c not in '\n\r\t' for c in text):
+        if type(work_output) is not bool or not isinstance(text, str) or len(text.encode()) > 8192 or any(ord(c) < 32 and c not in '\n\r\t' for c in text):
             raise BridgeError('invalid_output')
         text = redact(text, secrets)
         with self.transaction() as db:
             row = db.execute('SELECT status FROM runs WHERE start_key=?', (key,)).fetchone()
             if not row or row[0] != 'running':
                 return False
-            intent = 'reply' if text.strip() else 'silent'
-            if intent == 'reply':
+            from .journal_tools import settled_on
+            if not settled_on(db, key):
+                raise BridgeError('unsettled_workspace_tool', 409)
+            intent = 'reply' if text.strip() and not work_output else 'silent'
+            if text.strip():
                 self.append(db, key, {'event_type': 'assistant.delta', 'turn': 0, 'delta': {'text': text}})
             self.append(db, key, {'event_type': 'delivery.intent', 'intent': intent})
             self.append(db, key, {'event_type': 'run.completed', 'delivery_intent': intent})
             db.execute("UPDATE runs SET status='completed' WHERE start_key=?", (key,))
             return True
 
-    def fail(self, key, code='executor_interrupted'):
+    def fail(self, key, code='executor_interrupted', *, diagnostic=None):
         """Only closed failure codes reach persistence, never provider exceptions."""
-        if code not in {'executor_interrupted', 'executor_unavailable', 'policy_denied', 'provider_failed', 'deadline_exceeded'}:
+        if code not in {'executor_interrupted', 'executor_unavailable', 'policy_denied', 'provider_failed', 'deadline_exceeded',
+                        'provider_incomplete', 'provider_response_invalid', 'invalid_output', 'credential_denied',
+                        'runtime_selection_changed', 'unsupported_hermes_tool_selection', 'workspace_tool_failed'}:
             raise BridgeError('invalid_failure_code')
+        if diagnostic is not None and not validate_diagnostic(diagnostic):
+            raise BridgeError('invalid_failure_diagnostic')
         with self.transaction() as db:
+            from .confidential.journal import is_confidential_on, fail_on
+            if is_confidential_on(db, key):
+                fail_on(db, key, code)
+                return
             row = db.execute('SELECT status FROM runs WHERE start_key=?', (key,)).fetchone()
             if row and row[0] not in TERMINAL and row[0] != 'cancelling':
+                from .journal_tools import retire
+                retire(self, db, key, 'deadline_exceeded' if code == 'deadline_exceeded' else 'workspace_unavailable')
+                if diagnostic is not None:
+                    db.execute('INSERT INTO private_failure_diagnostics VALUES (?,?,?)',
+                               (key, now(), json.dumps(diagnostic, separators=(',', ':'))))
                 self.append(db, key, {'event_type': 'run.failed', 'code': code, 'message': {'text': code}})
                 db.execute("UPDATE runs SET status='failed' WHERE start_key=?", (key,))
 
@@ -199,12 +263,18 @@ class Journal:
                     raise BridgeError('journal_capacity', 503)
                 db.execute('INSERT INTO runs VALUES (?,?,?,?,0)', (key, None, 'cancelling', now()))
             else:
+                from .journal_tools import retire
+                retire(self, db, key, 'cancelled')
                 db.execute("UPDATE runs SET status='cancelling' WHERE start_key=?", (key,))
             return 'cancelled'
 
     def finish_cancel(self, key):
         """Call only after the execution owner has proven containment and reaped work."""
         with self.transaction() as db:
+            from .confidential.journal import is_confidential_on, finish_cancel_on
+            if is_confidential_on(db, key):
+                finish_cancel_on(db, key)
+                return
             row = db.execute('SELECT status FROM runs WHERE start_key=?', (key,)).fetchone()
             if row and row[0] == 'cancelling':
                 self.append(db, key, {'event_type': 'run.cancelled', 'reason': {'text': 'cancelled by control plane'}})
@@ -232,6 +302,9 @@ class Journal:
             raise BridgeError('invalid_cursor')
         with self.connection() as db:
             db.execute('BEGIN')
+            from .confidential.journal import is_confidential_on
+            if is_confidential_on(db, key):
+                raise BridgeError('run_not_found', 404)
             row = db.execute('SELECT * FROM runs WHERE start_key=?', (key,)).fetchone()
             if row is None:
                 raise BridgeError('run_not_found', 404)

@@ -4,12 +4,12 @@
 use super::postgres_tests::{empty_storage_manifest, store};
 use super::*;
 
-struct Scope {
-    community: CommunityId,
-    host: String,
-    company: Uuid,
-    project: Uuid,
-    item: Uuid,
+pub(super) struct Scope {
+    pub(super) community: CommunityId,
+    pub(super) host: String,
+    pub(super) company: Uuid,
+    pub(super) project: Uuid,
+    pub(super) item: Uuid,
 }
 
 async fn isolated_store() -> (Db, DeletionStore) {
@@ -30,7 +30,7 @@ async fn isolated_store() -> (Db, DeletionStore) {
     store().await
 }
 
-async fn seed(db: &Db) -> Scope {
+pub(super) async fn seed(db: &Db) -> Scope {
     let host = format!("ortak-project-delete-{}.example", Uuid::new_v4().simple());
     let community = db
         .ensure_configured_community(&host)
@@ -98,7 +98,7 @@ async fn seed(db: &Db) -> Scope {
     }
 }
 
-async fn preserved(db: &Db, scope: &Scope) -> serde_json::Value {
+pub(super) async fn preserved(db: &Db, scope: &Scope) -> serde_json::Value {
     sqlx::query_scalar(
         "SELECT jsonb_build_object(\
          'company',(SELECT to_jsonb(c) FROM companies c WHERE c.id=$1),\
@@ -121,7 +121,7 @@ async fn scoped_counts(db: &Db, scope: &Scope) -> (i64, i64, i64, i64) {
         .bind(scope.community.as_uuid()).fetch_one(&db.pool).await.expect("community counts")
 }
 
-async fn approved(db: &Db, store: &DeletionStore, scope: &Scope) -> LeaseToken {
+pub(super) async fn approved(db: &Db, store: &DeletionStore, scope: &Scope) -> LeaseToken {
     let submitted = store
         .submit(&scope.host, "fixture-operator", Some("fresh fixture only"))
         .await

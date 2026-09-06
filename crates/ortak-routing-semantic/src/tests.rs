@@ -14,6 +14,9 @@ use tokio::{
     task::{JoinHandle, JoinSet},
 };
 
+#[path = "tests/hermes.rs"]
+mod hermes;
+
 const TOKEN: &str = "fixture-semantic-token-not-a-provider-key";
 const MODEL: &str = "fixture-pinned-2026-09-05";
 
@@ -187,10 +190,14 @@ async fn actual_http_is_bounded_redacted_strict_and_cached_by_the_sealed_input()
     let input = fixture.input().await;
     let config = fixture.config(&server.origin);
     let scorer = fixture.scorer(config.clone());
-    let first = scorer.score(&input).await;
+    let first = scorer
+        .score(&input, ScoringBudget::for_duration(Duration::from_secs(5)))
+        .await;
     assert_eq!(first.result.as_ref().unwrap().len(), 2);
     assert_eq!(first.metadata.usage.as_ref().unwrap()["redacted"], true);
-    let second = scorer.score(&input).await;
+    let second = scorer
+        .score(&input, ScoringBudget::for_duration(Duration::from_secs(5)))
+        .await;
     assert_eq!(first.result, second.result);
     assert_eq!(second.metadata.usage.as_ref().unwrap()["cache_hit"], true);
     assert_eq!(second.metadata.usage.as_ref().unwrap()["total_tokens"], 0);
@@ -221,7 +228,14 @@ async fn actual_http_is_bounded_redacted_strict_and_cached_by_the_sealed_input()
             .unwrap()
             .key
     );
-    assert!(scorer.score(&changed).await.result.is_ok());
+    assert!(scorer
+        .score(
+            &changed,
+            ScoringBudget::for_duration(Duration::from_secs(5))
+        )
+        .await
+        .result
+        .is_ok());
     assert_eq!(server.requests.lock().unwrap().len(), 2);
     fixture.policy.semantic_threshold = 0.89;
     assert_ne!(
@@ -230,7 +244,14 @@ async fn actual_http_is_bounded_redacted_strict_and_cached_by_the_sealed_input()
             .unwrap()
             .key
     );
-    assert!(scorer.score(&fixture.input().await).await.result.is_ok());
+    assert!(scorer
+        .score(
+            &fixture.input().await,
+            ScoringBudget::for_duration(Duration::from_secs(5))
+        )
+        .await
+        .result
+        .is_ok());
     assert_eq!(server.requests.lock().unwrap().len(), 3);
     fixture.message = MessageId::from_bytes([18; 32]);
     assert_ne!(
@@ -239,10 +260,24 @@ async fn actual_http_is_bounded_redacted_strict_and_cached_by_the_sealed_input()
             .unwrap()
             .key
     );
-    assert!(scorer.score(&fixture.input().await).await.result.is_ok());
+    assert!(scorer
+        .score(
+            &fixture.input().await,
+            ScoringBudget::for_duration(Duration::from_secs(5))
+        )
+        .await
+        .result
+        .is_ok());
     assert_eq!(server.requests.lock().unwrap().len(), 4);
     let other = Fixture::new();
-    assert!(scorer.score(&other.input().await).await.result.is_err());
+    assert!(scorer
+        .score(
+            &other.input().await,
+            ScoringBudget::for_duration(Duration::from_secs(5))
+        )
+        .await
+        .result
+        .is_err());
     assert_eq!(server.requests.lock().unwrap().len(), 4);
 }
 
@@ -295,7 +330,7 @@ async fn malformed_refused_foreign_and_duplicate_envelopes_never_become_scores()
         let server = Server::new(vec![reply]).await;
         let result = fixture
             .scorer(fixture.config(&server.origin))
-            .score(&input)
+            .score(&input, ScoringBudget::for_duration(Duration::from_secs(5)))
             .await;
         assert!(result.result.is_err());
         assert!(result.metadata.usage.as_ref().unwrap()["failure_code"].is_string());
@@ -313,7 +348,7 @@ async fn redirects_oversized_responses_and_saturated_requests_are_bounded() {
     let sender = Server::new(vec![redirect]).await;
     assert!(fixture
         .scorer(fixture.config(&sender.origin))
-        .score(&input)
+        .score(&input, ScoringBudget::for_duration(Duration::from_secs(5)))
         .await
         .result
         .is_err());
@@ -323,7 +358,7 @@ async fn redirects_oversized_responses_and_saturated_requests_are_bounded() {
     let server = Server::new(vec![large]).await;
     assert!(fixture
         .scorer(fixture.config(&server.origin))
-        .score(&input)
+        .score(&input, ScoringBudget::for_duration(Duration::from_secs(5)))
         .await
         .result
         .is_err());
@@ -332,9 +367,9 @@ async fn redirects_oversized_responses_and_saturated_requests_are_bounded() {
     let server = Server::new(vec![slow]).await;
     let scorer = fixture.scorer(fixture.config(&server.origin));
     let (a, b, c) = tokio::join!(
-        scorer.score(&input),
-        scorer.score(&input),
-        scorer.score(&input)
+        scorer.score(&input, ScoringBudget::for_duration(Duration::from_secs(5))),
+        scorer.score(&input, ScoringBudget::for_duration(Duration::from_secs(5))),
+        scorer.score(&input, ScoringBudget::for_duration(Duration::from_secs(5)))
     );
     assert!(a.result.is_ok() && b.result.is_ok());
     assert!(c.result.is_err());
@@ -351,13 +386,16 @@ async fn cancelled_http_attempts_trip_the_breaker_without_detached_cache_updates
     let server = Server::new(vec![slow]).await;
     let scorer = fixture.scorer(fixture.config(&server.origin));
     for _ in 0..3 {
-        assert!(
-            tokio::time::timeout(Duration::from_millis(25), scorer.score(&input))
-                .await
-                .is_err()
-        );
+        assert!(tokio::time::timeout(
+            Duration::from_millis(25),
+            scorer.score(&input, ScoringBudget::for_duration(Duration::from_secs(5)))
+        )
+        .await
+        .is_err());
     }
-    let fourth = scorer.score(&input).await;
+    let fourth = scorer
+        .score(&input, ScoringBudget::for_duration(Duration::from_secs(5)))
+        .await;
     assert_eq!(
         fourth.metadata.usage.unwrap()["failure_code"],
         "circuit_open"
@@ -365,7 +403,12 @@ async fn cancelled_http_attempts_trip_the_breaker_without_detached_cache_updates
     tokio::time::sleep(Duration::from_millis(220)).await;
     assert_eq!(server.requests.lock().unwrap().len(), 3);
     assert_eq!(
-        scorer.score(&input).await.metadata.usage.unwrap()["failure_code"],
+        scorer
+            .score(&input, ScoringBudget::for_duration(Duration::from_secs(5)))
+            .await
+            .metadata
+            .usage
+            .unwrap()["failure_code"],
         "circuit_open"
     );
 }

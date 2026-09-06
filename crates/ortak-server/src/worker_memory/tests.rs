@@ -6,7 +6,7 @@
 
 use super::*;
 use ortak_control::{
-    fakes::InMemoryProvisioningRepository, ports::CompanyDirectory, PgControlPlane,
+    PgControlPlane, fakes::InMemoryProvisioningRepository, ports::CompanyDirectory,
 };
 use serde_json::json;
 
@@ -36,6 +36,61 @@ fn example_config() -> serde_json::Value {
 }
 
 #[test]
+fn employee_destinations_are_default_off_exact_and_owned_before_credentials() {
+    let scope = InMemoryProvisioningRepository::new().scope();
+    let old: MemoryConfig = serde_json::from_value(example_config()).unwrap();
+    assert!(old.employees[0].reviewed_employee_destinations.is_empty());
+    for failure in [
+        "receipt",
+        "duplicate_channel",
+        "duplicate_target",
+        "nil",
+        "bound",
+    ] {
+        let mut value = prepared_config(scope.company_id());
+        value["require_creation_receipts"] = json!(false);
+        value["employees"][0]["reviewed_employee_destinations"] = json!([
+            {"target_id":Uuid::from_u128(100),"destination_channel_id":Uuid::from_u128(200)}]);
+        match failure {
+            "receipt"=>value["employees"][0]["creation_receipt"]=serde_json::Value::Null,
+            "nil"=>value["employees"][0]["reviewed_employee_destinations"][0]["target_id"]=json!(Uuid::nil()),
+            "bound"=>value["employees"][0]["reviewed_employee_destinations"]=json!((0..17).map(|i|
+                json!({"target_id":Uuid::from_u128(100+i),"destination_channel_id":Uuid::from_u128(200+i)})).collect::<Vec<_>>()),
+            _=>value["employees"][0]["reviewed_employee_destinations"].as_array_mut().unwrap().push(
+                json!({"target_id":Uuid::from_u128(if failure=="duplicate_target" {100} else {101}),
+                    "destination_channel_id":Uuid::from_u128(if failure=="duplicate_channel" {200} else {201})})),
+        }
+        let config: MemoryConfig = serde_json::from_value(value).unwrap();
+        assert!(config.validate(&scope).is_err(), "{failure}");
+    }
+}
+
+fn prepared_config(company: Uuid) -> serde_json::Value {
+    let mut config = example_config();
+    config["origin"] = json!("http://127.0.0.1:1");
+    config["token_env"] = json!("ORTAK_MEMORY_RECIPE_TEST_TOKEN");
+    config["require_creation_receipts"] = json!(true);
+    let entry = config["employees"][0].clone();
+    config["employees"][0]["creation_receipt"] = json!({
+        "company_id": company,
+        "deployment_id": config["deployment_id"],
+        "employee_id": entry["employee_id"],
+        "binding": entry["binding"],
+        "creation_key": entry["creation_key"],
+        "request_hash": "0".repeat(64),
+        "native_ids": {"workspace": "fixture-native", "peers": {
+            "operator-private": "fixture-user-native", "ada-private": "fixture-employee-native"
+        }},
+        "resources": {
+            "workspace": {"resource_ref": "workspace:fixture-only", "ownership": "created"},
+            "user_peer": {"resource_ref": "peer:fixture-only/operator-private", "ownership": "created"},
+            "employee_peer": {"resource_ref": "peer:fixture-only/ada-private", "ownership": "created"}
+        }
+    });
+    config
+}
+
+#[test]
 fn config_requires_explicit_bounded_validation_before_credential_resolution() {
     let scope = InMemoryProvisioningRepository::new().scope();
     for change in ["authorization", "empty", "unbounded"] {
@@ -54,6 +109,245 @@ fn config_requires_explicit_bounded_validation_before_credential_resolution() {
     let mut unknown = example_config();
     unknown["implicit_create"] = json!(true);
     assert!(serde_json::from_value::<MemoryConfig>(unknown).is_err());
+}
+
+#[test]
+fn reviewed_projects_are_default_off_bounded_and_require_the_full_original_receipt() {
+    let scope = InMemoryProvisioningRepository::new().scope();
+    let legacy: MemoryConfig = serde_json::from_value(example_config()).unwrap();
+    assert!(legacy.employees[0].reviewed_projects.is_empty());
+    for change in ["missing_receipt", "nil", "unbounded"] {
+        let mut value = prepared_config(scope.company_id());
+        // Bind the project-specific full-receipt guard independently of the
+        // optional whole-recipe strict mode used by the activation runner.
+        value["require_creation_receipts"] = json!(false);
+        value["token_env"] = json!("invalid token variable");
+        value["employees"][0]["reviewed_projects"] = json!([Uuid::new_v4()]);
+        match change {
+            "missing_receipt" => {
+                value["employees"][0]["creation_receipt"] = serde_json::Value::Null
+            }
+            "nil" => value["employees"][0]["reviewed_projects"] = json!([Uuid::nil()]),
+            _ => {
+                value["employees"][0]["reviewed_projects"] =
+                    json!((0..17).map(|_| Uuid::new_v4()).collect::<Vec<_>>())
+            }
+        }
+        let config: MemoryConfig = serde_json::from_value(value).unwrap();
+        assert!(matches!(
+            WorkerMemory::new(&scope, config),
+            Err("memory recipe identity, original receipt or diagnostic differs")
+        ));
+    }
+}
+
+#[test]
+fn reviewed_runtime_requires_separate_subset_opt_in_before_credentials() {
+    let scope = InMemoryProvisioningRepository::new().scope();
+    let legacy: MemoryConfig = serde_json::from_value(example_config()).unwrap();
+    assert!(legacy.employees[0].reviewed_runtime_projects.is_empty());
+    let mut value = prepared_config(scope.company_id());
+    value["token_env"] = json!("invalid token variable");
+    value["employees"][0]["reviewed_projects"] = json!([Uuid::new_v4()]);
+    value["employees"][0]["reviewed_runtime_projects"] = json!([Uuid::new_v4()]);
+    assert!(matches!(
+        WorkerMemory::new(&scope, serde_json::from_value(value).unwrap()),
+        Err("memory recipe identity, original receipt or diagnostic differs")
+    ));
+}
+
+#[test]
+fn conversation_selection_is_explicit_unambiguous_and_checked_before_credentials() {
+    let scope = InMemoryProvisioningRepository::new().scope();
+    let legacy: MemoryConfig = serde_json::from_value(example_config()).unwrap();
+    assert!(legacy.employees[0].reviewed_conversations.is_empty());
+    let project = Uuid::new_v4();
+    let channel = Uuid::new_v4();
+    for fault in [
+        "nil_project",
+        "nil_channel",
+        "unselected_project",
+        "duplicate",
+        "ambiguous_channel",
+        "rebound_project",
+        "unbounded",
+    ] {
+        let mut value = prepared_config(scope.company_id());
+        value["token_env"] = json!("invalid token variable");
+        value["employees"][0]["reviewed_projects"] = json!([project]);
+        let mut selected = vec![json!({"project_id": project, "channel_id": channel})];
+        match fault {
+            "nil_project" => selected[0]["project_id"] = json!(Uuid::nil()),
+            "nil_channel" => selected[0]["channel_id"] = json!(Uuid::nil()),
+            "unselected_project" => selected[0]["project_id"] = json!(Uuid::new_v4()),
+            "duplicate" => selected.push(selected[0].clone()),
+            "ambiguous_channel" => {
+                let other = Uuid::new_v4();
+                value["employees"][0]["reviewed_projects"] = json!([project, other]);
+                selected.push(json!({"project_id":other,"channel_id":channel}));
+            }
+            "rebound_project" => {
+                selected.push(json!({"project_id":project,"channel_id":Uuid::new_v4()}))
+            }
+            _ => selected = vec![selected[0].clone(); 17],
+        }
+        value["employees"][0]["reviewed_conversations"] = json!(selected);
+        assert!(
+            matches!(
+                WorkerMemory::new(&scope, serde_json::from_value(value).unwrap()),
+                Err("memory recipe identity, original receipt or diagnostic differs")
+            ),
+            "{fault}"
+        );
+    }
+    let mut valid = prepared_config(scope.company_id());
+    valid["employees"][0]["reviewed_projects"] = json!([project]);
+    valid["employees"][0]["reviewed_conversations"] =
+        json!([{"project_id":project,"channel_id":channel}]);
+    let parsed: MemoryConfig = serde_json::from_value(valid.clone()).unwrap();
+    assert!(parsed.validate(&scope).is_ok());
+    assert!(
+        parsed.employees[0].reviewed_runtime_projects.is_empty(),
+        "conversation opt-in must not opt into project Work memory"
+    );
+    valid["employees"][0]["reviewed_conversations"][0]["thread_root"] = json!("caller-controlled");
+    assert!(serde_json::from_value::<MemoryConfig>(valid).is_err());
+}
+
+#[test]
+fn shared_receipt_selection_mismatch_is_rejected_before_credential_resolution() {
+    let scope = InMemoryProvisioningRepository::new().scope();
+    for change in [
+        "missing",
+        "company",
+        "deployment",
+        "employee",
+        "binding",
+        "key",
+        "diagnostic",
+        "endpoint",
+    ] {
+        let mut config = prepared_config(scope.company_id());
+        // If selection checking is removed or moved after credential lookup,
+        // this invalid variable name produces a different error.
+        config["token_env"] = json!("invalid token variable");
+        let receipt = &mut config["employees"][0]["creation_receipt"];
+        match change {
+            "missing" => *receipt = serde_json::Value::Null,
+            "company" => receipt["company_id"] = json!(Uuid::nil()),
+            "deployment" => receipt["deployment_id"] = json!(Uuid::nil()),
+            "employee" => receipt["employee_id"] = json!("other-employee"),
+            "binding" => receipt["binding"]["user_peer"] = json!("other-user"),
+            "key" => receipt["creation_key"] = json!("other-bootstrap-create-key"),
+            "diagnostic" => config["employees"][0]["validation_run_id"] = json!(Uuid::nil()),
+            "endpoint" => config["endpoint_ref"] = json!("service://other"),
+            _ => unreachable!(),
+        }
+        assert!(
+            matches!(
+                WorkerMemory::new(&scope, serde_json::from_value(config).unwrap()),
+                Err("memory recipe identity, original receipt or diagnostic differs")
+            ),
+            "{change}"
+        );
+    }
+}
+
+#[test]
+fn duplicate_worker_bindings_and_original_keys_are_rejected_before_credentials() {
+    let scope = InMemoryProvisioningRepository::new().scope();
+    for duplicate in ["employee", "workspace", "key"] {
+        let mut config = example_config();
+        config["token_env"] = json!("invalid token variable");
+        let mut second = config["employees"][0].clone();
+        second["employee_id"] = json!("second-employee");
+        second["binding"]["workspace"] = json!("second-workspace");
+        second["creation_key"] = json!("second-original-create-key");
+        match duplicate {
+            "employee" => second["employee_id"] = config["employees"][0]["employee_id"].clone(),
+            "workspace" => {
+                second["binding"]["workspace"] =
+                    config["employees"][0]["binding"]["workspace"].clone()
+            }
+            "key" => second["creation_key"] = config["employees"][0]["creation_key"].clone(),
+            _ => unreachable!(),
+        }
+        config["employees"].as_array_mut().unwrap().push(second);
+        assert!(
+            matches!(
+                WorkerMemory::new(&scope, serde_json::from_value(config).unwrap()),
+                Err("memory recipe identity, original receipt or diagnostic differs")
+            ),
+            "{duplicate}"
+        );
+    }
+}
+
+#[test]
+fn prepared_and_legacy_worker_construction_preserve_distinct_acquisition_modes() {
+    const CHILD: &str = "ORTAK_MEMORY_RECIPE_TEST_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "worker_memory::tests::prepared_and_legacy_worker_construction_preserve_distinct_acquisition_modes"])
+            .env_clear()
+            .env(CHILD, "1")
+            .env("ORTAK_MEMORY_RECIPE_TEST_TOKEN", "explicit-synthetic-test-token")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("child constructor check deadline exceeded");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        let mut output = String::new();
+        std::io::Read::read_to_string(
+            &mut std::io::Read::take(child.stdout.take().unwrap(), 4096),
+            &mut output,
+        )
+        .unwrap();
+        assert!(
+            status.success() && output.contains("1 passed"),
+            "bounded child constructor check failed"
+        );
+        return;
+    }
+    let scope = InMemoryProvisioningRepository::new().scope();
+    let prepared = prepared_config(scope.company_id());
+    let mut legacy = prepared.clone();
+    legacy["require_creation_receipts"] = json!(false);
+    legacy["employees"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("creation_receipt");
+    for (value, expected) in [
+        (prepared, ProvisioningMode::Adopt),
+        (legacy, ProvisioningMode::Create),
+    ] {
+        let config: MemoryConfig = serde_json::from_value(value).unwrap();
+        let original = config.employees[0].creation_receipt.clone();
+        let run = config.employees[0].validation_run_id;
+        let recorded_at = config.employees[0].validation_recorded_at;
+        let memory = WorkerMemory::new(&scope, config).unwrap();
+        assert!(
+            !memory.ready(),
+            "construction or a saved receipt cannot grant a witness"
+        );
+        let values = memory.validations.lock().unwrap();
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].resource.mode, expected);
+        assert_eq!(values[0].creation_receipt, original);
+        assert_eq!(values[0].roundtrip.run_id, run);
+        assert_eq!(values[0].roundtrip.recorded_at, recorded_at);
+    }
 }
 
 #[tokio::test]
@@ -113,6 +407,8 @@ mod private_live {
     const ROOT: &str = "/private/tmp/ortak-private-20260905";
     const DIRECTORY: &str = "/private/tmp/ortak-private-20260905/memory";
     const FRAGMENT: &str = "/private/tmp/ortak-private-20260905/memory/worker-memory.json";
+    const PREPARED_FRAGMENT: &str =
+        "/private/tmp/ortak-private-20260905/memory/worker-memory-prepared.json";
     const MAX_BYTES: u64 = 16_384;
     #[cfg(target_os = "macos")]
     const OPEN_FLAGS: i32 = 0x100 | 0x4;
@@ -121,7 +417,7 @@ mod private_live {
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
     const OPEN_FLAGS: i32 = 0x8000 | 0x800;
 
-    fn read_fragment(uid: u32) -> Result<Vec<u8>, &'static str> {
+    fn read_fragment(uid: u32, prepared: bool) -> Result<Vec<u8>, &'static str> {
         for directory in [ROOT, DIRECTORY] {
             let path = Path::new(directory);
             let metadata =
@@ -136,7 +432,11 @@ mod private_live {
         let file = OpenOptions::new()
             .read(true)
             .custom_flags(OPEN_FLAGS)
-            .open(FRAGMENT)
+            .open(if prepared {
+                PREPARED_FRAGMENT
+            } else {
+                FRAGMENT
+            })
             .map_err(|_| "private memory fragment unavailable")?;
         let metadata = file
             .metadata()
@@ -194,7 +494,7 @@ mod private_live {
         Ok(config)
     }
 
-    async fn check_actual_fragment() -> Result<(), &'static str> {
+    async fn check_actual_fragment(prepared: bool) -> Result<(), &'static str> {
         let uid: u32 = std::env::var("ORTAK_PRIVATE_MEMORY_TEST_UID")
             .map_err(|_| "explicit expected private owner UID required")?
             .parse()
@@ -207,8 +507,13 @@ mod private_live {
         if company.is_nil() || company.to_string() != company_text {
             return Err("canonical non-nil private company required");
         }
-        let bytes = read_fragment(uid)?;
+        let bytes = read_fragment(uid, prepared)?;
         let config = selected_fragment(&bytes, company)?;
+        if prepared
+            && (!config.require_creation_receipts || config.employees[0].creation_receipt.is_none())
+        {
+            return Err("prepared fragment requires the original complete creation receipt");
+        }
         let database = std::env::var("ORTAK_PRIVATE_MEMORY_TEST_DATABASE_URL")
             .map_err(|_| "explicit private test database required")?;
         let parsed = url::Url::parse(&database).map_err(|_| "invalid private test database")?;
@@ -273,7 +578,7 @@ mod private_live {
         assert!(restarted.ready());
         assert_mutation_unsupported(&restarted, &original.employees[0]).await;
         assert!(
-            read_fragment(uid)? == bytes,
+            read_fragment(uid, prepared)? == bytes,
             "worker composition changed bootstrap fragment"
         );
         pool.close().await;
@@ -283,10 +588,22 @@ mod private_live {
     #[tokio::test]
     #[ignore = "requires exact fresh private fragment, read-only selected DB credentials and selected native Honcho token; replays diagnostic I/O only"]
     async fn live_private_bootstrap_fragment_recovers_worker_memory_readiness() {
-        let result = tokio::time::timeout(Duration::from_secs(25), check_actual_fragment()).await;
+        let result =
+            tokio::time::timeout(Duration::from_secs(25), check_actual_fragment(false)).await;
         assert!(
             matches!(result, Ok(Ok(()))),
             "private WorkerMemory compatibility gate failed: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires exported prepared private fragment, read-only selected DB credentials and selected native Honcho token; replays original diagnostic I/O only"]
+    async fn live_private_prepared_fragment_recovers_adopted_worker_memory_readiness() {
+        let result =
+            tokio::time::timeout(Duration::from_secs(25), check_actual_fragment(true)).await;
+        assert!(
+            matches!(result, Ok(Ok(()))),
+            "prepared WorkerMemory compatibility gate failed: {result:?}"
         );
     }
 }

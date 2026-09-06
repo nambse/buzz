@@ -7,6 +7,7 @@ license.workspace = true
 description = "Ortak control plane: repository ports, authoritative routing transaction, and PostgreSQL adapters"
 
 [dependencies]
+base64.workspace = true
 ortak-domain.workspace = true
 ortak-router.workspace = true
 chrono.workspace = true

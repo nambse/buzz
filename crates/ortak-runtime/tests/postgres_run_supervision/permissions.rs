@@ -20,9 +20,7 @@ async fn lifecycle_and_binding_refusals_record_bounded_retry_before_any_runtime_
     assert_eq!(
         outcome,
         DispatchOutcome::Refused {
-            refusal: DispatchRefusal::EmployeeNotActive {
-                status: EmployeeStatus::Disabled
-            },
+            refusal: DispatchRefusal::EmployeeLifecycleChanged,
             retry: OutboxFailOutcome::Retrying,
         }
     );
@@ -40,14 +38,13 @@ async fn lifecycle_and_binding_refusals_record_bounded_retry_before_any_runtime_
     assert!(row
         .last_error
         .as_deref()
-        .is_some_and(|error| error.contains("not active")));
+        .is_some_and(|error| error.contains("lifecycle")));
 
-    // Re-enabled but with an unvalidated runtime binding: still refused.
-    sqlx::query("UPDATE employees SET status = 'active' WHERE company_id = $1 AND id = 'cem'")
-        .bind(fixture.scope.company_id())
-        .execute(&fixture.pool)
-        .await
-        .expect("enable");
+    // A separate current epoch isolates runtime binding validation. Disabled
+    // work is permanently fenced; the lifecycle suite covers sealed re-enable.
+    let fixture = Fixture::new().await;
+    fixture.route("Cem, current binding").await;
+    let supervisor = fixture.supervisor(fixture.config());
     sqlx::query(
         "UPDATE employee_runtime_bindings SET validated_at = NULL
           WHERE company_id = $1 AND revision_id = $2",
@@ -58,7 +55,7 @@ async fn lifecycle_and_binding_refusals_record_bounded_retry_before_any_runtime_
     .await
     .expect("unvalidate");
     let lease = fixture.lease(Duration::from_secs(60)).await;
-    assert_eq!(lease.attempt_count, 2);
+    assert_eq!(lease.attempt_count, 1);
     assert_eq!(
         supervisor
             .dispatch(&fixture.scope, &lease)

@@ -13,6 +13,83 @@ use crate::inbox::{
 };
 use crate::ports::InboxRepository;
 
+/// Captures only server-selected canonical Office input on the event's own
+/// transaction. Absent/off cohorts store the signed event without an inbox row.
+/// Gift wraps are captured for explicit unsupported-DM audit, never execution.
+pub async fn insert_selected_accepted_event_on(
+    connection: &mut PgConnection,
+    community_id: Uuid,
+    event: &InboxEvent,
+) -> Result<InboxInsertOutcome> {
+    let company_id: Uuid =
+        sqlx::query_scalar("SELECT company_id FROM office_company_bindings WHERE community_id=$1")
+            .bind(community_id)
+            .fetch_optional(&mut *connection)
+            .await?
+            .ok_or(ControlError::UnknownCompanyBinding { community_id })?;
+    let scope = CompanyScope::new(company_id, Some(community_id));
+    super::cohort::lock(connection, &scope).await?;
+    let row = sqlx::query(
+        "SELECT ev.kind,ev.pubkey,ev.channel_id,
+                EXISTS(SELECT 1 FROM channels ch WHERE ch.community_id=b.community_id
+                  AND ch.id=ev.channel_id AND ch.channel_type='dm') AS direct,
+                EXISTS (SELECT 1 FROM office_routing_cohorts c
+                        WHERE c.company_id=b.company_id AND c.community_id=b.community_id
+                          AND c.state IN ('capture','enabled') AND (
+                            (ev.kind=1059 AND ev.channel_id IS NULL) OR
+                            (ev.kind IN (9,40002) AND EXISTS (
+                               SELECT 1 FROM office_routing_channels s JOIN channels ch
+                               ON ch.community_id=s.community_id AND ch.id=s.channel_id
+                               WHERE s.company_id=c.company_id AND s.community_id=c.community_id
+                                 AND s.channel_id=ev.channel_id AND (ch.channel_type='stream'
+                                   OR (ch.channel_type='dm' AND ch.visibility='private'))
+                                 AND ch.archived_at IS NULL AND ch.deleted_at IS NULL))))
+                AND ev.deleted_at IS NULL AS selected
+         FROM office_company_bindings b JOIN events ev ON ev.community_id=b.community_id
+         WHERE b.company_id=$1 AND b.community_id=$2 AND ev.created_at=$3 AND ev.id=$4",
+    )
+    .bind(company_id)
+    .bind(community_id)
+    .bind(event.event_created_at)
+    .bind(event.event_id.as_bytes().as_slice())
+    .fetch_optional(&mut *connection)
+    .await?
+    .ok_or_else(|| ControlError::InboxFactMismatch {
+        message_id: event.event_id.to_hex(),
+        field: "event",
+    })?;
+    let canonical_author: Vec<u8> = row.try_get("pubkey")?;
+    if row.try_get::<i32, _>("kind")? != event.event_kind
+        || canonical_author.as_slice() != event.author_pubkey.as_slice()
+        || row.try_get::<Option<Uuid>, _>("channel_id")? != event.channel_id
+    {
+        return Err(ControlError::InboxFactMismatch {
+            message_id: event.event_id.to_hex(),
+            field: "capture_facts",
+        });
+    }
+    if !row.try_get::<bool, _>("selected")? {
+        return Ok(InboxInsertOutcome::OutsideCohort);
+    }
+    if row.try_get::<bool, _>("direct")? {
+        let Some(channel) = event.channel_id else {
+            return Ok(InboxInsertOutcome::OutsideCohort);
+        };
+        if !super::direct_channel_on(
+            connection,
+            scope.company_id(),
+            scope.community_id(),
+            channel,
+        )
+        .await?
+        .is_some_and(|direct| direct.permits_execution())
+        {
+            return Ok(InboxInsertOutcome::OutsideCohort);
+        }
+    }
+    insert_accepted_event_on(connection, community_id, event).await
+}
+
 /// Inserts the inbox row on a caller-owned connection so the relay can commit
 /// it in the same transaction as the signed `events` row.
 ///
@@ -134,8 +211,24 @@ impl PgControlPlane {
         let row = sqlx::query(
             "WITH candidate AS (
                  SELECT company_id, event_id
-                   FROM office_inbox
+                   FROM office_inbox i
                   WHERE company_id = $1
+                    -- Retained crypto jobs own their source forever; neither
+                    -- failed jobs nor historical unsupported decisions reset.
+                    AND NOT EXISTS (SELECT 1 FROM encrypted_dm_decrypt_jobs j
+                      WHERE j.company_id=i.company_id AND j.source_id=i.event_id)
+                    -- Reserve only untouched, canonical selected gift wraps.
+                    -- This central lane never asks an employee to subscribe.
+                    AND NOT (i.event_kind=1059 AND i.state='pending'
+                      AND i.claim_generation=0 AND i.attempt_count=0 AND i.finalized_at IS NULL
+                      AND EXISTS (SELECT 1 FROM encrypted_dm_selections s
+                        WHERE s.company_id=i.company_id AND s.enabled AND i.received_at>=s.enabled_at
+                          AND i.received_at+interval '120 seconds'>clock_timestamp()
+                          AND ortak_encrypted_dm_pair_current(s)
+                          AND ortak_encrypted_dm_outer(s.company_id,s.community_id,i.event_id,
+                            i.event_created_at,s.employee_public_key) IS NOT NULL))
+                    AND NOT EXISTS (SELECT 1 FROM office_routing_cohorts c
+                                    WHERE c.company_id=$1 AND c.state<>'enabled')
                     AND ($5::bytea IS NULL OR event_id = $5)
                     AND attempt_count < $4
                     AND (

@@ -4,11 +4,13 @@
 
 mod admission;
 mod build_info;
+mod legacy;
 mod rejection;
 
 /// REST API route handlers.
 pub mod api;
 /// WebSocket audio relay for huddle voice channels.
+#[cfg(feature = "legacy-mesh")]
 pub mod audio;
 /// Relay configuration from environment variables.
 pub mod config;
@@ -28,6 +30,7 @@ pub mod invite_token;
 /// Fixed-schema evidence for the relay's earliest startup steps.
 pub mod lifecycle;
 /// Inter-relay mesh startup wiring (`BUZZ_MESH` seam).
+#[cfg(feature = "legacy-mesh")]
 pub mod mesh_boot;
 /// Prometheus metrics: recorder, upkeep, HTTP middleware.
 pub mod metrics;
@@ -52,10 +55,13 @@ pub mod tenant;
 #[cfg(test)]
 mod test_support;
 /// Relay-side tunnel session directory and routing.
+#[cfg(feature = "legacy-mesh")]
 pub mod tunnel;
 /// Webhook secret generation and constant-time comparison.
+#[cfg(feature = "legacy-workflow")]
 pub mod webhook_secret;
 /// Workflow action sink — relay-side implementation of [`buzz_workflow::ActionSink`].
+#[cfg(feature = "legacy-workflow")]
 pub mod workflow_sink;
 
 pub use config::Config;

@@ -65,6 +65,28 @@ pub(super) async fn create_work_item_on(
     scope: &CompanyScope,
     command: &CreateWorkItem,
 ) -> Result<WorkItemCreation> {
+    create_with_id_on(connection, scope, command, None).await
+}
+
+/// Called only after an immutable fresh-child reservation in the same transaction.
+pub(super) async fn create_manual_child_on(
+    connection: &mut PgConnection,
+    scope: &CompanyScope,
+    command: &CreateWorkItem,
+    child: Uuid,
+) -> Result<WorkItemCreation> {
+    if child.is_nil() || command.input.source_message_id.is_some() {
+        return Err(invalid("decomposition requires a new manual child"));
+    }
+    create_with_id_on(connection, scope, command, Some(child)).await
+}
+
+async fn create_with_id_on(
+    connection: &mut PgConnection,
+    scope: &CompanyScope,
+    command: &CreateWorkItem,
+    child: Option<Uuid>,
+) -> Result<WorkItemCreation> {
     let input = &command.input;
     input.validate()?;
     verify_actor(&mut *connection, scope, &command.actor).await?;
@@ -110,7 +132,7 @@ pub(super) async fn create_work_item_on(
     }
 
     let ids = NewWorkItemIds {
-        id: Uuid::new_v4(),
+        id: child.unwrap_or_else(Uuid::new_v4),
         criterion_ids: input.criteria.iter().map(|_| Uuid::new_v4()).collect(),
         approval_ids: input.approvals.iter().map(|_| Uuid::new_v4()).collect(),
     };

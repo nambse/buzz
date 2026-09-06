@@ -20,6 +20,7 @@ pub(super) const PREPARE: &str = r#"
 SELECT j.*, (
  c.status='active' AND e.status='active' AND r.status='completed' AND r.delivery_intent IN ('reply','channel')
  AND j.employee_id=r.employee_id AND j.employee_revision_id=r.employee_revision_id
+ AND e.lifecycle_epoch=r.employee_lifecycle_epoch
  AND o.state='delivered' AND o.kind='office_publish' AND o.run_id=r.id AND o.signed_event_id=j.signed_event_id
  AND o.signed_event_bytes IS NOT NULL AND output.state='enqueued' AND output.outbox_id=j.outbox_id
  AND output.source_facts=j.source_facts AND output.draft_content=j.content

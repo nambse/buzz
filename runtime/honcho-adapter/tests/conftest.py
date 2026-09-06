@@ -38,6 +38,8 @@ os.environ["SENTRY_ENABLED"] = "false"
 from httpx import ASGITransport, AsyncClient
 from ortak_honcho.app import app
 from ortak_honcho.models import TABLES, write_receipts
+from ortak_honcho.reviewed_guards import install as install_reviewed_guards
+from ortak_honcho.reviewed_employee_guards import install as install_employee_reviewed_guards
 from sqlalchemy import func, select
 from src import models as native
 from src.db import Base, SessionLocal, engine
@@ -50,6 +52,8 @@ async def client():
         await connection.run_sync(
             lambda sync: Base.metadata.create_all(sync, tables=TABLES)
         )
+        await install_reviewed_guards(connection)
+        await install_employee_reviewed_guards(connection)
     async with AsyncClient(
         transport=ASGITransport(app=app, raise_app_exceptions=False),
         base_url="http://honcho.test",

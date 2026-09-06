@@ -47,7 +47,11 @@ impl SemanticScorer for DisabledSemanticScorer {
         Self::metadata()
     }
 
-    async fn score(&self, _input: &SemanticScoringInput) -> ScoringOutcome {
+    async fn score(
+        &self,
+        _input: &SemanticScoringInput,
+        _budget: crate::ScoringBudget,
+    ) -> ScoringOutcome {
         ScoringOutcome {
             result: Err(SemanticScoringFailure::Disabled),
             metadata: Self::metadata(),
@@ -89,7 +93,12 @@ mod tests {
         };
 
         let input = crate::semantic::tests::fixture_input(request.clone());
-        let outcome = DisabledSemanticScorer::new().score(&input).await;
+        let outcome = DisabledSemanticScorer::new()
+            .score(
+                &input,
+                crate::ScoringBudget::for_duration(std::time::Duration::from_secs(5)),
+            )
+            .await;
         assert_eq!(outcome.result, Err(SemanticScoringFailure::Disabled));
         assert_eq!(outcome.metadata.adapter, DISABLED_SCORER_ADAPTER);
         assert_eq!(outcome.metadata.version, DISABLED_SCORER_VERSION);

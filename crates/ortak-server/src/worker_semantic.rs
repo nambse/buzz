@@ -1,26 +1,50 @@
 //! Optional semantic evidence; absence performs no credential lookup or HTTP.
 
 use ortak_control::{
+    CompanyScope, SemanticScoringInput,
     ports::{ScoringOutcome, SemanticScorer},
     routing::ScorerMetadata,
     scorer::DisabledSemanticScorer,
-    CompanyScope, SemanticScoringInput,
 };
 use ortak_router::SemanticScoringFailure;
-use ortak_routing_semantic::{ChatCompletionsScorer, SemanticConfig, SemanticToken};
+use ortak_routing_semantic::{
+    ChatCompletionsScorer, HermesCodexConfig, HermesCodexScorer, SemanticConfig, SemanticToken,
+};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SemanticSelection {
+struct LegacySelection {
     deployment: SemanticConfig,
     token_env: String,
+}
+
+#[derive(Deserialize)]
+enum HermesAdapter {
+    #[serde(rename = "hermes-codex")]
+    Codex,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HermesSelection {
+    adapter: HermesAdapter,
+    deployment: HermesCodexConfig,
+    bridge_token_env: String,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum SemanticSelection {
+    Hermes(HermesSelection),
+    Legacy(LegacySelection),
 }
 
 pub(crate) enum WorkerSemantic {
     Disabled,
     Unavailable,
     Configured(Box<ChatCompletionsScorer>),
+    Hermes(Box<HermesCodexScorer>),
 }
 
 impl WorkerSemantic {
@@ -30,17 +54,33 @@ impl WorkerSemantic {
         };
         let configured = serde_json::from_value::<SemanticSelection>(selection)
             .map_err(|_| "invalid semantic selection")
-            .and_then(|selection| {
-                SemanticToken::from_env(
-                    selection.deployment.token_ref.clone(),
-                    &selection.token_env,
-                )
-                .and_then(|token| ChatCompletionsScorer::new(scope, selection.deployment, token))
+            .and_then(|selection| match selection {
+                SemanticSelection::Legacy(selection) => {
+                    selection.deployment.validate()?;
+                    let token = SemanticToken::from_env(
+                        selection.deployment.token_ref.clone(),
+                        &selection.token_env,
+                    )?;
+                    ChatCompletionsScorer::new(scope, selection.deployment, token)
+                        .map(|scorer| Self::Configured(Box::new(scorer)))
+                }
+                SemanticSelection::Hermes(selection) => {
+                    let HermesAdapter::Codex = selection.adapter;
+                    selection.deployment.validate()?;
+                    let token = SemanticToken::from_env(
+                        selection.deployment.bridge_token_ref.clone(),
+                        &selection.bridge_token_env,
+                    )?;
+                    HermesCodexScorer::new(scope, selection.deployment, token)
+                        .map(|scorer| Self::Hermes(Box::new(scorer)))
+                }
             });
         match configured {
-            Ok(scorer) => Self::Configured(Box::new(scorer)),
+            Ok(scorer) => scorer,
             Err(_) => {
-                eprintln!("ortak-worker: semantic configuration unavailable; untargeted messages remain silent");
+                eprintln!(
+                    "ortak-worker: semantic configuration unavailable; untargeted messages remain silent"
+                );
                 Self::Unavailable
             }
         }
@@ -52,6 +92,7 @@ impl SemanticScorer for WorkerSemantic {
         match self {
             Self::Disabled => DisabledSemanticScorer::metadata(),
             Self::Configured(scorer) => scorer.metadata(),
+            Self::Hermes(scorer) => scorer.metadata(),
             Self::Unavailable => ScorerMetadata {
                 adapter: "unavailable".to_owned(),
                 model: None,
@@ -63,9 +104,14 @@ impl SemanticScorer for WorkerSemantic {
         }
     }
 
-    async fn score(&self, input: &SemanticScoringInput) -> ScoringOutcome {
+    async fn score(
+        &self,
+        input: &SemanticScoringInput,
+        budget: ortak_control::ScoringBudget,
+    ) -> ScoringOutcome {
         match self {
-            Self::Configured(scorer) => scorer.score(input).await,
+            Self::Configured(scorer) => scorer.score(input, budget).await,
+            Self::Hermes(scorer) => scorer.score(input, budget).await,
             Self::Disabled => ScoringOutcome {
                 result: Err(SemanticScoringFailure::Disabled),
                 metadata: self.metadata(),

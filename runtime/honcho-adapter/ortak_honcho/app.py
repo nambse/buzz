@@ -14,6 +14,8 @@ from src.security import require_auth
 
 from . import PROTOCOL
 from .models import TABLES
+from .reviewed_routes import reviewed_router
+from .reviewed_employee_routes import employee_router
 from .recall import recall
 from .resources import create_resources, inspect_resources
 from .schemas import CreateResources, InspectResources, Name, Recall, Remember
@@ -105,6 +107,9 @@ class BodyLimit:
             return await self.app(scope, receive, send)
         from starlette.responses import JSONResponse
 
+        parts = scope["path"].split("/")
+        employee_family = len(parts) >= 7 and parts[3] == "workspaces" and parts[5] == "reviewed-employees"
+        maximum = 32768 if employee_family else 1152 * 1024
         try:
             async with asyncio.timeout(10):
                 chunks, size = [], 0
@@ -114,7 +119,7 @@ class BodyLimit:
                         return
                     data = message.get("body", b"")
                     size += len(data)
-                    if size > 1152 * 1024:
+                    if size > maximum:
                         return await JSONResponse({"detail": "request_too_large"}, 413)(
                             scope, receive, send
                         )
@@ -152,5 +157,7 @@ async def extension_lifespan(application):
 
 
 app.router.lifespan_context = extension_lifespan
+router.include_router(reviewed_router(bounded))
+router.include_router(employee_router(bounded))
 app.include_router(router)
 app.add_middleware(BodyLimit)

@@ -5,8 +5,21 @@ use ortak_work::{AttachRecord, WorkService};
 
 #[path = "work/boundaries.rs"]
 mod boundaries;
+#[path = "work/conversation_memory.rs"]
+mod conversation_memory;
 #[path = "work/replays.rs"]
 mod replays;
+
+#[path = "work/assignments.rs"]
+mod assignments;
+#[path = "work/decomposition.rs"]
+mod decomposition;
+#[path = "work/definition.rs"]
+mod definition;
+#[path = "work/dependencies.rs"]
+mod dependencies;
+#[path = "work/reviewed_exports.rs"]
+mod reviewed_exports;
 
 #[test]
 fn omitted_project_creation_grant_stays_disabled() {
@@ -368,3 +381,12 @@ async fn explicit_project_roles_and_creation_permission_cannot_be_bypassed_by_gl
 
 #[path = "work/queue.rs"]
 mod queue;
+
+#[path = "work/execution.rs"]
+mod execution;
+
+#[path = "work/facts.rs"]
+mod facts;
+
+#[path = "work/workspace.rs"]
+mod workspace;

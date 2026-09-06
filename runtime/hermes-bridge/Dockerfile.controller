@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# Uses the same selected BuildKit built-in frontend as the worker build.
 # Supply worker_image as a digest-selected OCI-layout named build context.
 # DOCKER_CLI_IMAGE is an immutable image reference; no floating defaults.
 ARG DOCKER_CLI_IMAGE

@@ -21,6 +21,9 @@ use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
+#[path = "../../../ortak-control/tests/cohort_support.rs"]
+mod cohort_support;
+
 pub const KIND_STREAM_MESSAGE: i32 = 9;
 pub const KIND_STREAM_MESSAGE_V2: i32 = 40002;
 pub const KIND_GIFT_WRAP: i32 = 1059;
@@ -150,6 +153,16 @@ impl Fixture {
             .resolve_company_for_community(community_id)
             .await
             .expect("resolve scope");
+        cohort_support::select_and_reconcile(
+            &control,
+            &scope,
+            &[channel_id],
+            &[
+                ortak_domain::EmployeeId::parse("cem").expect("id"),
+                ortak_domain::EmployeeId::parse("zeynep").expect("id"),
+            ],
+        )
+        .await;
         Self {
             pool,
             control,

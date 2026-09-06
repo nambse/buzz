@@ -4,15 +4,23 @@
 //!
 //! Static protocol or resource health never grants memory I/O. Each fresh owned
 //! binding needs an explicit write/scoped-recall validation, expires independently,
-//! and loses that evidence at restart. Adoption is native list-only; deletion and
-//! peer-global representations are deliberately unavailable.
+//! and loses that evidence at restart. Ordinary adoption is native list-only;
+//! explicitly recovered extension receipts can separately validate scoped I/O.
+//! Native resource deletion and peer-global representations remain unavailable.
+//! Explicit reviewed-project erasure covers only the separate extension text store.
 
 mod config;
 mod gate;
 mod http;
+mod recovery;
+mod reviewed;
+pub use reviewed::*;
+mod employee_reviewed;
+pub use employee_reviewed::*;
 mod resources;
 mod validation;
 mod wire;
+pub use recovery::{HonchoCreatedResourcesReceipt, HonchoNativeResourceIds};
 pub use validation::{MemoryRoundtripReceipt, MemoryRoundtripRequest};
 
 pub use config::{
@@ -68,6 +76,7 @@ fn unsupported(capability: MemoryCapability) -> MemoryError {
 
 /// Fixed company/deployment/cohort adapter. Secrets and HTTP client are not Debug.
 pub struct HonchoMemoryAdapter {
+    employee_namespace_instance: Uuid,
     company_id: Uuid,
     config: HonchoMemoryConfig,
     http: http::Http,
@@ -99,6 +108,7 @@ impl HonchoMemoryAdapter {
         }
         let http = http::Http::new(origin, token, config.request_timeout)?;
         Ok(Self {
+            employee_namespace_instance: Uuid::new_v4(),
             company_id,
             config,
             http,
@@ -141,17 +151,16 @@ impl HonchoMemoryAdapter {
     }
 
     fn witnessed(&self, allowed: &HonchoEmployeeBinding) -> Result<bool, MemoryError> {
-        Ok(allowed.mode == ProvisioningMode::Create
-            && self
-                .witnesses
-                .lock()
-                .map_err(|_| unavailable("memory validation state unavailable"))?
-                .get(&allowed.employee_id)
-                .is_some_and(|state| {
-                    state
-                        .expires
-                        .is_some_and(|expires| expires > Instant::now())
-                }))
+        Ok(self
+            .witnesses
+            .lock()
+            .map_err(|_| unavailable("memory validation state unavailable"))?
+            .get(&allowed.employee_id)
+            .is_some_and(|state| {
+                state
+                    .expires
+                    .is_some_and(|expires| expires > Instant::now())
+            }))
     }
 
     fn require_witness(
@@ -165,10 +174,9 @@ impl HonchoMemoryAdapter {
             .map_err(|_| unavailable("memory validation state unavailable"))?;
         match states.get(&allowed.employee_id) {
             Some(state)
-                if allowed.mode == ProvisioningMode::Create
-                    && state
-                        .expires
-                        .is_some_and(|expires| expires > Instant::now()) =>
+                if state
+                    .expires
+                    .is_some_and(|expires| expires > Instant::now()) =>
             {
                 Ok(IoGate::Witness(state.generation, capability))
             }

@@ -12,6 +12,43 @@ from .journal import BridgeError, Journal, identity, reference, start_key
 MAX_BODY = 256 * 1024
 EMPTY_POLICY = {'allowed_tools': [], 'allowed_workspaces': [], 'allowed_networks': [], 'approval_required': []}
 
+
+def profile_registry(profiles, company_id=None):
+    """Freeze explicit model variants without splitting profile or credential ownership."""
+    if not isinstance(profiles, list) or len(profiles) > 64:
+        raise BridgeError('invalid_profile_registry')
+    try:
+        frozen = json.loads(json.dumps(profiles, allow_nan=False))
+        bindings, identities = set(), {}
+        for profile in frozen:
+            binding = profile['binding']
+            employee, ref = profile['employee_id'], binding['profile_ref']
+            if (not isinstance(binding, dict)
+                    or any(not isinstance(x, str) or not 1 <= len(x) <= 256 or '\0' in x
+                           for x in (employee, ref, binding['model']))
+                    or not isinstance(binding['options'], dict)):
+                raise ValueError()
+            encoded = json.dumps(binding, sort_keys=True, separators=(',', ':'))
+            # A profile's model/options may vary. Its owner, workspace and
+            # credential identity (including the one OAuth store) may not.
+            base = {k: v for k, v in binding.items() if k not in {'model', 'options'}}
+            owner = (employee, base, 'oauth_directory' in profile, profile.get('oauth_directory'),
+                     'oauth_owner' in profile, profile.get('oauth_owner'))
+            if encoded in bindings or (ref in identities and identities[ref] != owner):
+                raise ValueError()
+            bindings.add(encoded)
+            identities[ref] = owner
+        # Public-only authorization precedes all credential reads. Existing
+        # undelegated registries keep their original validation behavior.
+        from .oauth_connection import connection_identity
+        for profile in frozen:
+            if 'oauth_owner' in profile:
+                connection_identity(company_id, profile, frozen)
+        return frozen
+    except (KeyError, TypeError, ValueError):
+        raise BridgeError('invalid_profile_registry') from None
+
+
 class UnavailableExecutor:
     """Safe shipping default until a contained Hermes executor is validated."""
     available = False
@@ -35,12 +72,9 @@ class Bridge:
             raise BridgeError('invalid_company')
         self.journal = journal
         self.company_id = company_id
-        self.profiles = json.loads(json.dumps(profiles))
+        self.profiles = profile_registry(profiles, company_id)
         self.executor = executor if executor is not None else UnavailableExecutor()
         self.lock = threading.RLock()
-        refs = [p['binding']['profile_ref'] for p in self.profiles]
-        if len(refs) != len(set(refs)) or len(refs) > 64:
-            raise BridgeError('invalid_profile_registry')
 
     def scoped_key(self, body):
         """Require body identity to match both canonical key and fixed company."""
@@ -61,7 +95,7 @@ class Bridge:
 
     def validate(self, body):
         """Validate B2 RunSpec bounds and reject every unsupported policy upfront."""
-        if set(body) != {'company_id', 'spec'} or not isinstance(body['spec'], dict):
+        if set(body) not in ({'company_id', 'spec'}, {'company_id', 'spec', 'workspace'}) or not isinstance(body['spec'], dict):
             raise BridgeError('invalid_spec')
         spec = body['spec']
         required = {'run_id', 'employee_id', 'revision_id', 'binding', 'permissions', 'input', 'context', 'idempotency_key'}
@@ -76,8 +110,6 @@ class Bridge:
         except (ValueError, TypeError, AttributeError):
             raise BridgeError('invalid_spec') from None
         self.profile(body['company_id'], spec['binding'], spec['employee_id'])
-        if spec['permissions'] != EMPTY_POLICY:
-            raise BridgeError('unsupported_permission_policy', 422)
         if not isinstance(spec['input'], str) or not spec['input'].strip() or len(spec['input'].encode()) > 65536 or '\0' in spec['input']:
             raise BridgeError('invalid_spec')
         context = spec['context']
@@ -90,35 +122,80 @@ class Bridge:
             value = context.get(name)
             if value is not None and (not isinstance(value, str) or len(value.encode()) > 1024 or '\0' in value):
                 raise BridgeError('invalid_context')
+        if context.get('work_item_id') is not None:
+            try:
+                work = UUID(context['work_item_id'])
+                if not work.int or str(work) != context['work_item_id'] or context.get('conversation_ref') is not None or context.get('reply_to_message_id') is not None:
+                    raise ValueError()
+            except (ValueError, TypeError, AttributeError):
+                raise BridgeError('invalid_context') from None
+        from .workspace_contract import validate_workspace
+        validate_workspace(body.get('workspace'), spec, self.company_id)
         return key, spec
 
     def dispatch(self, method, url, body=None):
         """Implement the Rust HermesAdapter's wire contract."""
         parsed = urlsplit(url)
         path = unquote(parsed.path)
+        if path.startswith('/v1/confidential/'):
+            from .confidential.service import dispatch
+            return dispatch(self, method, path, parsed.query, body)
         if method == 'GET' and path == '/v1/capabilities':
             caps = ['health_probe', 'profile_inspect', 'run_events', 'run_lookup', 'run_cancel_start', 'run_cancel']
             if self.executor.available:
                 caps.append('run_start')
+                if getattr(self.executor, 'workspace_text_read', False):
+                    caps.append('workspace_text_read')
+                if getattr(self.executor, 'confidential_dm', False):
+                    caps.append('confidential_dm_v1')
             return {'adapter': 'hermes', 'api_version': API_VERSION, 'capabilities': caps}
         if method == 'POST' and path == '/v1/profiles/inspect':
             self.profile(body.get('company_id'), body.get('binding'))
-            return {'profile_ref': body['binding']['profile_ref'], 'healthy': bool(self.executor.available and self.executor.inspect(body['binding']))}
+            resolver = getattr(self.executor, 'credential_references', lambda binding: [])
+            return {'profile_ref': body['binding']['profile_ref'],
+                    'credential_references': resolver(body['binding']),
+                    'healthy': bool(self.executor.available and self.executor.inspect(body['binding']))}
+        if method == 'POST' and path == '/v1/profiles/probe':
+            if set(body) != {'company_id', 'binding', 'probe_id'}:
+                raise BridgeError('invalid_probe')
+            self.profile(body['company_id'], body['binding'])
+            identity(f"ortak-run:{self.company_id}:{body['probe_id']}")
+            with self.lock:
+                if not self.executor.available:
+                    raise BridgeError('executor_unavailable', 503)
+                return self.executor.start_profile_probe(body['binding'], body['probe_id'])
         if method == 'POST' and path == '/v1/runs':
             key, spec = self.validate(body)
+            workspace = body.get('workspace')
             with self.lock:
                 # Existing tombstones remain authoritative even if the executor is down.
                 existing = self.journal.lookup(key)
                 if existing is None and not self.executor.available:
                     raise BridgeError('executor_unavailable', 503)
-                receipt, fresh = self.journal.reserve(spec)
+                if existing is None and workspace is not None and not getattr(self.executor, 'workspace_text_read', False):
+                    raise BridgeError('unsupported_permission_policy', 422)
+                receipt, fresh = self.journal.reserve(spec, workspace=workspace)
                 if fresh:
                     try:
-                        self.executor.start(spec, self.journal)
+                        if workspace is None:
+                            self.executor.start(spec, self.journal)
+                        else:
+                            self.executor.start(spec, self.journal, workspace=workspace)
                     except Exception:
                         self.journal.fail(key, 'executor_unavailable')
                         raise BridgeError('executor_unavailable', 503) from None
                 return receipt
+        if method == 'POST' and path in {'/v1/runs/tools/pending', '/v1/runs/tools/resolve'}:
+            from . import journal_tools
+            expected = {'company_id', 'run_id', 'idempotency_key'}
+            if path.endswith('/resolve'):
+                expected |= {'request', 'result'}
+            if set(body) != expected:
+                raise BridgeError('invalid_tool_request', 422)
+            key = self.scoped_key(body)
+            if path.endswith('/pending'):
+                return journal_tools.pending(self.journal, key)
+            return journal_tools.resolve(self.journal, key, body['request'], body['result'])
         if method == 'POST' and path == '/v1/runs/lookup':
             result = self.journal.lookup(self.scoped_key(body))
             if result is None:
@@ -185,9 +262,21 @@ def handler(bridge, token):
                 if len(lengths) > 1:
                     raise BridgeError('invalid_body')
                 size = int(lengths[0]) if lengths else 0
-                if not 0 <= size <= MAX_BODY:
+                confidential = unquote(urlsplit(self.path).path).startswith('/v1/confidential/')
+                maximum = 112 * 1024 if confidential else MAX_BODY
+                if not 0 <= size <= maximum:
                     raise BridgeError('body_too_large', 413)
-                body = json.loads(self.rfile.read(size)) if size else {}
+                raw = self.rfile.read(size)
+                if len(raw) != size:
+                    raise BridgeError('invalid_body')
+                if confidential and size:
+                    from .confidential.wire import _load, ConfidentialError
+                    try:
+                        body = _load(raw, maximum)
+                    except ConfidentialError:
+                        raise BridgeError('invalid_confidential_request', 422) from None
+                else:
+                    body = json.loads(raw) if size else {}
                 if not isinstance(body, dict):
                     raise BridgeError('invalid_body')
                 result = bridge.dispatch(self.command, self.path, body)

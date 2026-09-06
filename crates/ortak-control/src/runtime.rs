@@ -41,6 +41,10 @@ pub enum RuntimeCapability {
     RunLookup,
     /// Cancel by stable start key, including a durable pre-start tombstone.
     RunCancelStart,
+    /// Execute the selected immutable workspace text-read tool through the central worker.
+    WorkspaceTextRead,
+    /// Separately validated protected DM transport with a sealed volatile child input.
+    ConfidentialDmV1,
 }
 
 /// Capabilities every activated runtime binding must support.
@@ -342,6 +346,21 @@ pub trait RuntimeAdapter {
     /// Starts a run; idempotent per `spec.idempotency_key`.
     async fn start_run(&self, spec: &RunSpec) -> Result<RunStartReceipt, RuntimeError>;
 
+    /// Starts with a separately frozen workspace grant. Legacy adapters remain
+    /// unchanged for absent grants and must explicitly implement selected tools.
+    async fn start_run_with_workspace(
+        &self,
+        spec: &RunSpec,
+        workspace: Option<&crate::workspace::WorkspaceGrant>,
+    ) -> Result<RunStartReceipt, RuntimeError> {
+        if workspace.is_some() {
+            return Err(RuntimeError::Unsupported {
+                capability: RuntimeCapability::WorkspaceTextRead,
+            });
+        }
+        self.start_run(spec).await
+    }
+
     /// Looks up an existing receipt without causing execution. This recovers a
     /// lost start acknowledgement using the original stable idempotency key.
     async fn lookup_start(
@@ -415,6 +434,14 @@ impl<T: RuntimeAdapter + ?Sized> RuntimeAdapter for &T {
 
     async fn start_run(&self, spec: &RunSpec) -> Result<RunStartReceipt, RuntimeError> {
         (**self).start_run(spec).await
+    }
+
+    async fn start_run_with_workspace(
+        &self,
+        spec: &RunSpec,
+        workspace: Option<&crate::workspace::WorkspaceGrant>,
+    ) -> Result<RunStartReceipt, RuntimeError> {
+        (**self).start_run_with_workspace(spec, workspace).await
     }
 
     async fn lookup_start(

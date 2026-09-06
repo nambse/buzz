@@ -11,6 +11,35 @@ use ortak_domain::{EmployeeId, MessageEnvelope};
 use ortak_router::{SemanticCandidate, SemanticRoutingRequest};
 use uuid::Uuid;
 
+/// Transient remaining time for one scorer call, never routing authority or cache identity.
+#[derive(Clone, Copy, Debug)]
+pub struct ScoringBudget {
+    deadline: tokio::time::Instant,
+}
+
+impl ScoringBudget {
+    /// Makes an explicit bounded budget for adapter callers and transport tests.
+    /// The production inbox service instead preserves its original shared deadline.
+    pub fn for_duration(duration: std::time::Duration) -> Self {
+        Self::until(tokio::time::Instant::now() + duration.min(std::time::Duration::from_secs(5)))
+    }
+
+    pub(crate) fn until(deadline: tokio::time::Instant) -> Self {
+        Self { deadline }
+    }
+
+    /// Monotonic deadline shared by admission, network I/O and parsing.
+    pub fn deadline(self) -> tokio::time::Instant {
+        self.deadline
+    }
+
+    /// Time still available; an expired budget remains zero.
+    pub fn remaining(self) -> std::time::Duration {
+        self.deadline
+            .saturating_duration_since(tokio::time::Instant::now())
+    }
+}
+
 use crate::inbox::{InboxClaim, InboxState};
 use crate::ports::RoutingSnapshot;
 use crate::routing::CandidateRevision;

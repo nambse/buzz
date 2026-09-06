@@ -2,7 +2,8 @@ pub(super) const IMPORT_HUMAN: &str = r#"
 INSERT INTO runtime_cancellations (company_id, run_id, reason)
 SELECT h.company_id, h.run_id, 'human_requested'
 FROM run_cancel_requests h
-WHERE h.company_id=$1 AND h.status='pending'
+JOIN runs r ON r.company_id=h.company_id AND r.id=h.run_id
+WHERE h.company_id=$1 AND h.status='pending' AND r.payload_mode='ordinary'
   AND NOT EXISTS (SELECT 1 FROM runtime_cancellations c
                   WHERE c.company_id=h.company_id AND c.run_id=h.run_id)
 ORDER BY h.requested_at, h.run_id LIMIT $2
@@ -32,7 +33,7 @@ pub(super) const EXHAUSTED: &str = r#"
 WITH due AS (
     SELECT c.company_id,c.run_id FROM runtime_cancellations c
     JOIN runs r ON r.company_id=c.company_id AND r.id=c.run_id
-    WHERE c.company_id=$1 AND r.runtime_adapter=$2 AND c.state='pending'
+    WHERE c.company_id=$1 AND r.runtime_adapter=$2 AND r.payload_mode='ordinary' AND c.state='pending'
       AND c.attempt_count=c.max_attempts
       AND (c.lease_expires_at IS NULL OR c.lease_expires_at<=clock_timestamp())
     ORDER BY c.next_attempt_at,c.run_id LIMIT $3 FOR UPDATE OF c SKIP LOCKED
@@ -47,7 +48,7 @@ pub(super) const CLAIM: &str = r#"
 WITH due AS (
     SELECT c.company_id,c.run_id,r.runtime_adapter FROM runtime_cancellations c
     JOIN runs r ON r.company_id=c.company_id AND r.id=c.run_id
-    WHERE c.company_id=$1 AND r.runtime_adapter=$2 AND c.state='pending'
+    WHERE c.company_id=$1 AND r.runtime_adapter=$2 AND r.payload_mode='ordinary' AND c.state='pending'
       AND c.attempt_count<c.max_attempts AND c.next_attempt_at<=clock_timestamp()
       AND (c.lease_expires_at IS NULL OR c.lease_expires_at<=clock_timestamp())
     ORDER BY c.next_attempt_at,c.requested_at,c.run_id

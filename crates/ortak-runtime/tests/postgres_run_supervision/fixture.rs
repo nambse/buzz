@@ -2,6 +2,9 @@ use super::*;
 use ortak_control::fakes::FakeMemoryAdapter;
 use ortak_runtime::memory_context::AdapterRunMemory;
 
+#[path = "../../../ortak-control/tests/cohort_support.rs"]
+mod cohort_support;
+
 pub(super) const PROFILE_REF: &str = "fake://profiles/cem";
 
 pub(super) fn database_url() -> String {
@@ -107,6 +110,22 @@ impl Fixture {
             .resolve_company_for_community(community_id)
             .await
             .expect("resolve scope");
+        let channel: Uuid = sqlx::query_scalar(
+            "INSERT INTO channels(community_id,name,created_by) VALUES ($1,$2,$3) RETURNING id",
+        )
+        .bind(community_id)
+        .bind(format!("supervision-cohort-{company_id}"))
+        .bind([7u8; 32].as_slice())
+        .fetch_one(&pool)
+        .await
+        .expect("fixture cohort channel");
+        cohort_support::select_and_reconcile(
+            &control,
+            &scope,
+            &[channel],
+            std::slice::from_ref(&employee.id),
+        )
+        .await;
         let mut memory = FakeMemoryAdapter::new();
         if let Some(binding) = &employee.memory {
             memory = memory.with_existing_binding(binding);
@@ -174,6 +193,23 @@ impl Fixture {
             ] {
                 sqlx::query("INSERT INTO channel_members (community_id, channel_id, pubkey) VALUES ($1, $2, $3) ON CONFLICT (community_id,channel_id,pubkey) DO NOTHING")
                     .bind(self.community_id).bind(channel_id).bind(key).execute(&self.pool).await.expect("member");
+            }
+            let mut channels = self
+                .control
+                .routing_cohort(&self.scope)
+                .await
+                .expect("cohort")
+                .expect("explicit fixture cohort")
+                .channel_ids;
+            if !channels.contains(&channel_id) {
+                channels.push(channel_id);
+                cohort_support::select_and_reconcile(
+                    &self.control,
+                    &self.scope,
+                    &channels,
+                    std::slice::from_ref(&self.employee.id),
+                )
+                .await;
             }
         }
         let created_at = Utc::now();

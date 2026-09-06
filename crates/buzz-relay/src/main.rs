@@ -23,6 +23,7 @@ use buzz_relay::router::{build_health_router, build_router};
 use buzz_relay::state::AppState;
 use buzz_relay::storage_sweep;
 use buzz_relay::telemetry;
+#[cfg(feature = "legacy-workflow")]
 use buzz_workflow::WorkflowEngine;
 use tokio_util::sync::CancellationToken;
 
@@ -506,7 +507,9 @@ async fn run_relay_main(boot: BootTracker) -> anyhow::Result<()> {
         "Search service ready (Postgres FTS)"
     );
 
+    #[cfg(feature = "legacy-workflow")]
     let workflow_config = buzz_workflow::WorkflowConfig::default();
+    #[cfg(feature = "legacy-workflow")]
     let workflow_engine = Arc::new(WorkflowEngine::new(db.clone(), workflow_config));
 
     config
@@ -525,6 +528,7 @@ async fn run_relay_main(boot: BootTracker) -> anyhow::Result<()> {
         pubsub,
         auth,
         search,
+        #[cfg(feature = "legacy-workflow")]
         Arc::clone(&workflow_engine),
         relay_keypair,
         media_storage,
@@ -536,6 +540,7 @@ async fn run_relay_main(boot: BootTracker) -> anyhow::Result<()> {
     // relay behaves byte-identically to a build without the mesh. When
     // enabled, a misconfigured mesh is fatal here (bind/Redis failure): an
     // operator who asked for the mesh gets it or gets told why not.
+    #[cfg(feature = "legacy-mesh")]
     if let Some(handle) = buzz_relay::mesh_boot::boot_mesh(
         &state.config,
         state.redis_pool.clone(),
@@ -564,6 +569,7 @@ async fn run_relay_main(boot: BootTracker) -> anyhow::Result<()> {
     // linearizable conditional-write axiom (A3) before serving git traffic.
     // Failure is fatal: a backend that cannot satisfy pointer CAS invalidates
     // the manifest-pointer protocol. This is a deployment gate, not a proof.
+    #[cfg(feature = "legacy-git")]
     if std::env::var("BUZZ_GIT_CONFORMANCE_PROBE")
         .map(|v| v != "false")
         .unwrap_or(true)
@@ -719,12 +725,15 @@ async fn run_relay_main(boot: BootTracker) -> anyhow::Result<()> {
 
     // Wire the action sink — must happen after AppState (which creates
     // sub_registry, conn_manager) and before the cron loop starts.
-    let action_sink = Arc::new(buzz_relay::workflow_sink::RelayActionSink::new(&state));
-    workflow_engine.set_action_sink(action_sink);
+    #[cfg(feature = "legacy-workflow")]
+    {
+        let action_sink = Arc::new(buzz_relay::workflow_sink::RelayActionSink::new(&state));
+        workflow_engine.set_action_sink(action_sink);
 
-    // Start the cron loop AFTER the action sink is wired.
-    let wf_cron = Arc::clone(&workflow_engine);
-    tokio::spawn(async move { wf_cron.run().await });
+        // Start the cron loop AFTER the action sink is wired.
+        let wf_cron = Arc::clone(&workflow_engine);
+        tokio::spawn(async move { wf_cron.run().await });
+    }
 
     // Ephemeral channel reaper — archives channels whose TTL deadline has passed.
     // Runs every 60s, matching the workflow cron loop pattern. The SQL UPDATE

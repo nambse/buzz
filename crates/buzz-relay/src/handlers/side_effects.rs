@@ -83,6 +83,7 @@ async fn disable_departed_member_workflows(
                 disabled = n,
                 "Disabled departed member's workflows"
             );
+            #[cfg(feature = "legacy-workflow")]
             state
                 .workflow_engine
                 .invalidate_channel_workflows(tenant.community(), channel_id);
@@ -218,6 +219,7 @@ pub async fn handle_side_effects(
         9021 => handle_join_request(tenant, event, state).await,
         9022 => handle_leave_request(tenant, event, state).await,
         // NIP-34: Git repo announcement → reserve name + seed manifest pointer.
+        #[cfg(feature = "legacy-git")]
         KIND_GIT_REPO_ANNOUNCEMENT => handle_git_repo_announcement(tenant, event, state).await,
         KIND_AGENT_PROFILE => handle_agent_profile(tenant, event, state).await,
         // kind:7 (reaction) handled inline in ingest_event() before storage.
@@ -2127,10 +2129,11 @@ async fn handle_a_tag_deletion(
                     .delete_workflow_for_owner(tenant.community(), wf_id, &actor_bytes)
                     .await
                     .map_err(|e| anyhow::anyhow!("failed to delete workflow {wf_id}: {e}"))?;
-                if let Some(channel_id) = channel_id {
+                if let Some(_channel_id) = channel_id {
+                    #[cfg(feature = "legacy-workflow")]
                     state
                         .workflow_engine
-                        .invalidate_channel_workflows(tenant.community(), channel_id);
+                        .invalidate_channel_workflows(tenant.community(), _channel_id);
                 }
                 tracing::info!(workflow_id = %wf_id, "Workflow deleted via NIP-09 a-tag (UUID)");
             } else {
@@ -2148,10 +2151,11 @@ async fn handle_a_tag_deletion(
                             .map_err(|e| {
                                 anyhow::anyhow!("failed to delete workflow {}: {e}", wf.id)
                             })?;
-                        if let Some(channel_id) = channel_id {
+                        if let Some(_channel_id) = channel_id {
+                            #[cfg(feature = "legacy-workflow")]
                             state
                                 .workflow_engine
-                                .invalidate_channel_workflows(tenant.community(), channel_id);
+                                .invalidate_channel_workflows(tenant.community(), _channel_id);
                         }
                         tracing::info!(workflow_id = %wf.id, name = d_tag, "Workflow deleted via NIP-09 a-tag (name)");
                     }
@@ -2512,6 +2516,7 @@ fn delete_tombstone_content(
 /// Validate a git repo identifier (d-tag value from kind:30617).
 ///
 /// Rules: `[a-zA-Z0-9._-]{1,64}`, no leading dots, no `..`.
+#[cfg(feature = "legacy-git")]
 fn validate_repo_id(repo_id: &str) -> bool {
     !repo_id.is_empty()
         && repo_id.len() <= 64
@@ -2533,6 +2538,7 @@ fn validate_repo_id(repo_id: &str) -> bool {
 /// - Repo name validated: `[a-zA-Z0-9._-]{1,64}`, no leading dots, no `..`
 /// - Name reserved atomically in Postgres (`git_repo_names`), unique per community
 /// - Per-pubkey repo count limit enforced
+#[cfg(feature = "legacy-git")]
 async fn handle_git_repo_announcement(
     tenant: &TenantContext,
     event: &Event,
@@ -2542,19 +2548,21 @@ async fn handle_git_repo_announcement(
         .await
 }
 
+#[cfg(feature = "legacy-git")]
 #[derive(Default)]
 pub(crate) struct GitRepoAnnouncementHooks {
     #[cfg(test)]
     pub(crate) post_lease_gate: Option<Arc<GitRepoAnnouncementGate>>,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy-git"))]
 #[derive(Default)]
 pub(crate) struct GitRepoAnnouncementGate {
     pub(crate) reached: tokio::sync::Notify,
     pub(crate) resume: tokio::sync::Notify,
 }
 
+#[cfg(feature = "legacy-git")]
 pub(crate) async fn handle_git_repo_announcement_inner(
     tenant: &TenantContext,
     event: &Event,
@@ -2789,6 +2797,7 @@ pub(crate) async fn handle_git_repo_announcement_inner(
 /// The first push's `cas_publish` overwrites this with the real symbolic
 /// HEAD observed in the receive-pack workspace via standard CAS, so the
 /// default is a stand-in, not a permanent commitment.
+#[cfg(feature = "legacy-git")]
 const DEFAULT_HEAD: &str = "refs/heads/main";
 
 /// Seed the manifest-pointer for a newly-announced repo with an empty manifest.
@@ -2798,6 +2807,7 @@ const DEFAULT_HEAD: &str = "refs/heads/main";
 /// pointer body (e.g. a non-empty manifest from a previous announce/push pair
 /// for the same `(owner, repo)`) surfaces as an error rather than silently
 /// succeeding — that would mask a real misconfiguration.
+#[cfg(feature = "legacy-git")]
 async fn seed_manifest_pointer(
     state: &Arc<AppState>,
     tenant: &TenantContext,
@@ -2887,6 +2897,7 @@ async fn seed_manifest_pointer(
 /// handling (same empty digest → Ok), and a concurrent *pusher* that populates
 /// the pointer between our read and our seed loses the create race and is
 /// likewise treated as an already-present pointer, not an overwrite.
+#[cfg(feature = "legacy-git")]
 async fn ensure_manifest_pointer(
     state: &Arc<AppState>,
     tenant: &TenantContext,
@@ -2916,6 +2927,7 @@ async fn ensure_manifest_pointer(
 /// The seeded empty manifest is the source of truth; this event is the
 /// derived notification. Fires once per announce, signed by the relay,
 /// carrying the announcer's pubkey in the `p` tag (buzz extension).
+#[cfg(feature = "legacy-git")]
 async fn emit_initial_ref_state(
     tenant: &TenantContext,
     state: &Arc<AppState>,

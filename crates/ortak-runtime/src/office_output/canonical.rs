@@ -1,5 +1,6 @@
 use ortak_control::inbox::InboxEvent;
 use ortak_control::ports::Normalization;
+#[cfg(test)]
 use ortak_control::run_event::RunEventPayload;
 use ortak_control::service::office_input_hash;
 use ortak_control::{CompanyScope, MessageId};
@@ -21,6 +22,16 @@ pub(super) async fn target(
     scope: &CompanyScope,
     run_id: Uuid,
 ) -> Result<Target, OutputFailure> {
+    // Shared Office authority is already held. Lock the reviewed source before
+    // SOURCE locks the run, including post-ACK admission into memory.
+    let current: bool = sqlx::query_scalar("SELECT ortak_lock_run_reviewed_memory($1,$2)")
+        .bind(scope.company_id())
+        .bind(run_id)
+        .fetch_one(&mut *connection)
+        .await?;
+    if !current {
+        return Err(OutputFailure::Permanent("office_output_authority_changed"));
+    }
     let row = sqlx::query(sql::SOURCE)
         .bind(scope.company_id())
         .bind(run_id)
@@ -92,6 +103,16 @@ pub(super) async fn target(
     if !ortak_office::event::is_allowed_publish_kind(kind) {
         return Err(OutputFailure::Permanent("office_output_source_invalid"));
     }
+    // A human reply begins a new delivery chain even inside an older Office
+    // thread. Keep that chain pin above; NIP-10 needs the separate thread root.
+    let reply = intent.as_deref() == Some("reply");
+    let thread_root = if reply {
+        ortak_office::postgres::reply_root_on(connection, scope, &inbox)
+            .await?
+            .ok_or(OutputFailure::Permanent("office_output_authority_changed"))?
+    } else {
+        message
+    };
     Ok(Target {
         source_facts: serde_json::json!({
             "employee_id": employee.as_str(),
@@ -101,7 +122,7 @@ pub(super) async fn target(
             "delivery_intent": intent.as_deref(), "office_input_hash": hex::encode(hash),
         }),
         kind,
-        tags: canonical_tags(channel, message, root, intent.as_deref() == Some("reply")),
+        tags: canonical_tags(channel, message, thread_root, reply),
     })
 }
 
@@ -169,25 +190,16 @@ pub(super) async fn final_text(
 }
 
 fn assemble_text(payloads: Vec<serde_json::Value>) -> Result<String, OutputFailure> {
-    let mut text = String::new();
-    for payload in payloads {
-        let parsed: RunEventPayload = serde_json::from_value(payload)
-            .map_err(|_| OutputFailure::Permanent("office_output_invalid_delta"))?;
-        let RunEventPayload::AssistantDelta { delta, .. } = parsed else {
-            return Err(OutputFailure::Permanent("office_output_invalid_delta"));
-        };
-        if delta.truncated || delta.original_bytes.is_some() || delta.original_sha256.is_some() {
-            return Err(OutputFailure::Permanent("office_output_truncated"));
-        }
-        if text.len() + delta.text.len() > MAX_CONTENT_BYTES {
-            return Err(OutputFailure::Permanent("office_output_oversized"));
-        }
-        text.push_str(&delta.text);
-    }
-    if text.trim().is_empty() {
-        return Err(OutputFailure::Permanent("office_output_empty"));
-    }
-    Ok(text)
+    use ortak_control::run_event::{assemble_final_text, FinalTextRefusal};
+    assemble_final_text(payloads).map_err(|reason| {
+        OutputFailure::Permanent(match reason {
+            FinalTextRefusal::FragmentLimit => "office_output_fragment_limit",
+            FinalTextRefusal::InvalidDelta => "office_output_invalid_delta",
+            FinalTextRefusal::Truncated => "office_output_truncated",
+            FinalTextRefusal::Oversized => "office_output_oversized",
+            FinalTextRefusal::Empty => "office_output_empty",
+        })
+    })
 }
 
 #[cfg(test)]

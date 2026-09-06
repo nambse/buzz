@@ -197,7 +197,8 @@ impl PgControlPlane {
                    FROM outbox
                   WHERE company_id = $1
                     AND state = 'pending'
-                    AND ($2::text IS NULL OR kind = $2)
+                    AND ($2::text IS NULL OR kind = $2
+                        OR ($6::text IS NOT NULL AND $2='run_dispatch' AND kind='work_run_dispatch'))
                     AND ($6::text IS NULL OR EXISTS (
                         SELECT 1 FROM routing_recipients rr
                         JOIN employee_runtime_bindings rb
@@ -205,7 +206,13 @@ impl PgControlPlane {
                          AND rb.revision_id = rr.employee_revision_id
                         WHERE rr.company_id = outbox.company_id
                           AND rr.routing_decision_id = outbox.routing_decision_id
-                          AND rr.employee_id = outbox.employee_id AND rb.adapter = $6))
+                          AND rr.employee_id = outbox.employee_id AND rb.adapter = $6)
+                        OR (outbox.kind='work_run_dispatch' AND EXISTS (
+                            SELECT 1 FROM work_executions x JOIN runs r ON r.company_id=x.company_id AND r.id=x.run_id
+                            JOIN employee_runtime_bindings rb ON rb.company_id=x.company_id AND rb.employee_id=x.employee_id
+                                AND rb.revision_id=x.employee_revision_id
+                            WHERE x.company_id=outbox.company_id AND x.run_id=outbox.run_id
+                                AND x.employee_id=outbox.employee_id AND r.runtime_adapter=$6 AND rb.adapter=$6)))
                     AND (retry_after IS NULL OR retry_after <= clock_timestamp())
                     AND (lease_expires_at IS NULL OR lease_expires_at <= clock_timestamp())
                     AND attempt_count < max_attempts

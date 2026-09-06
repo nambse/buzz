@@ -19,6 +19,13 @@ use uuid::Uuid;
 use crate::error::{DbError, Result};
 use crate::Db;
 
+#[path = "deletion/reviewed_exports.rs"]
+mod reviewed_exports;
+#[path = "deletion/workspaces.rs"]
+mod workspaces;
+#[path = "deletion/extensions77.rs"]
+mod extensions77;
+
 /// Default PostgreSQL lease duration for one claimed deletion request.
 pub const DEFAULT_LEASE_DURATION: Duration = Duration::from_secs(60);
 /// Durable name of the schema manifest's PostgreSQL component.
@@ -49,7 +56,7 @@ pub const CONTROL_PLANE_TABLES: &[&str] = &[
     "community_serving_write_leases",
 ];
 
-/// Expected community-scoped tables purged by V1.
+/// Expected community-scoped tables, including explicitly retained company evidence.
 ///
 /// Catalog inventory compares the live database against this exact set before
 /// approval and again before PostgreSQL purge. A new tenant table therefore
@@ -61,7 +68,26 @@ pub const EXPECTED_SCOPED_TABLES: &[&str] = &[
     "channel_members",
     "channels",
     "community_bans",
+    "confidential_dm_receipts",
+    "confidential_event_receipts",
+    "confidential_execution_leases",
+    "confidential_reply_bundles",
+    "confidential_reply_outbox",
+    "confidential_run_dispatches",
+    "confidential_run_payloads",
+    "confidential_runs",
+    "conversation_memory_authorities",
     "delivery_log",
+    "employee_memory_channel_authorities",
+    "employee_reviewed_memory_export_commands",
+    "employee_reviewed_memory_export_jobs",
+    "employee_reviewed_memory_export_receipts",
+    "employee_reviewed_memory_exports",
+    "employee_reviewed_memory_facts",
+    "employee_reviewed_memory_operations",
+    "employee_reviewed_memory_targets",
+    "encrypted_dm_decrypt_jobs",
+    "encrypted_dm_selections",
     "event_mentions",
     "events",
     "git_repo_names",
@@ -69,6 +95,10 @@ pub const EXPECTED_SCOPED_TABLES: &[&str] = &[
     "moderation_actions",
     "moderation_reports",
     "office_company_bindings",
+    "office_identity_profiles",
+    "office_inbox_reconciliations",
+    "office_routing_channels",
+    "office_routing_cohorts",
     "parameterized_event_watermarks",
     "project_api_bindings",
     "pubkey_allowlist",
@@ -78,6 +108,17 @@ pub const EXPECTED_SCOPED_TABLES: &[&str] = &[
     "reactions",
     "relay_invites",
     "relay_members",
+    "reviewed_memory_conversation_audiences",
+    "reviewed_memory_export_commands",
+    "reviewed_memory_export_jobs",
+    "reviewed_memory_export_receipts",
+    "reviewed_memory_exports",
+    "reviewed_memory_facts",
+    "reviewed_memory_operations",
+    "reviewed_memory_targets",
+    "run_employee_reviewed_memory_uses",
+    "run_reviewed_memory_uses",
+    "run_workspace_uses",
     "scheduled_workflow_fires",
     "subscriptions",
     "thread_metadata",
@@ -85,6 +126,55 @@ pub const EXPECTED_SCOPED_TABLES: &[&str] = &[
     "workflow_approvals",
     "workflow_runs",
     "workflows",
+    "workspace_bindings",
+    "workspace_files",
+    "workspace_reader_executions",
+    "workspace_tool_actions",
+    "workspace_tool_receipts",
+];
+
+/// Immutable company evidence retained with its permanent community provenance.
+///
+/// These tables remain in exact catalog inventory and universal write fencing.
+/// Retention never permits writes after Office authority has been revoked.
+pub const RETAINED_SCOPED_TABLES: &[&str] = &[
+    "confidential_dm_receipts",
+    "confidential_event_receipts",
+    "confidential_execution_leases",
+    "confidential_reply_bundles",
+    "confidential_reply_outbox",
+    "confidential_run_dispatches",
+    "confidential_run_payloads",
+    "confidential_runs",
+    "conversation_memory_authorities",
+    "employee_memory_channel_authorities",
+    "employee_reviewed_memory_export_commands",
+    "employee_reviewed_memory_export_jobs",
+    "employee_reviewed_memory_export_receipts",
+    "employee_reviewed_memory_exports",
+    "employee_reviewed_memory_facts",
+    "employee_reviewed_memory_operations",
+    "employee_reviewed_memory_targets",
+    "encrypted_dm_decrypt_jobs",
+    "encrypted_dm_selections",
+    "office_identity_profiles",
+    "office_inbox_reconciliations",
+    "reviewed_memory_conversation_audiences",
+    "reviewed_memory_export_commands",
+    "reviewed_memory_export_jobs",
+    "reviewed_memory_export_receipts",
+    "reviewed_memory_exports",
+    "reviewed_memory_facts",
+    "reviewed_memory_operations",
+    "reviewed_memory_targets",
+    "run_employee_reviewed_memory_uses",
+    "run_reviewed_memory_uses",
+    "run_workspace_uses",
+    "workspace_bindings",
+    "workspace_files",
+    "workspace_reader_executions",
+    "workspace_tool_actions",
+    "workspace_tool_receipts",
 ];
 
 /// Foreign-key-safe child-before-parent order for the PostgreSQL purge.
@@ -106,6 +196,8 @@ pub const PURGE_SCOPED_TABLES: &[&str] = &[
     "push_match_queue",
     "push_leases",
     "relay_invites",
+    "office_routing_channels",
+    "office_routing_cohorts",
     "project_api_bindings",
     "office_company_bindings",
     "delivery_log",
@@ -292,6 +384,9 @@ pub struct DeletionRequest {
 pub struct SchemaManifest {
     /// Sorted community-scoped table names.
     pub scoped_tables: Vec<String>,
+    /// Explicit immutable evidence retained by the approved purge policy.
+    #[serde(default)]
+    pub retained_tables: Vec<String>,
     /// Per-table row counts for the target.
     pub row_counts: BTreeMap<String, i64>,
     /// Sorted tables with the universal write-fence trigger.
@@ -952,7 +1047,8 @@ impl DeletionStore {
     /// Row counts are observational evidence captured at submission. They bind
     /// operator approval to the target's visible PostgreSQL footprint, but the
     /// executor still revalidates the structural catalog and proves zero rows
-    /// after purge rather than requiring these live counts to remain unchanged.
+    /// after purge in mutable tables; retained evidence stays counted and fenced.
+    /// Counts themselves need not remain unchanged between inventory and purge.
     pub async fn inventory_schema(&self, community: CommunityId) -> Result<SchemaManifest> {
         self.validate_catalog().await?;
         let live_tables = self.live_scoped_tables().await?;
@@ -968,6 +1064,10 @@ impl DeletionStore {
         }
         Ok(SchemaManifest {
             scoped_tables: live_tables.into_iter().collect(),
+            retained_tables: RETAINED_SCOPED_TABLES
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect(),
             row_counts,
             fenced_tables: fenced_tables.into_iter().collect(),
         })
@@ -1033,6 +1133,7 @@ impl DeletionStore {
                 ))
             })?;
         let inventory: FrozenInventory = serde_json::from_value(inventory_manifest)?;
+        validate_frozen_schema(&inventory.schema)?;
         let recomputed_digest = inventory.digest()?;
         if digest.as_slice() != recomputed_digest {
             return Err(DbError::DeletionSafety(format!(
@@ -1181,6 +1282,10 @@ impl DeletionStore {
         } else {
             verify_lease(&mut tx, token, stage).await?;
         }
+        // A resumed request may already be fenced or drained and skip the
+        // admission/freeze gates. External deletion checks this method before
+        // and after every effect, so old approval never inherits new scope.
+        validate_frozen_request_on(&mut tx, token.request_id).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -1271,6 +1376,8 @@ impl DeletionStore {
     /// acquisition, so after commit no newer external effect can be admitted.
     /// Already-acquired leases remain renewable, verifiable, and releasable so
     /// admitted remote effects retain their exclusion proof until completion.
+    /// Reviewed-memory exports must already have exact erasure ACKs: their
+    /// cleanup is universally fenced by quiescence and cannot be deferred.
     pub async fn begin_quiescing(&self, token: &LeaseToken) -> Result<()> {
         let (mut tx, transaction_timer) = crate::observability::begin_transaction(
             &self.pool,
@@ -1279,9 +1386,15 @@ impl DeletionStore {
         .await?;
         transaction_timer
             .observe(async {
+        lock_schema_destruction_shared(&mut tx).await?;
+        validate_catalog_on(&mut tx).await?;
         verify_lease(&mut tx, token, DeletionStage::Approved).await?;
+        validate_frozen_request_on(&mut tx, token.request_id).await?;
         lock_community_deletion(&mut tx, token.community_id).await?;
         verify_lease(&mut tx, token, DeletionStage::Approved).await?;
+        reviewed_exports::require_erased(&mut tx, token.community_id).await?;
+        workspaces::require_settled(&mut tx, token.community_id).await?;
+        extensions77::require_settled(&mut tx, token.community_id).await?;
         let (generation, archived_at): (i64, Option<DateTime<Utc>>) = sqlx::query_as(
             "SELECT deletion_fence_generation, archived_at FROM communities WHERE id = $1 FOR UPDATE",
         )
@@ -1337,9 +1450,14 @@ impl DeletionStore {
         .await?;
         transaction_timer
             .observe(async {
+        lock_schema_destruction_shared(&mut tx).await?;
+        validate_catalog_on(&mut tx).await?;
         verify_lease(&mut tx, token, DeletionStage::Approved).await?;
+        validate_frozen_request_on(&mut tx, token.request_id).await?;
         lock_community_deletion(&mut tx, token.community_id).await?;
         verify_lease(&mut tx, token, DeletionStage::Approved).await?;
+        reviewed_exports::require_erased(&mut tx, token.community_id).await?;
+        extensions77::require_settled(&mut tx, token.community_id).await?;
         let active_serving_writes = sqlx::query(
             "SELECT count(*)::BIGINT AS active_count, \
                     COALESCE(array_agg(DISTINCT operation ORDER BY operation), ARRAY[]::TEXT[]) AS operations \
@@ -1426,6 +1544,7 @@ impl DeletionStore {
                 ))
             })?;
         verify_lease_and_fence(&mut tx, token, DeletionStage::Fenced, generation).await?;
+        validate_frozen_request_on(&mut tx, token.request_id).await?;
         validate_storage_manifest(manifest)?;
         // The chunk rows are the concrete delete list; the freeze commits only
         // if they hash to the manifest's frozen per-prefix digests. Loading the
@@ -1717,7 +1836,7 @@ impl DeletionStore {
         .await
     }
 
-    /// Purge every scoped PostgreSQL table, preserve the community tombstone, and
+    /// Purge mutable Office data, retain immutable company evidence and tombstone, and
     /// move bindings_removed → postgres_purged in one transaction.
     pub async fn purge_postgres(&self, token: &LeaseToken) -> Result<BTreeMap<String, u64>> {
         let generation = require_fence_generation(token)?;
@@ -1729,6 +1848,9 @@ impl DeletionStore {
         lock_schema_destruction_shared(&mut tx).await?;
         validate_catalog_on(&mut tx).await?;
         verify_lease_and_fence(&mut tx, token, DeletionStage::BindingsRemoved, generation).await?;
+        validate_frozen_request_on(&mut tx, token.request_id).await?;
+        reviewed_exports::require_erased(&mut tx, token.community_id).await?;
+        extensions77::require_settled(&mut tx, token.community_id).await?;
         set_executor_gucs(&mut tx, token.community_id, generation).await?;
         // The Work binding has a narrower deletion contract: keep the company
         // history, but detach API access only under this exact approved lease.
@@ -1768,6 +1890,15 @@ impl DeletionStore {
             .await?;
         }
 
+        // Revoke mutable routing selection before detaching its Office authority.
+        // Removing the cohort cascades only employee-selection rows, never the
+        // durable Employee, provisioning resources, or retained receipt bytes.
+        sqlx::query(
+            "UPDATE office_routing_cohorts SET state='off' WHERE community_id=$1 AND state<>'off'",
+        )
+        .bind(token.community_id.as_uuid())
+        .execute(&mut *tx)
+        .await?;
         let mut deleted = BTreeMap::new();
         // The order is child-before-parent/FK-safe, not alphabetical. Cascades
         // can make later units observe zero rows; each scoped WHERE stays idempotent.
@@ -1874,7 +2005,7 @@ impl DeletionStore {
                 token.community_id
             )));
         }
-        for table in EXPECTED_SCOPED_TABLES {
+        for table in PURGE_SCOPED_TABLES {
             let sql =
                 format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE community_id = $1 LIMIT 1)");
             let remains: bool = sqlx::query_scalar(AssertSqlSafe(sql))
@@ -2723,6 +2854,36 @@ async fn lock_schema_destruction_shared(conn: &mut PgConnection) -> Result<()> {
     Ok(())
 }
 
+/// Reject an old approval when either the scoped surface or retention policy changed.
+fn validate_frozen_schema(schema: &SchemaManifest) -> Result<()> {
+    let expected: Vec<String> = EXPECTED_SCOPED_TABLES
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect();
+    let retained: Vec<String> = RETAINED_SCOPED_TABLES
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect();
+    if schema.scoped_tables != expected
+        || schema.fenced_tables != expected
+        || schema.retained_tables != retained
+    {
+        return Err(DbError::DeletionSafety(
+            "frozen community deletion scope or retention policy changed; fresh inventory approval required".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+async fn validate_frozen_request_on(conn: &mut PgConnection, request_id: Uuid) -> Result<()> {
+    let value: serde_json::Value =
+        sqlx::query_scalar("SELECT schema_manifest FROM community_deletion_requests WHERE id=$1")
+            .bind(request_id)
+            .fetch_one(conn)
+            .await?;
+    validate_frozen_schema(&serde_json::from_value(value)?)
+}
+
 /// Connection-bound form of [`DeletionStore::validate_catalog`].
 ///
 /// Destructive transactions call this on their own transaction after taking
@@ -3212,6 +3373,116 @@ mod tests {
     }
 
     #[test]
+    fn retained_evidence_is_fenced_and_requires_explicit_frozen_approval() {
+        let expected = EXPECTED_SCOPED_TABLES
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let purged = PURGE_SCOPED_TABLES.iter().copied().collect::<BTreeSet<_>>();
+        let retained = RETAINED_SCOPED_TABLES
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        assert!(purged.is_disjoint(&retained));
+        assert_eq!(
+            purged.union(&retained).copied().collect::<BTreeSet<_>>(),
+            expected
+        );
+        let mut schema = SchemaManifest {
+            scoped_tables: expected.iter().map(|name| (*name).to_owned()).collect(),
+            fenced_tables: expected.iter().map(|name| (*name).to_owned()).collect(),
+            retained_tables: retained.iter().map(|name| (*name).to_owned()).collect(),
+            row_counts: BTreeMap::new(),
+        };
+        validate_frozen_schema(&schema).expect("current explicit policy");
+        let export_tables = [
+            "reviewed_memory_export_commands",
+            "reviewed_memory_export_jobs",
+            "reviewed_memory_export_receipts",
+            "reviewed_memory_exports",
+            "reviewed_memory_targets",
+        ];
+        let mut before_exports = schema.clone();
+        before_exports
+            .scoped_tables
+            .retain(|table| !export_tables.contains(&table.as_str()));
+        before_exports
+            .fenced_tables
+            .retain(|table| !export_tables.contains(&table.as_str()));
+        before_exports
+            .retained_tables
+            .retain(|table| !export_tables.contains(&table.as_str()));
+        assert!(
+            validate_frozen_schema(&before_exports).is_err(),
+            "an approved pre-export catalog cannot gain erasure or retention authority"
+        );
+        let mut before_runtime_uses = schema.clone();
+        before_runtime_uses
+            .scoped_tables
+            .retain(|table| table != "run_reviewed_memory_uses");
+        before_runtime_uses
+            .fenced_tables
+            .retain(|table| table != "run_reviewed_memory_uses");
+        before_runtime_uses
+            .retained_tables
+            .retain(|table| table != "run_reviewed_memory_uses");
+        assert!(
+            validate_frozen_schema(&before_runtime_uses).is_err(),
+            "an approved pre-use catalog cannot acquire the new retained evidence scope"
+        );
+        let mut unfenced_runtime_uses = schema.clone();
+        unfenced_runtime_uses
+            .fenced_tables
+            .retain(|table| table != "run_reviewed_memory_uses");
+        assert!(
+            validate_frozen_schema(&unfenced_runtime_uses).is_err(),
+            "retained runtime uses still require the universal community write fence"
+        );
+        let workspace_tables = [
+            "run_workspace_uses",
+            "workspace_bindings",
+            "workspace_files",
+            "workspace_reader_executions",
+            "workspace_tool_actions",
+            "workspace_tool_receipts",
+        ];
+        let mut before_workspaces = schema.clone();
+        before_workspaces
+            .scoped_tables
+            .retain(|table| !workspace_tables.contains(&table.as_str()));
+        before_workspaces
+            .fenced_tables
+            .retain(|table| !workspace_tables.contains(&table.as_str()));
+        before_workspaces
+            .retained_tables
+            .retain(|table| !workspace_tables.contains(&table.as_str()));
+        assert!(validate_frozen_schema(&before_workspaces).is_err());
+        for table in workspace_tables {
+            assert!(retained.contains(table));
+            assert!(!purged.contains(table));
+            let mut unfenced = schema.clone();
+            unfenced.fenced_tables.retain(|name| name != table);
+            assert!(validate_frozen_schema(&unfenced).is_err());
+            let mut unretained = schema.clone();
+            unretained.retained_tables.retain(|name| name != table);
+            assert!(validate_frozen_schema(&unretained).is_err());
+        }
+        schema.retained_tables.clear();
+        assert!(
+            validate_frozen_schema(&schema).is_err(),
+            "old approval cannot adopt retention semantics"
+        );
+        schema.retained_tables = retained.iter().map(|name| (*name).to_owned()).collect();
+        schema
+            .fenced_tables
+            .retain(|table| table != "office_identity_profiles");
+        assert!(
+            validate_frozen_schema(&schema).is_err(),
+            "retained evidence still needs its universal fence"
+        );
+    }
+
+    #[test]
     fn stage_order_is_exact_and_terminal() {
         let mut stage = DeletionStage::Submitted;
         let mut seen = vec![stage];
@@ -3284,6 +3555,7 @@ mod tests {
         let inventory = FrozenInventory {
             schema: SchemaManifest {
                 scoped_tables: vec!["events".to_string()],
+                retained_tables: Vec::new(),
                 row_counts: BTreeMap::from([("events".to_string(), 1)]),
                 fenced_tables: vec!["events".to_string()],
             },
@@ -3412,6 +3684,7 @@ mod tests {
         let inventory = FrozenInventory {
             schema: SchemaManifest {
                 scoped_tables: vec!["events".to_string()],
+                retained_tables: Vec::new(),
                 row_counts: BTreeMap::from([("events".to_string(), 3)]),
                 fenced_tables: vec!["events".to_string()],
             },
@@ -3433,6 +3706,9 @@ mod tests {
 #[cfg(test)]
 #[path = "deletion/ortak_project_tests.rs"]
 mod ortak_project_tests;
+
+#[cfg(test)]
+mod ortak_retained_postgres_tests;
 
 #[cfg(test)]
 mod postgres_tests {
@@ -4479,7 +4755,7 @@ mod postgres_tests {
             .await
             .expect("bindings");
         let first = store.purge_postgres(&token).await.expect("purge postgres");
-        assert_eq!(first.len(), EXPECTED_SCOPED_TABLES.len());
+        assert_eq!(first.len(), PURGE_SCOPED_TABLES.len());
         assert!(
             store.purge_postgres(&token).await.is_err(),
             "completed stage cannot be replayed under stale checkpoint state"

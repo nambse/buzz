@@ -69,6 +69,10 @@ impl From<ortak_work::WorkError> for ApiError {
                 | DomainError::CriterionAlreadySatisfied
                 | DomainError::ApprovalAlreadyResolved
                 | DomainError::DuplicateAssignment
+                | DomainError::AssignmentNotActive
+                | DomainError::DuplicateWorkDependency
+                | DomainError::UnknownWorkDependency
+                | DomainError::DependencyCycle
                 | DomainError::ProjectArchived => conflict(),
                 _ => Self::invalid(),
             },

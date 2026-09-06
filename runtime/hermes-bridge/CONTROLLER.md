@@ -1,10 +1,19 @@
 # Private controller packaging and checks
 
+For fresh ChatGPT/Codex OAuth enrollment, exact model/effort selection, separate
+refresh ownership and explicit real health probes, follow [OAUTH.md](OAUTH.md).
+Its three-file OAuth profile extends the API-key format described below.
+
 The worker image and controller image are separate artifacts. The controller
 has Python, the fixed SQLite library, bridge code, and Docker's static client.
 Only the controller receives the daemon socket and service bearer token. The
 selected worker image receives one disposable employee profile, one company
 journal directory, and the bounded RunSpec on stdin.
+
+The Dockerfiles use the selected BuildKit built-in frontend. Record the actual
+BuildKit version with each build receipt (this continuation observed v0.26.2);
+there is no floating `docker/dockerfile:1` frontend download. This is the
+[built-in frontend supported by Docker](https://docs.docker.com/build/buildkit/frontend/).
 
 Build the worker first with `Dockerfile` and retain its real constructor/guard
 smoke and immutable image identity. Docker Desktop's buildx driver attempts
@@ -74,6 +83,73 @@ Mount state and profile paths at the **same absolute paths** inside the
 controller as on the daemon host. Docker interprets a child bind mount's source
 on the host. Mapping `/srv/.../state` to `/state` in the controller would make the
 child mount the wrong host path. Avoid symlinks and commas in these paths.
+This paragraph describes the legacy bind configuration. For a Docker-managed
+journal, use the explicit selection below; changing the controller mount alone
+would otherwise leave its worker children using the old host directory.
+
+### Optional named journal volume
+
+The controller accepts an optional `executor.journal_volume` object:
+
+```json
+{
+  "name": "<exact-created-local-volume-name>",
+  "created_at": "<exact-Docker-CreatedAt>",
+  "owner_id": "<fresh-canonical-UUID>"
+}
+```
+
+Create that volume explicitly with driver `local`, no driver options, and labels
+`org.ortak.company=<company UUID>` and `org.ortak.journal_owner=<owner_id>`.
+Keep both labels on the new controller too. Use Docker's default generated
+hostname; custom hostnames are refused for this option. Mount the selected
+volume read/write at the directory containing the controller's `--journal`
+path, with `volume-nocopy`, and no nested mounts below that directory. The
+directory remains private and writable by UID/GID10001. Profile/OAuth paths,
+service token and worker image selection do not change.
+
+Before opening `Journal` at startup, before acquiring executor ownership, and
+before every child launch, the controller verifies the exact volume name,
+creation timestamp, ownership labels, local driver/options and its own actual
+volume mount. The daemon's source mountpoint is compared as metadata only.
+Both selected JSON projections retain the existing1024-byte/five-second command
+bound. The child receives
+`type=volume,src=<name>,dst=/ortak-state,volume-nocopy`; the existing worker's
+`/ortak-state/journal.sqlite` contract is unchanged. A missing, replaced,
+read-only, shadowed or differently owned volume refuses admission. There is no
+volume creation, initialization, migration or fallback in the runtime.
+
+For the current incident, root's isolated comparison reproduced SIGBUS on the
+host bind while the same existing images completed64 resolve/consume cycles on
+a local Docker volume. Evidence:
+`/private/tmp/ortak-c2-sqlite-repro-95d6d9e626224b8e955b8a041ef8337b/receipt.json`.
+This is an observed deployment failure, not a reason to discard the run. Its
+cold journal already held `run.completed` and the consumed tool result hash.
+Same-key result ACK and event replay preserve that history without a new model
+request; current Work/Office authority guards still apply to output publication.
+
+Migration is a separate root operation: contain all original writers, preserve
+the physical journal and WAL/SHM absence or bytes, copy only the selected cold
+state into a fresh owned volume, and verify bytes/metadata before starting the
+new controller. Retain the original source and crash evidence. A controller-only
+derivative may keep the existing tested worker image unchanged; record the new
+controller source/image relationship and exercise this mount gate on the actual
+image before a new run. Recovery inventory must explicitly select the new volume
+before claiming a later full-stack backup; the historical host bind is not its
+current storage authority.
+
+The actual dated G74 operation subsequently captured that selected local volume
+and completed its offline foundation restore on 2026-09-06. Bundle
+`214fd4f027a34604aeb7469d9dfb9a60` and restore
+`cea594c6416d42f7a3403aa7509d2c70` passed physical raw-journal extraction and
+coherent logical comparison: 25 terminal runs with valid cursors, two workspace
+run/call histories and zero pending/invalid workspace rows. The source services
+were restarted; the restored files stayed inert. No restored journal volume or
+runtime was activated and no separate host/daemon was exercised. Raw Linux
+UID/GID remain provenance when the offline files belong to the host UID; a later
+activation still requires a fresh owned local volume and explicit generation
+rebinding. Exact manifests, frozen operator closure, cleanup and source-owner
+limits are in [the G74 recovery record](../../docs/ortak/CURRENT_PRIVATE_RECOVERY74_2026-09-06.md).
 
 The config schema is:
 
@@ -302,3 +378,32 @@ service processes with the first forcibly terminated by SIGKILL. Provider
 calls were zero and no Docker socket was mounted. This is now an actual
 Python HTTP/CLI/restart receipt; the Rust adapter and live provider remain
 separate integration seams.
+
+## Latest private E2 artifact checkpoint (2026-09-05)
+
+This checkpoint supersedes earlier candidate artifact identities above. The
+Hermes source remains the reviewed22-file lock at
+`29112bef099274229cadff79cdff7bf7b99c4b77`.
+
+- Worker: `sha256:baf828b237502da6bfdde3cd598d32b4f4f87979adbc64ee6d3fe0b548b9d79c`.
+- Controller: `sha256:090758781ef2ed301556d89dbb6f13394dbe310d13e52328f5194fe3a73520f0`.
+- Constructor, real Office run-loop and Codex I/O fixtures passed. A separate
+  real-AIAgent Work fixture retained exact assistant text with silent Office
+  intent and preserved the forged-tool denial. HTTP recovery12 and actual
+  Docker containment8 passed. Those checks made0 provider calls.
+- Root subsequently deployed these exact artifacts using the existing fresh
+  company/profile/OAuth selection and journal. The old controller is retained
+  stopped; its verified stopped-journal backup contains8 runs/22 events/2 probes.
+  Worker PID6260/session28241 resumed through a frozen public launcher.
+- New selected-profile health probe `de59d162-04d2-4563-8e10-0649e6c1ca89` made
+  an actual Codex OAuth request and completed with exactly `OK`. This health
+  witness expires normally; it is not permanent provider-health authority.
+- Native100-word Office run `2d191b5b-1f92-450d-96a5-2fb444348d5f` still failed
+  `provider_failed`. Its message was accepted through the corrected native
+  central-routing mention path. General useful-response acceptance remains open;
+  safe bounded exception-boundary diagnostics are being investigated.
+
+Artifact checks: `/private/tmp/ortak-v0-evidence/hermes-e2-checks-a873cd8065d847bdaa71349dbad06ead`
+and `/private/tmp/ortak-v0-evidence/hermes-e2-containment-93ce272df8554b8396735a3cfa57137b`.
+Rollout: `/private/tmp/ortak-private-20260905/rollouts/hermes-e2-38c4035768844a9aac1e55c7f672a457`.
+The earlier source/binary snapshots and failed attempts remain retained.

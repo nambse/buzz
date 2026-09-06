@@ -5,27 +5,15 @@ use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
 use crate::{
-    auth::Principal,
+    auth::{Principal, RequestAuthority},
     error::{ApiError, Result},
     routes::ApiState,
 };
 
-// Shared audience gate used before paging and for all single-run operations.
-// Canonical event partition, author, kind and channel must match the inbox copy.
-// Work/DM/noncanonical runs deliberately have no visibility in this API.
-const VISIBLE_RUNS: &str = "
-    SELECT r.id FROM runs r
-    JOIN office_company_bindings b ON b.company_id = r.company_id AND b.community_id = $2
-    JOIN office_inbox i ON i.company_id = r.company_id AND i.event_id = r.message_id
-    JOIN events e ON e.community_id = b.community_id AND e.id = i.event_id AND e.created_at = i.event_created_at
-      AND e.channel_id = i.channel_id AND e.kind = i.event_kind AND e.pubkey = i.author_pubkey
-    JOIN channels c ON c.community_id = e.community_id AND c.id = e.channel_id
-    WHERE r.company_id = $1 AND r.employee_id = ANY($5) AND r.work_item_id IS NULL
-      AND e.channel_id = ANY($3) AND e.kind IN (9, 40002) AND e.deleted_at IS NULL
-      AND c.channel_type::text = 'stream' AND c.deleted_at IS NULL
-      AND (c.visibility::text = 'open' OR EXISTS (
-        SELECT 1 FROM channel_members m WHERE m.community_id = b.community_id
-          AND m.channel_id = e.channel_id AND m.pubkey = $4 AND m.removed_at IS NULL))";
+mod direct;
+mod visibility;
+use direct::visible_direct_channels_on;
+use visibility::{lock_projects_on, VISIBLE_RUNS};
 
 impl ApiState {
     pub(crate) async fn office_delivery(
@@ -94,8 +82,11 @@ impl ApiState {
         principal: &Principal,
         run_id: Uuid,
     ) -> Result<bool> {
+        lock_projects_on(connection, principal, &[run_id]).await?;
+        let direct =
+            visible_direct_channels_on(connection, principal, self.config.community_id).await?;
         let mut sql = sqlx::QueryBuilder::new(VISIBLE_RUNS);
-        sql.push(" AND r.id = $6");
+        sql.push(" AND r.id = $7");
         let row = sql
             .build()
             .bind(principal.scope.company_id())
@@ -103,6 +94,7 @@ impl ApiState {
             .bind(&principal.grant.channel_ids)
             .bind(principal.public_key.to_bytes().as_slice())
             .bind(employee_ids(principal))
+            .bind(&direct)
             .bind(run_id)
             .fetch_optional(connection)
             .await?;
@@ -114,14 +106,13 @@ impl ApiState {
         principal: &Principal,
         run_id: Uuid,
         action: &str,
+        authority: &RequestAuthority,
     ) -> Result<()> {
-        let mut connection = self.control.pool().acquire().await?;
-        if !self
-            .visible_run_on(&mut connection, principal, run_id)
-            .await?
-        {
+        let mut held = authority.0.lock().await;
+        let connection = held.as_mut().ok_or_else(ApiError::unavailable)?;
+        if !self.visible_run_on(connection, principal, run_id).await? {
             audit_on(
-                &mut connection,
+                connection,
                 &principal.scope,
                 &principal.public_key,
                 &principal.auth_event_id,
@@ -139,14 +130,19 @@ impl ApiState {
         &self,
         principal: &Principal,
         query: &RunListQuery,
+        authority: &RequestAuthority,
     ) -> Result<RunListPage> {
+        let mut held = authority.0.lock().await;
+        let connection = held.as_mut().ok_or_else(ApiError::unavailable)?;
+        let direct =
+            visible_direct_channels_on(connection, principal, self.config.community_id).await?;
         let mut sql = sqlx::QueryBuilder::new(VISIBLE_RUNS);
         sql.push(
             "
-            AND ($6::text IS NULL OR r.employee_id = $6)
-            AND ($7::text[] IS NULL OR r.status = ANY($7))
-            AND ($8::timestamptz IS NULL OR (r.queued_at, r.id) < ($8, $9::uuid))
-            ORDER BY r.queued_at DESC, r.id DESC LIMIT $10",
+            AND ($7::text IS NULL OR r.employee_id = $7)
+            AND ($8::text[] IS NULL OR r.status = ANY($8))
+            AND ($9::timestamptz IS NULL OR (r.queued_at, r.id) < ($9, $10::uuid))
+            ORDER BY r.queued_at DESC, r.id DESC LIMIT $11",
         );
         let rows = sql
             .build()
@@ -155,12 +151,33 @@ impl ApiState {
             .bind(&principal.grant.channel_ids)
             .bind(principal.public_key.to_bytes().as_slice())
             .bind(employee_ids(principal))
+            .bind(&direct)
             .bind(query.employee_id.as_ref().map(|id| id.as_str()))
             .bind(query.status_filter())
             .bind(query.cursor.map(|c| c.queued_at()))
             .bind(query.cursor.map(|c| c.run_id()))
             .bind(i64::from(query.page_size()) + 1)
-            .fetch_all(self.control.pool())
+            .fetch_all(&mut **connection)
+            .await?;
+        let candidates = rows
+            .iter()
+            .map(|row| row.try_get::<Uuid, _>("id"))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        lock_projects_on(connection, principal, &candidates).await?;
+        // Recheck only the bounded candidate set under its project fences. A
+        // grant revoked between selection and locking cannot leak a header.
+        let mut recheck = sqlx::QueryBuilder::new(VISIBLE_RUNS);
+        recheck.push(" AND r.id=ANY($7) ORDER BY r.queued_at DESC,r.id DESC");
+        let rows = recheck
+            .build()
+            .bind(principal.scope.company_id())
+            .bind(self.config.community_id)
+            .bind(&principal.grant.channel_ids)
+            .bind(principal.public_key.to_bytes().as_slice())
+            .bind(employee_ids(principal))
+            .bind(&direct)
+            .bind(&candidates)
+            .fetch_all(&mut **connection)
             .await?;
         let has_more = rows.len() > query.page_size() as usize;
         let mut runs = Vec::new();

@@ -43,7 +43,11 @@ impl SemanticScorer for Scorer {
         }
     }
 
-    async fn score(&self, input: &SemanticScoringInput) -> ScoringOutcome {
+    async fn score(
+        &self,
+        input: &SemanticScoringInput,
+        _budget: ortak_control::ScoringBudget,
+    ) -> ScoringOutcome {
         self.calls.fetch_add(1, Ordering::SeqCst);
         if let Some((pool, company, hang)) = &self.shorten {
             sqlx::query("UPDATE office_inbox SET claim_expires_at=clock_timestamp()-interval '1 second' WHERE company_id=$1 AND event_id=$2")

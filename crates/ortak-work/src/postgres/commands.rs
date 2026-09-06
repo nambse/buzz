@@ -157,7 +157,8 @@ pub(super) async fn add_dependency_on(
     let mut edges: BTreeMap<Uuid, BTreeSet<Uuid>> = BTreeMap::new();
     for row in sqlx::query(
         "SELECT work_item_id, depends_on_work_item_id FROM work_dependencies
-              WHERE company_id = $1 AND project_id = $2",
+              WHERE company_id = $1 AND project_id = $2 AND released_at IS NULL
+              ORDER BY work_item_id, depends_on_work_item_id LIMIT 4097",
     )
     .bind(scope.company_id())
     .bind(project_id)
@@ -168,6 +169,11 @@ pub(super) async fn add_dependency_on(
         let to: Uuid = row.try_get("depends_on_work_item_id")?;
         edges.entry(from).or_default().insert(to);
     }
+    if edges.values().map(BTreeSet::len).sum::<usize>() >= 4096 {
+        return Err(WorkError::InvalidQuery(
+            "dependency graph exceeds 4096 active edges",
+        ));
+    }
     if creates_dependency_cycle(&edges, command.work_item_id, command.depends_on) {
         return Err(ortak_domain::DomainError::DependencyCycle.into());
     }
@@ -177,7 +183,9 @@ pub(super) async fn add_dependency_on(
         "INSERT INTO work_dependencies
                  (company_id, project_id, work_item_id, depends_on_work_item_id,
                   created_by_type, created_by_id)
-             VALUES ($1, $2, $3, $4, $5, $6)",
+             VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT(company_id,work_item_id,depends_on_work_item_id)
+             DO UPDATE SET released_at=NULL",
     )
     .bind(scope.company_id())
     .bind(project_id)

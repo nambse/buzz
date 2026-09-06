@@ -49,12 +49,13 @@ mod error;
 pub mod model;
 pub mod postgres;
 pub mod repository;
+pub mod reviewed_exports;
 pub mod service;
 
 pub use error::{Result, WorkError};
 pub use model::{
-    ProjectRecord, WorkHistoryRecord, WorkItemAggregate, WorkListCursor, WorkListPage,
-    WorkListQuery, WorkSummary, DEFAULT_WORK_PAGE_SIZE, MAX_WORK_HISTORY_ROWS, MAX_WORK_PAGE_SIZE,
+    DEFAULT_WORK_PAGE_SIZE, MAX_WORK_HISTORY_ROWS, MAX_WORK_PAGE_SIZE, ProjectRecord,
+    WorkHistoryRecord, WorkItemAggregate, WorkListCursor, WorkListPage, WorkListQuery, WorkSummary,
 };
 pub use repository::{
     AddDependency, ArchiveProject, AssignEmployee, AttachRecord, CreateProject, CreateWorkItem,
@@ -65,7 +66,24 @@ pub use service::WorkService;
 
 pub use postgres::{
     ApiProject, ApiProjectCreation, ApiProjectPage, ApiWorkPrincipal, AuthorizedWork, ProjectRole,
-    WorkMutation,
+    WorkExecutionReceipt, WorkMutation,
 };
 
+pub use postgres::{DependencyAction, WorkDependencyPage, WorkDependencyView};
 pub use postgres::{EmployeeWorkQueueEntry, EmployeeWorkQueuePage};
+pub use postgres::{WorkChildCreation, WorkDecomposition};
+pub use postgres::{WorkExecutionView, WorkTextArtifact};
+pub use postgres::{WorkOutputReport, schedule_work_outputs};
+
+// Explicitly reviewed project context and retained stop-use receipts.
+pub use postgres::{
+    ReviewedFact, ReviewedFactDraft, ReviewedFactPage, ReviewedFactRecall, ReviewedFactReceipt,
+    ReviewedFactSource,
+};
+
+// Explicit conversation review; approval remains separate from publication/use.
+pub use postgres::{
+    ConversationMemoryAudience, ReviewedConversationFact, ReviewedConversationFactDraft,
+    ReviewedConversationFactPage, ReviewedConversationFactReceipt, ReviewedConversationPreview,
+    ReviewedConversationPreviewRequest,
+};

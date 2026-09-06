@@ -131,7 +131,8 @@ def run(root):
                 'unauthenticated_request_accepted')
         status, health = request(port, token, 'POST', '/v1/profiles/inspect',
                                  {'company_id': company, 'binding': binding})
-        require(status == 200 and health == {'profile_ref': binding['profile_ref'], 'healthy': False},
+        require(status == 200 and health == {'profile_ref': binding['profile_ref'], 'healthy': False,
+                                             'credential_references': []},
                 'unavailable_profile_reported_healthy')
         require(request(port, token, 'POST', '/v1/runs/lookup', control)[0] == 404,
                 'lookup_created_run')

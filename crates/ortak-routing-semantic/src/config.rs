@@ -20,6 +20,13 @@ pub struct SemanticConfig {
     pub token_ref: CredentialRef,
 }
 
+impl SemanticConfig {
+    /// Validates every public selection before a caller resolves authentication.
+    pub fn validate(&self) -> Result<(), &'static str> {
+        validate(self).map(|_| ())
+    }
+}
+
 /// Resolved authentication material; deliberately neither Debug nor serializable.
 pub struct SemanticToken {
     pub(crate) reference: CredentialRef,

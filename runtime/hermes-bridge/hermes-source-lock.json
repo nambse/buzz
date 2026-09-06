@@ -17,7 +17,12 @@
     "tools/env_probe.py": "d46c016348a493cf26e1b0ed82c3b935672f5a9d27493d5cab2e04ecf37c34df",
     "agent/transports/codex.py": "c90e07e6bbb01e27fe2ebd24ca96f6efffd0458738efb83fe064851b993a05c3",
     "agent/transports/chat_completions.py": "fec0186cdb5536f657f8428ef873ea8871bed7d178db629b5a15a1c50f765003",
-    "agent/transports/__init__.py": "fe832003b28c5470608eb51a055e5cc759f1fb81d93174b54dbbd217f97bbffe"
+    "agent/transports/__init__.py": "fe832003b28c5470608eb51a055e5cc759f1fb81d93174b54dbbd217f97bbffe",
+    "agent/codex_headers.py": "a0a83440762b8141240521fe30ee41811c162ff4a39906b3c96c0b187a2d9b63",
+    "agent/codex_runtime.py": "e155d679cff0f34ad685a9a2297e0f6d213d210d5c934b996f264070f665fadc",
+    "agent/codex_responses_adapter.py": "9ae4f05a05a6a6d372f83d3c64a7ca48d90b62fc433285111fd66a8a8fe709e0",
+    "agent/reasoning_effort.py": "9296b9f616a296c9111257f07723d1f8050843f5a3d7bc3d3909f3a8a2ac0e0e",
+    "hermes_cli/auth.py": "98d96872425c1e4564fe6a5cc27731166266b1b6795d0187db1d42cf1c92b84e"
   },
   "archive_sha256": "76b99a8be9b77d66833c3cfe2b35c6d6f6a58e4ff9637ef8effcfc1f420ab35a"
 }

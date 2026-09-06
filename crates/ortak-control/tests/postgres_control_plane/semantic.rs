@@ -29,7 +29,11 @@ impl SemanticScorer for HangingScorer {
     fn metadata(&self) -> ScorerMetadata {
         metadata()
     }
-    async fn score(&self, _: &SemanticScoringInput) -> ScoringOutcome {
+    async fn score(
+        &self,
+        _: &SemanticScoringInput,
+        _budget: ortak_control::ScoringBudget,
+    ) -> ScoringOutcome {
         self.calls.fetch_add(1, Ordering::SeqCst);
         self.active.fetch_add(1, Ordering::SeqCst);
         let _held = ActiveCall(self.active.clone());
@@ -180,7 +184,11 @@ impl SemanticScorer for BudgetRevisionScorer {
     fn metadata(&self) -> ScorerMetadata {
         metadata()
     }
-    async fn score(&self, input: &SemanticScoringInput) -> ScoringOutcome {
+    async fn score(
+        &self,
+        input: &SemanticScoringInput,
+        _budget: ortak_control::ScoringBudget,
+    ) -> ScoringOutcome {
         assert_eq!(input.company_id(), self.company);
         self.inputs.lock().expect("inputs").push(input.clone());
         if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
@@ -265,7 +273,11 @@ impl SemanticScorer for ReclaimingScorer {
     fn metadata(&self) -> ScorerMetadata {
         metadata()
     }
-    async fn score(&self, input: &SemanticScoringInput) -> ScoringOutcome {
+    async fn score(
+        &self,
+        input: &SemanticScoringInput,
+        _budget: ortak_control::ScoringBudget,
+    ) -> ScoringOutcome {
         sqlx::query("UPDATE office_inbox SET claim_expires_at=clock_timestamp()-interval '1 second' WHERE company_id=$1 AND event_id=$2")
             .bind(self.scope.company_id()).bind(input.message_id().as_bytes().as_slice())
             .execute(&self.pool).await.expect("expire held claim");

@@ -6,6 +6,7 @@ only from fixed container paths, and no Hermes source is downloaded at runtime.
 import argparse
 import inspect
 import json
+import logging
 import os
 import signal
 import sys
@@ -15,11 +16,13 @@ from .journal import BridgeError, Journal, identity
 from .service import Bridge
 from .hermes_candidate import execute_candidate
 from .verify_source import verify_source
+from .oauth_credentials import token_expiry
 
 
 
 def isolate_environment(home):
     """Replace ambient configuration before any Hermes import, including lazy deps."""
+    logging.disable(logging.CRITICAL)
     os.environ.clear()
     os.environ.update(PATH='/usr/local/bin:/usr/bin:/bin', HOME=str(home),
                       HERMES_HOME=str(home), LANG='C.UTF-8',
@@ -74,6 +77,26 @@ def load_hermes():
     return AIAgent
 
 
+def selected_provider_token(spec, provider, oauth_token):
+    """Gate exact credentials again inside the child without loading refresh state."""
+    if (not isinstance(provider, dict) or set(provider) != {'provider', 'credential_ref'}
+            or spec['binding']['credential_refs'] != [provider['credential_ref']]
+            or provider['provider'] not in {'openai', 'openrouter', 'openai-codex'}):
+        raise BridgeError('credential_binding_mismatch')
+    if provider['provider'] == 'openai-codex':
+        import time
+        if token_expiry(oauth_token) <= time.time() + 180:
+            raise BridgeError('oauth_relogin_required', 503)
+        return oauth_token
+    if oauth_token is not None:
+        raise BridgeError('credential_binding_mismatch')
+    with open('/profile/provider-token', 'r') as token_file:
+        token = token_file.read(4097).strip()
+    if not token or len(token) > 4096 or any(c.isspace() for c in token):
+        raise BridgeError('invalid_provider_credential')
+    return token
+
+
 def main():
     """Validate fixed profile ownership and journal before invoking the real agent."""
     parser = argparse.ArgumentParser()
@@ -87,10 +110,11 @@ def main():
     path = Path(args.journal)
     if path.parent != Path('/ortak-state') or not path.is_file():
         raise BridgeError('invalid_journal_path')
-    raw = sys.stdin.buffer.read(256 * 1024 + 1)
-    if len(raw) > 256 * 1024:
+    raw = sys.stdin.buffer.read(256 * 1024 + 16384 + 1)
+    if len(raw) > 256 * 1024 + 16384:
         raise BridgeError('body_too_large')
     request = json.loads(raw)
+    oauth_token = request.pop('oauth_access_token', None)
     spec = request['spec']
     key = spec['idempotency_key']
     company, _ = identity(key)
@@ -101,20 +125,20 @@ def main():
     journal = Journal(path)
     bridge = Bridge(journal, company, [{'employee_id': marker['employee_id'], 'binding': profile}])
     bridge.validate(request)
+    workspace = request.get('workspace')
     # A delayed container receives only a tombstone and never loads Hermes.
     receipt = journal.lookup(key)
     if receipt is None or receipt['status'] != 'accepted':
         return
+    # Recheck the full durable start fingerprint before selecting credentials.
+    journal.reserve(spec, workspace=workspace)
+    if workspace is not None:
+        # The filesystem workflow has a hard provider-child ceiling as well as
+        # the pinned model-loop budget; no hung SDK stream can extend it.
+        arm_deadline(120)
     provider = bounded_json('/profile/ORTAK_PROVIDER.json')
-    if set(provider) != {'provider', 'credential_ref'} or spec['binding']['credential_refs'] != [provider['credential_ref']] or provider['provider'] not in {'openai', 'openrouter'}:
-        raise BridgeError('credential_binding_mismatch')
-    # This file belongs to the fresh selected profile. No old-profile files,
-    # host environment secrets, or arbitrary credential paths are consulted.
-    with open('/profile/provider-token', 'r') as token_file:
-        token = token_file.read(4097).strip()
-    if not token or len(token) > 4096 or any(c.isspace() for c in token):
-        raise BridgeError('invalid_provider_credential')
-    execute_candidate(spec, journal, None, provider['provider'], token, load_base=load_hermes)
+    token = selected_provider_token(spec, provider, oauth_token)
+    execute_candidate(spec, journal, None, provider['provider'], token, load_base=load_hermes, workspace=workspace)
 
 if __name__ == '__main__':
     try:

@@ -30,7 +30,11 @@ struct ManifestRoutingView {
     routing: EmployeeRoutingPolicy,
 }
 
-const ROSTER_SQL: &str = "SELECT e.id, e.status, e.active_revision_id, r.manifest
+const ROSTER_SQL: &str = "SELECT e.id, e.status, e.active_revision_id, r.manifest,
+       EXISTS (SELECT 1 FROM office_routing_cohorts cohort
+               JOIN office_routing_employees selected ON selected.company_id=cohort.company_id
+               WHERE cohort.company_id=e.company_id AND cohort.state='enabled'
+                 AND selected.employee_id=e.id) AS cohort_enabled
        FROM employees e
        LEFT JOIN employee_revisions r
          ON r.company_id = e.company_id
@@ -56,7 +60,7 @@ fn employee_record(row: &PgRow) -> Result<(EmployeeRecord, Option<serde_json::Va
             id: EmployeeId::parse(id)?,
             status: parse_column::<EmployeeStatus>("employees.status", &status)?,
             active_revision_id: row.try_get("active_revision_id")?,
-            routing_enabled,
+            routing_enabled: routing_enabled && row.try_get::<bool, _>("cohort_enabled")?,
         },
         manifest,
     ))

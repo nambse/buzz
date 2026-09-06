@@ -4,6 +4,9 @@ from sqlalchemy import Column, DateTime, String, Table, func
 from sqlalchemy.dialects.postgresql import JSONB
 from src.db import Base
 
+from .reviewed_models import TABLES as REVIEWED_TABLES
+from .reviewed_employee_models import TABLES as EMPLOYEE_REVIEWED_TABLES
+
 resource_receipts = Table(
     "ortak_resource_receipts",
     Base.metadata,
@@ -41,4 +44,4 @@ write_receipts = Table(
     ),
 )
 
-TABLES = [resource_receipts, session_ownership, write_receipts]
+TABLES = [resource_receipts, session_ownership, write_receipts, *REVIEWED_TABLES, *EMPLOYEE_REVIEWED_TABLES]

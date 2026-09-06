@@ -211,6 +211,7 @@ pub async fn handle_req(
     }
 
     if filters_are_huddle_liveness_only(&filters) {
+        #[cfg(feature = "legacy-mesh")]
         handle_huddle_liveness_req(
             &sub_id,
             &filters,
@@ -219,6 +220,11 @@ pub async fn handle_req(
             &state,
         )
         .await;
+        #[cfg(not(feature = "legacy-mesh"))]
+        conn.send(RelayMessage::closed(
+            &sub_id,
+            "unsupported: huddle liveness is not available in this build",
+        ));
         return;
     }
 
@@ -1160,6 +1166,7 @@ fn filters_are_huddle_liveness_only(filters: &[Filter]) -> bool {
         })
 }
 
+#[cfg(feature = "legacy-mesh")]
 fn huddle_liveness_session_ids(filters: &[Filter]) -> Vec<uuid::Uuid> {
     let d_tag = nostr::SingleLetterTag::lowercase(nostr::Alphabet::D);
     let mut session_ids = Vec::new();
@@ -1178,6 +1185,7 @@ fn huddle_liveness_session_ids(filters: &[Filter]) -> Vec<uuid::Uuid> {
     session_ids
 }
 
+#[cfg(feature = "legacy-mesh")]
 async fn handle_huddle_liveness_req(
     sub_id: &str,
     filters: &[Filter],
@@ -1568,6 +1576,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-mesh")]
     fn huddle_liveness_session_ids_are_deduplicated_and_bounded() {
         let d_tag = SingleLetterTag::lowercase(Alphabet::D);
         let input = (0..MAX_EXPLICIT_CHANNEL_VALUES + 16)

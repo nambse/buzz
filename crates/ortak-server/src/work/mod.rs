@@ -1,16 +1,24 @@
 //! Manual Work operations over the atomic, project-authorized core facade.
+mod assignment;
+mod conversation_memory;
+mod decomposition;
+mod definition;
+mod dependencies;
 mod dto;
+mod execution;
+mod facts;
 mod projection;
 mod queue;
+mod reviewed_exports;
 mod routes;
 
 pub(crate) use routes::router;
 
 use crate::{
+    Role,
     auth::Principal,
     error::{ApiError, Result},
     routes::ApiState,
-    Role,
 };
 use ortak_work::{ApiWorkPrincipal, AuthorizedWork};
 

@@ -9,7 +9,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::{
-    auth::Principal,
+    auth::{Principal, RequestAuthority},
     error::{ApiError, Result},
     routes::ApiState,
 };
@@ -52,7 +52,8 @@ pub(crate) async fn list(
         None
     };
     Ok(Json(
-        serde_json::json!({"employees": employees, "has_more": has_more, "next_after": next_after}),
+        serde_json::json!({"employees": employees, "has_more": has_more, "next_after": next_after, "can_view_provisioning": principal.grant.can_manage_employees && principal.grant.role == crate::Role::Operator,
+            "can_execute_provisioning":principal.grant.can_execute_provisioning && principal.grant.can_manage_employees && principal.grant.role==crate::Role::Operator}),
     ))
 }
 
@@ -60,6 +61,7 @@ pub(crate) async fn detail(
     State(state): State<ApiState>,
     Extension(principal): Extension<Principal>,
     Path(employee_id): Path<EmployeeId>,
+    Extension(authority): Extension<RequestAuthority>,
 ) -> Result<Json<serde_json::Value>> {
     if !principal.grant.employee_ids.contains(&employee_id) {
         state
@@ -86,6 +88,7 @@ pub(crate) async fn detail(
                 limit: Some(1),
                 ..RunListQuery::default()
             },
+            &authority,
         )
         .await?;
     Ok(Json(

@@ -31,7 +31,7 @@ pub struct HonchoEmployeeBinding {
     pub employee_id: EmployeeId,
     /// Exact binding; requests cannot change any field, including options.
     pub binding: MemoryBinding,
-    /// Fresh owned bundles can validate memory I/O; adoption stays read-only.
+    /// Acquisition ownership; adopted bundles need explicit receipt recovery before I/O validation.
     pub mode: ProvisioningMode,
     /// Explicit permission for the company-truth namespace, false by default in callers.
     pub allow_company_truth: bool,

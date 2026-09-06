@@ -518,7 +518,11 @@ async fn score_before_deadline<S: SemanticScorer>(
     let started = Instant::now();
     let mut metadata = scorer.metadata();
     if started < deadline {
-        let outcome = timeout_at(deadline, scorer.score(input)).await;
+        let outcome = timeout_at(
+            deadline,
+            scorer.score(input, crate::semantic::ScoringBudget::until(deadline)),
+        )
+        .await;
         // A future which blocks within one poll can return after timeout_at's
         // timer was due. Its result is still late and must never wake anyone.
         match outcome {

@@ -216,7 +216,11 @@ impl SemanticScorer for CaptureScorer {
     fn metadata(&self) -> ScorerMetadata {
         crate::DisabledSemanticScorer::metadata()
     }
-    async fn score(&self, input: &SemanticScoringInput) -> ScoringOutcome {
+    async fn score(
+        &self,
+        input: &SemanticScoringInput,
+        _budget: crate::ScoringBudget,
+    ) -> ScoringOutcome {
         let result = if let Ok(mut capture) = self.0.lock() {
             *capture = Some(input.clone());
             Err(SemanticScoringFailure::Disabled)

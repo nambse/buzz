@@ -6,7 +6,16 @@ rust-version.workspace = true
 license.workspace = true
 description = "Ortak run dispatch and supervision foundation: authoritative run_dispatch consumption, idempotent runtime starts, cursor-resumed event ingestion, and supervised cancellation over the RuntimeAdapter port"
 
+[features]
+# Isolated repositories only; no worker, normalizer or public route is enabled.
+encrypted-dm = ["ortak-office/encrypted-dm"]
+
 [dependencies]
+base64.workspace = true
+aes-gcm = { version = "=0.10.3", default-features = false, features = ["aes", "alloc", "zeroize"] }
+hkdf = "=0.13.0"
+getrandom = "=0.4.3"
+zeroize.workspace = true
 ortak-control.workspace = true
 ortak-domain.workspace = true
 ortak-office.workspace = true
@@ -25,5 +34,8 @@ uuid.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+futures-util.workspace = true
+tokio-tungstenite.workspace = true
+nostr.workspace = true
 buzz-db.workspace = true
 serde_yaml.workspace = true

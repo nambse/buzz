@@ -5,6 +5,19 @@ use std::future::Future;
 use std::time::Duration;
 
 mod authority;
+mod dependencies;
+pub use dependencies::*;
+mod decomposition;
+pub use decomposition::*;
+mod execution;
+pub use execution::WorkExecutionReceipt;
+mod execution_reads;
+pub use execution_reads::{WorkExecutionView, WorkTextArtifact};
+mod facts;
+pub use facts::*;
+mod output;
+mod reviewed_exports;
+pub use output::{schedule_work_outputs, WorkOutputReport};
 mod queries;
 mod queue;
 pub use queue::{EmployeeWorkQueueEntry, EmployeeWorkQueuePage};
@@ -216,12 +229,31 @@ impl AuthorizedWork {
                 "expected_version must be at least 1",
             ));
         }
+        if let WorkMutation::EditDefinition { definition } = &action {
+            definition.validate()?;
+            if definition.criteria.len() + definition.additional_criteria.len() > 16 {
+                return Err(WorkError::InvalidQuery(
+                    "manual definition exceeds 16 criteria",
+                ));
+            }
+        }
         if matches!(&action,
             WorkMutation::Transition { reason: Some(reason), .. }
             | WorkMutation::ResolveApproval { reason: Some(reason), .. }
             if reason.len() > ortak_domain::MAX_WORK_REASON_BYTES)
         {
             return Err(WorkError::InvalidQuery("reason exceeds the bounded size"));
+        }
+        if let WorkMutation::ReleaseAssignment { reason, .. }
+        | WorkMutation::Reassign { reason, .. } = &action
+        {
+            if reason.trim().is_empty()
+                || reason.len() > ortak_domain::MAX_WORK_REASON_BYTES
+                || reason.chars().any(char::is_control)
+                || ortak_control::run_event::RedactionPolicy::new().redact(reason) != *reason
+            {
+                return Err(WorkError::InvalidQuery("invalid assignment reason"));
+            }
         }
         let hash = fingerprint((id, version, &action))?;
         let (mut tx, deadline) = self.begin().await?;
@@ -244,10 +276,28 @@ impl AuthorizedWork {
             _ => item.item.state,
         };
         match &action {
+            WorkMutation::EditDefinition { .. } => self.contribute(project.role)?,
             WorkMutation::Assign { employee_id, .. } => {
                 self.contribute(project.role)?;
                 self.employee_on(&mut tx, project.channel_id, employee_id)
                     .await?;
+            }
+            WorkMutation::ReleaseAssignment { employee_id, .. }
+            | WorkMutation::Reassign { employee_id, .. } => {
+                self.contribute(project.role)?;
+                // Releasing an inactive or removed member is a recovery operation.
+                // Only the replacement needs current employee/member eligibility.
+                if !self.principal.employee_ids.contains(employee_id) {
+                    return Err(WorkError::AccessDenied);
+                }
+                if let WorkMutation::Reassign {
+                    replacement_employee_id,
+                    ..
+                } = &action
+                {
+                    self.employee_on(&mut tx, project.channel_id, replacement_employee_id)
+                        .await?;
+                }
             }
             WorkMutation::Transition { target, .. } => {
                 if *target == WorkState::Completed
@@ -271,6 +321,12 @@ impl AuthorizedWork {
         }
         let actor = self.actor();
         let item = match action {
+            action @ (WorkMutation::ReleaseAssignment { .. } | WorkMutation::Reassign { .. }) => {
+                assignment::change_on(&mut tx, &self.scope, id, version, &action, &actor).await?
+            }
+            WorkMutation::EditDefinition { definition } => {
+                definition::edit_on(&mut tx, &self.scope, id, version, &definition, &actor).await?
+            }
             WorkMutation::Assign { employee_id, role } => {
                 commands::assign_employee_on(
                     &mut tx,

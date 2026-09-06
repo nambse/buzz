@@ -18,7 +18,10 @@
 //!   as a verified human. Anything else is not Office input.
 //! - **Channel state** must be live: the channel row exists, is neither
 //!   archived nor deleted, and has the channel type the kind is defined for
-//!   (`stream`). A DM-typed or otherwise unexpected channel is refused.
+//!   (`stream`), or be an explicitly selected canonical private one-to-one DM.
+//!   DMs require exactly one current human and one company employee, the
+//!   retained participant fingerprint, and live membership/expiry. They use
+//!   server-derived direct recipients and never widen to group or tag targets.
 //! - **Origin** resolves the author key through every
 //!   `employee_office_bindings` row of the company first (historical,
 //!   retired, unverified, and disabled bindings included). A key that is not
@@ -65,7 +68,9 @@
 //! the coordinated mutation fence at commit. Runtime admission can use
 //! `normalize_on` within its own short transaction holding the same fence.
 
+mod dm;
 mod postgres;
+pub use postgres::channel_eligible_employees;
 mod tags;
 
 use ortak_control::inbox::{InboxEvent, InboxRow};
@@ -232,6 +237,11 @@ impl PgChannelNormalizer {
         if facts.deleted {
             return Ok(refused(RoutingReason::NonRoutableMessage, origin));
         }
+        if !ortak_control::postgres::routing_channel_enabled_on(&mut *connection, scope, channel_id)
+            .await?
+        {
+            return Ok(refused(RoutingReason::ChannelNotRoutable, origin));
+        }
 
         // 4. Content, tags, channel state, and persisted thread parent.
         let row = postgres::channel_message(
@@ -245,7 +255,10 @@ impl PgChannelNormalizer {
         let Some(channel_type) = row.channel_type.as_deref() else {
             return Err(mismatch(message_id, "channel_row"));
         };
-        if row.channel_deleted || row.channel_archived || channel_type != expected_type {
+        if row.channel_deleted
+            || row.channel_archived
+            || (channel_type != expected_type && channel_type != "dm")
+        {
             return Ok(refused(RoutingReason::ChannelNotRoutable, origin));
         }
 
@@ -317,7 +330,7 @@ impl PgChannelNormalizer {
         };
 
         // 8. Structured mentions from accepted key tags, and the employees
-        //    that are live, verified members of this channel right now.
+        //    that are live, verified members of the enabled cohort/channel now.
         let structured_mentions =
             resolve_mentions(&mut *connection, company_id, &tag_facts.mention_keys).await?;
         let eligible_employee_ids = postgres::channel_eligible_employees(
@@ -328,16 +341,36 @@ impl PgChannelNormalizer {
         )
         .await?;
 
+        let conversation = if channel_type == "dm" {
+            match dm::conversation(
+                connection,
+                scope,
+                channel_id,
+                &facts.author,
+                &eligible_employee_ids,
+            )
+            .await?
+            {
+                Some(conversation) => conversation,
+                None => return Ok(refused(RoutingReason::ChannelNotRoutable, origin)),
+            }
+        } else {
+            ConversationContext::Channel {
+                channel_id: channel_id.to_string(),
+            }
+        };
+
         let mut envelope = MessageEnvelope::root(
             message_id.to_hex(),
             MessageKind::Text,
             origin,
-            ConversationContext::Channel {
-                channel_id: channel_id.to_string(),
-            },
+            conversation,
             tags::strip_control_characters(&row.content),
         );
-        envelope.structured_mentions = structured_mentions;
+        // A private DM never acquires recipients from tags or alias text.
+        if channel_type != "dm" {
+            envelope.structured_mentions = structured_mentions;
+        }
         envelope.reply_to = reply_to;
 
         Ok(Normalization::Message(Box::new(NormalizedMessage {

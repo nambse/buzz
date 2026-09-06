@@ -26,6 +26,7 @@ async fn live_extension_create_roundtrip_replay_and_scoped_recall() {
         idempotency_key: format!("rust-create-{company}"),
     };
     let resources = service.ensure_resources(&create).await.unwrap();
+    let original = service.created_resources_receipt(&create).await.unwrap();
     assert!(resources
         .outcomes()
         .iter()
@@ -82,7 +83,10 @@ async fn live_extension_create_roundtrip_replay_and_scoped_recall() {
     ));
     assert_eq!(
         resources,
-        restarted.resume_created_resources(&create).await.unwrap()
+        restarted
+            .recover_created_resources(&original)
+            .await
+            .unwrap()
     );
     assert_eq!(
         validated.write_receipt,
@@ -112,4 +116,31 @@ async fn live_extension_create_roundtrip_replay_and_scoped_recall() {
         adopted.recall(&query).await,
         Err(MemoryError::Unsupported { .. })
     ));
+    assert!(adopted
+        .recover_created_resources(&original)
+        .await
+        .unwrap()
+        .outcomes()
+        .iter()
+        .all(|resource| resource.ownership.is_adopted()));
+    assert!(matches!(
+        adopted.recall(&query).await,
+        Err(MemoryError::Unsupported { .. })
+    ));
+    assert_eq!(
+        validated.write_receipt,
+        adopted
+            .validate_memory_roundtrip(&validation)
+            .await
+            .unwrap()
+            .write_receipt
+    );
+    assert_eq!(receipt, adopted.remember(&write).await.unwrap());
+    assert!(adopted
+        .ensure_resources(&inspect)
+        .await
+        .unwrap()
+        .outcomes()
+        .iter()
+        .all(|resource| resource.ownership.is_adopted()));
 }

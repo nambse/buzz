@@ -46,7 +46,7 @@ def main():
             raise RuntimeError('smoke execution admission failed')
         guarded = guarded_agent_class(AIAgent, journal, key)
         constructor_kwargs = agent_constructor_kwargs(
-            {'run_id': run_id, 'binding': {'model': 'gpt-4o-mini'}},
+            {'run_id': run_id, 'binding': {'model': 'gpt-4o-mini', 'options': {}}},
             'openai', 'fixture-only-not-a-provider-key')
         agent = guarded(**constructor_kwargs)
         if agent.api_key != constructor_kwargs['api_key'] or agent.base_url != constructor_kwargs['base_url']:

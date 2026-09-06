@@ -75,12 +75,8 @@ pub(crate) async fn request(
         tx.commit().await?;
         return Err(ApiError(StatusCode::FORBIDDEN, "forbidden"));
     }
-    let row = sqlx::query("SELECT status FROM runs WHERE company_id = $1 AND id = $2 FOR UPDATE")
-        .bind(principal.scope.company_id())
-        .bind(run_id)
-        .fetch_optional(&mut *tx)
-        .await?;
-    if row.is_none() || !state.visible_run_on(&mut tx, &principal, run_id).await? {
+    // Project authority precedes the run lock, matching Work admission/output.
+    if !state.visible_run_on(&mut tx, &principal, run_id).await? {
         audit_on(
             &mut tx,
             &principal.scope,
@@ -94,6 +90,25 @@ pub(crate) async fn request(
         tx.commit().await?;
         return Err(ApiError::not_found());
     }
+    if !state.can_cancel_run_on(&mut tx, &principal, run_id).await? {
+        audit_on(
+            &mut tx,
+            &principal.scope,
+            &principal.public_key,
+            &principal.auth_event_id,
+            "cancel_run",
+            "denied",
+            Some(run_id),
+        )
+        .await?;
+        tx.commit().await?;
+        return Err(ApiError(StatusCode::FORBIDDEN, "forbidden"));
+    }
+    let row = sqlx::query("SELECT status FROM runs WHERE company_id = $1 AND id = $2 FOR UPDATE")
+        .bind(principal.scope.company_id())
+        .bind(run_id)
+        .fetch_optional(&mut *tx)
+        .await?;
     let status: String = row.ok_or_else(ApiError::not_found)?.try_get("status")?;
     if matches!(status.as_str(), "completed" | "failed" | "cancelled") {
         audit_on(

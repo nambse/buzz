@@ -59,7 +59,7 @@ def main():
             run, company = str(uuid4()), str(uuid4())
             key = f'ortak-run:{company}:{run}'
             spec = {'run_id': run, 'employee_id': 'fixture', 'revision_id': str(uuid4()),
-                    'binding': {'model': 'gpt-4o-mini'}, 'permissions': EMPTY_POLICY,
+                    'binding': {'model': 'gpt-4o-mini', 'options': {}}, 'permissions': EMPTY_POLICY,
                     'input': 'Reply with the fixed fixture answer.', 'context': {}, 'idempotency_key': key}
             calls = []
             def fixture_request(self, *args, **kwargs):

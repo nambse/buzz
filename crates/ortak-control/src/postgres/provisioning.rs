@@ -177,6 +177,27 @@ async fn lock_operation_row(
 }
 
 impl ProvisioningRepository for PgControlPlane {
+    async fn check_provisioning_authority(
+        &self,
+        scope: &CompanyScope,
+        operation: Uuid,
+    ) -> Result<()> {
+        self.check_operation_lifecycle(scope, operation).await
+    }
+
+    async fn allow_reenable_operation(
+        &self,
+        scope: &CompanyScope,
+        operation: Uuid,
+    ) -> Result<bool> {
+        let mut tx = self.pool.begin().await?;
+        let allowed = self
+            .reenable_operation_on(&mut tx, scope, operation)
+            .await?;
+        tx.commit().await?;
+        Ok(allowed)
+    }
+
     async fn begin_operation(
         &self,
         scope: &CompanyScope,
@@ -186,6 +207,34 @@ impl ProvisioningRepository for PgControlPlane {
         let manifest = serde_json::to_value(&request.manifest)?;
         let company_id = scope.company_id();
         let mut tx = self.pool.begin().await?;
+
+        self.provisioning_guard_on(&mut tx, scope, None).await?;
+        if self.provisioning_execution.is_none() {
+            let installed: bool = sqlx::query_scalar(
+                "SELECT to_regclass('employee_management_commands') IS NOT NULL",
+            )
+            .fetch_one(&mut *tx)
+            .await?;
+            if installed {
+                let delegated: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM employee_management_commands WHERE company_id=$1 AND configuration->>'operation_key'=$2)")
+                    .bind(company_id).bind(&request.idempotency_key).fetch_one(&mut *tx).await?;
+                if delegated {
+                    return Err(ControlError::InvalidData(
+                        "managed operation requires its executor".into(),
+                    ));
+                }
+            }
+        }
+        if self.provisioning_execution.is_some() {
+            let matches: bool = sqlx::query_scalar("SELECT configuration->'manifest'=$1 AND configuration->>'operation_key'=$2 AND configuration->>'mode'=$3 AND configuration->'dry_run'=$4 FROM employee_management_commands WHERE company_id=$5 AND id=current_setting('ortak.management_command')::uuid")
+                .bind(&manifest).bind(&request.idempotency_key).bind(request.mode.as_str())
+                .bind(serde_json::json!(request.dry_run)).bind(company_id).fetch_one(&mut *tx).await?;
+            if !matches {
+                return Err(ControlError::InvalidData(
+                    "management request mismatch".into(),
+                ));
+            }
+        }
 
         // The operation row references the employee row; reserve the draft
         // identity here and let the saga step verify it.
@@ -269,6 +318,8 @@ impl ProvisioningRepository for PgControlPlane {
     ) -> Result<()> {
         let company_id = scope.company_id();
         let mut tx = self.pool.begin().await?;
+        self.provisioning_guard_on(&mut tx, scope, Some(operation_id))
+            .await?;
         let (status, activated) = lock_operation_row(&mut tx, company_id, operation_id).await?;
         if activated {
             return Err(ProvisioningError::Superseded {
@@ -313,6 +364,8 @@ impl ProvisioningRepository for PgControlPlane {
     ) -> Result<()> {
         let company_id = scope.company_id();
         let mut tx = self.pool.begin().await?;
+        self.provisioning_guard_on(&mut tx, scope, Some(operation_id))
+            .await?;
         let (status, activated) = lock_operation_row(&mut tx, company_id, operation_id).await?;
         if activated || status.is_terminal() {
             return Err(ProvisioningError::Superseded {
@@ -351,6 +404,17 @@ impl ProvisioningRepository for PgControlPlane {
         scope: &CompanyScope,
         employee_id: &EmployeeId,
     ) -> Result<IdentityReservation> {
+        let mut tx = self.pool.begin().await?;
+        self.provisioning_guard_on(&mut tx, scope, None).await?;
+        if self.provisioning_execution.is_some() {
+            let matches: bool = sqlx::query_scalar("SELECT employee_id=$2 FROM employee_management_commands WHERE company_id=$1 AND id=current_setting('ortak.management_command')::uuid")
+                .bind(scope.company_id()).bind(employee_id.as_str()).fetch_one(&mut *tx).await?;
+            if !matches {
+                return Err(ControlError::InvalidData(
+                    "management employee mismatch".into(),
+                ));
+            }
+        }
         let row = sqlx::query(
             "WITH inserted AS (
                  INSERT INTO employees (company_id, id, status) VALUES ($1, $2, 'draft')
@@ -365,11 +429,12 @@ impl ProvisioningRepository for PgControlPlane {
         )
         .bind(scope.company_id())
         .bind(employee_id.as_str())
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await?;
         let created: bool = row.try_get("created")?;
         let status: String = row.try_get("status")?;
         let status: EmployeeStatus = parse_column("employees.status", &status)?;
+        tx.commit().await?;
         Ok(if created {
             IdentityReservation::Created
         } else {
@@ -401,6 +466,8 @@ impl ProvisioningRepository for PgControlPlane {
         activation::configure(&mut tx).await?;
         // Must precede operation/employee/step row locks. Hold through commit.
         let office = super::lock_office_authority_on(&mut tx, scope).await?;
+        self.provisioning_guard_on(&mut tx, scope, Some(operation_id))
+            .await?;
 
         let operation = sqlx::query(
             "SELECT status, dry_run, result_revision_id FROM provisioning_operations

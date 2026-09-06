@@ -20,7 +20,7 @@ use sqlx::{PgConnection, Row};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
-const AUTHORITY_SQL: &str = "SELECT o.kind, o.state, o.dedup_key, o.lease_token,
+const AUTHORITY_SQL: &str = "SELECT o.kind, o.state, o.dedup_key, o.lease_token, o.run_id,
             (o.lease_expires_at > clock_timestamp()) AS lease_live,
             c.status AS company_status,
             o.routing_decision_id, o.employee_id,
@@ -29,6 +29,7 @@ const AUTHORITY_SQL: &str = "SELECT o.kind, o.state, o.dedup_key, o.lease_token,
             rr.action AS recipient_action, rr.employee_revision_id AS pinned_revision_id,
             v.batch_hop,
             e.status AS employee_status,
+            rr.employee_lifecycle_epoch=e.lifecycle_epoch AS current_lifecycle,
             rev.id AS revision_id, rev.manifest, active_rev.manifest AS active_manifest,
             rb.adapter AS binding_adapter, rb.profile_ref AS binding_profile_ref,
             rb.model AS binding_model, rb.workspace_ref AS binding_workspace_ref,
@@ -88,12 +89,12 @@ const AUTHORITY_SQL: &str = "SELECT o.kind, o.state, o.dedup_key, o.lease_token,
         AND ev.id = d.message_id
       WHERE o.company_id = $1 AND o.id = $2";
 
-fn parse_employee_status(value: &str) -> Result<EmployeeStatus> {
+pub(super) fn parse_employee_status(value: &str) -> Result<EmployeeStatus> {
     serde_json::from_value(serde_json::Value::String(value.to_owned()))
         .map_err(|_| invalid(format!("employees.status holds {value:?}")))
 }
 
-fn stored_binding(row: &PgRow) -> Result<Option<StoredRuntimeBinding>> {
+pub(super) fn stored_binding(row: &PgRow) -> Result<Option<StoredRuntimeBinding>> {
     let adapter: Option<String> = row.try_get("binding_adapter")?;
     let Some(adapter) = adapter else {
         return Ok(None);
@@ -114,7 +115,7 @@ fn stored_binding(row: &PgRow) -> Result<Option<StoredRuntimeBinding>> {
     }))
 }
 
-fn stored_memory(row: &PgRow, prefix: &str) -> Result<Option<StoredMemoryBinding>> {
+pub(super) fn stored_memory(row: &PgRow, prefix: &str) -> Result<Option<StoredMemoryBinding>> {
     let Some(adapter) = row.try_get::<Option<String>, _>((format!("{prefix}_adapter")).as_str())?
     else {
         return Ok(None);
@@ -150,7 +151,7 @@ pub(super) async fn authorize(
 
 /// Derives canonical dispatch facts under the caller's shared mutation fence.
 /// Call before any row locks; the witness must originate in this transaction.
-pub(super) async fn authorize_on(
+pub(crate) async fn authorize_on(
     connection: &mut PgConnection,
     scope: &CompanyScope,
     lease: &OutboxLease,
@@ -172,6 +173,9 @@ pub(super) async fn authorize_on(
     let kind_raw: String = row.try_get("kind")?;
     let kind = OutboxKind::parse(&kind_raw)
         .ok_or_else(|| invalid(format!("outbox.kind holds {kind_raw:?}")))?;
+    if kind == OutboxKind::WorkRunDispatch {
+        return super::work::authorize_on(connection, scope, lease, office_authority).await;
+    }
     if kind != OutboxKind::RunDispatch {
         return Err(RunSupervisionError::WrongKind { found: kind });
     }
@@ -217,6 +221,18 @@ async fn derive_on(
     let row_employee: Option<String> = row.try_get("employee_id")?;
     // 3. Routing provenance.
     let refused = |refusal| Ok(DispatchAuthorization::Refused(refusal));
+    if let Some(run) = row.try_get::<Option<Uuid>, _>("run_id")? {
+        // Initial dispatch has no uses. Retrying or renewing an admitted Office
+        // run must retain the same current conversation input before run locks.
+        let current: bool = sqlx::query_scalar("SELECT ortak_lock_run_reviewed_memory($1,$2)")
+            .bind(scope.company_id())
+            .bind(run)
+            .fetch_one(&mut *connection)
+            .await?;
+        if !current {
+            return refused(DispatchRefusal::OfficeAuthorityChanged);
+        }
+    }
     if row.try_get::<String, _>("company_status")? != "active" {
         return refused(DispatchRefusal::CompanyNotActive);
     }
@@ -264,6 +280,9 @@ async fn derive_on(
         return refused(DispatchRefusal::EmployeeMissing);
     };
     let employee_status = parse_employee_status(&employee_status)?;
+    if row.try_get::<Option<bool>, _>("current_lifecycle")? != Some(true) {
+        return refused(DispatchRefusal::EmployeeLifecycleChanged);
+    }
     let Some(revision_id) = row.try_get::<Option<Uuid>, _>("revision_id")? else {
         if employee_status != EmployeeStatus::Active {
             return refused(DispatchRefusal::EmployeeNotActive {
@@ -459,14 +478,19 @@ pub(super) async fn refresh_admission(
     }
     if run.try_get::<String, _>("employee_id")? != authority.employee_id().as_str()
         || run.try_get::<Uuid, _>("employee_revision_id")? != authority.employee_revision_id()
-        || run.try_get::<Option<Uuid>, _>("routing_decision_id")?
-            != Some(authority.routing_decision_id())
+        || run.try_get::<Option<Uuid>, _>("routing_decision_id")? != authority.routing_decision_id()
         || run.try_get::<Option<Vec<u8>>, _>("message_id")?.as_deref()
-            != Some(authority.message_id().as_bytes().as_slice())
+            != authority
+                .message_id()
+                .map(|id| id.as_bytes().to_vec())
+                .as_deref()
         || run
             .try_get::<Option<Vec<u8>>, _>("root_message_id")?
             .as_deref()
-            != Some(authority.root_message_id().as_bytes().as_slice())
+            != authority
+                .root_message_id()
+                .map(|id| id.as_bytes().to_vec())
+                .as_deref()
         || run.try_get::<String, _>("runtime_adapter")? != authority.binding().adapter
     {
         return Ok(false);

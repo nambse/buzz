@@ -117,12 +117,35 @@ pub struct ApiProjectPage {
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum WorkMutation {
+    /// Edit the manual definition before any review evidence exists.
+    EditDefinition {
+        /// Bounded replacements and retained criterion identities.
+        definition: ortak_domain::EditWorkDefinition,
+    },
     /// Assign a currently active, channel-authorized employee.
     Assign {
         /// Employee in the server configured cohort.
         employee_id: EmployeeId,
         /// Assignment role; does not grant human review permission.
         role: AssignmentRole,
+    },
+    /// Release an existing assignment, including an inactive employee's assignment.
+    ReleaseAssignment {
+        /// Employee in the configured audience.
+        employee_id: EmployeeId,
+        /// Bounded nonempty human explanation.
+        reason: String,
+    },
+    /// Atomically replace an assignment, or change the same employee's role.
+    Reassign {
+        /// Currently assigned employee in the configured audience.
+        employee_id: EmployeeId,
+        /// Currently active and channel-authorized replacement.
+        replacement_employee_id: EmployeeId,
+        /// New role; never grants human approval authority.
+        role: AssignmentRole,
+        /// Bounded nonempty human explanation.
+        reason: String,
     },
     /// Change manual status. Completion and review rejection require human review authority.
     Transition {

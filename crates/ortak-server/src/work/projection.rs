@@ -99,7 +99,10 @@ pub(super) fn item(value: &WorkItemAggregate, principal: &Principal) -> Value {
         .filter(|entry| {
             !matches!(
                 entry.event,
-                WorkEvent::Attached { .. } | WorkEvent::DependencyAdded { .. }
+                WorkEvent::Attached { .. }
+                    | WorkEvent::DependencyAdded { .. }
+                    | WorkEvent::DependencyRemoved { .. }
+                    | WorkEvent::ChildCreated { .. }
             )
         })
         .map(|entry| {
@@ -126,7 +129,11 @@ pub(super) fn item(value: &WorkItemAggregate, principal: &Principal) -> Value {
         "completed_at": value.completed_at, "cancelled_at": value.cancelled_at,
         "history_omitted": history.len() != value.history.len(),
         "history_truncated": value.history_truncated, "history": history,
-        "execution_available": false,
+        "execution_available": principal.grant.role == crate::Role::Operator
+            && matches!(item.state,ortak_domain::WorkState::Ready|ortak_domain::WorkState::InProgress)
+            && item.definition_editable() && item.assignments.iter().any(|a|
+                principal.grant.employee_ids.contains(&a.employee_id) && a.status==ortak_domain::AssignmentStatus::Active
+                && matches!(a.role,ortak_domain::AssignmentRole::Owner|ortak_domain::AssignmentRole::Contributor)),
     })
 }
 

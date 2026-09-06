@@ -85,6 +85,15 @@ class CliComposition(unittest.TestCase):
             bridge = configured_bridge(self.config, self.journal, True)
             self.assertIs(bridge.executor, executor)
             self.assertEqual(constructor.call_args.kwargs['validated_digest'], self.config['executor']['image'])
+            self.assertIsNone(constructor.call_args.kwargs['workspace_validated_digest'])
+
+    def test_workspace_capability_opt_in_passes_only_explicit_exact_digest(self):
+        self.config['executor']['workspace_validated_digest'] = self.config['executor']['image']
+        executor = Mock(available=True)
+        with patch('ortak_hermes_bridge.docker_executor.DockerExecutor', return_value=executor) as constructor:
+            bridge = configured_bridge(self.config, self.journal, True)
+            self.assertIs(bridge.executor, executor)
+            self.assertEqual(constructor.call_args.kwargs['workspace_validated_digest'], self.config['executor']['image'])
 
     def test_invalid_company_does_not_construct_or_leak_executor(self):
         self.config['company_id'] = 'invalid'

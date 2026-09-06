@@ -2,12 +2,12 @@ use std::collections::BTreeSet;
 
 use nostr::PublicKey;
 use ortak_domain::EmployeeId;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use url::Url;
 use uuid::Uuid;
 
 /// Server-owned access configuration. Contains public identifiers, never keys.
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ApiConfig {
     /// Canonical origin used for Host and NIP-98 URL verification.
@@ -23,7 +23,7 @@ pub struct ApiConfig {
 }
 
 /// A human principal authorized out of band by the deployment operator.
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct HumanGrant {
     /// Canonical lowercase hex public key. No private key is accepted here.
@@ -34,6 +34,18 @@ pub struct HumanGrant {
     /// remain mandatory for every read and mutation. Defaults to disabled.
     #[serde(default)]
     pub can_create_projects: bool,
+    /// May inspect provisioning progress for granted employees. This does not
+    /// permit executing an operation; defaults to disabled and requires operator.
+    #[serde(default)]
+    pub can_manage_employees: bool,
+    /// May admit prepared-resource commands. Separate from the F1 read grant;
+    /// defaults to disabled and requires both operator and management access.
+    #[serde(default)]
+    pub can_execute_provisioning: bool,
+    /// May explicitly review employee-owned memory from their own Office source.
+    /// Independent of Operator; no publication or runtime permission is implied.
+    #[serde(default)]
+    pub can_review_employee_memory: bool,
     /// Allowed Office channels; live private-channel membership is also required.
     pub channel_ids: Vec<Uuid>,
     /// Explicit employee directory and run audience for this private MVP.
@@ -41,7 +53,7 @@ pub struct HumanGrant {
 }
 
 /// Product API privileges, derived only from server configuration.
-#[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
     /// Read the explicitly granted employee/channel audience.
@@ -105,6 +117,9 @@ impl ApiConfig {
                 PublicKey::from_hex(&grant.public_key).map_err(|_| "invalid human public key")?;
             if key.to_hex() != grant.public_key
                 || !principals.insert(grant.public_key.clone())
+                || (grant.can_manage_employees && grant.role != Role::Operator)
+                || (grant.can_execute_provisioning
+                    && (!grant.can_manage_employees || grant.role != Role::Operator))
                 || grant.channel_ids.is_empty()
                 || grant.channel_ids.len() > 64
                 || grant.channel_ids.iter().any(Uuid::is_nil)

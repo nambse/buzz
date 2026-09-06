@@ -18,6 +18,7 @@ use ortak_runtime::{
     reconciliation::reconcile_runtime, RunSupervisor, SupervisorConfig,
 };
 use ortak_server::shutdown::{Outcome, Shutdown};
+use ortak_server::worker_workspace_tools::{WorkerWorkspace, WorkspaceConfig};
 use serde::Deserialize;
 use sqlx::Row;
 use uuid::Uuid;
@@ -30,6 +31,10 @@ use worker_memory::{MemoryConfig, WorkerMemory};
 mod worker_semantic;
 use worker_semantic::WorkerSemantic;
 
+#[path = "../worker_encrypted.rs"]
+mod worker_encrypted;
+use worker_encrypted::WorkerEncrypted;
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
@@ -39,6 +44,10 @@ struct Config {
     memory: Option<MemoryConfig>,
     #[serde(default)]
     semantic: Option<serde_json::Value>,
+    #[serde(default)]
+    workspace: Option<WorkspaceConfig>,
+    #[serde(default)]
+    encrypted_dm: Option<serde_json::Value>,
     #[serde(default)]
     office_signers: Vec<OfficeSignerBinding>,
     #[serde(default)]
@@ -64,7 +73,9 @@ async fn main() {
         Ok(mut shutdown) => match shutdown.until(run()).await {
             Ok(Outcome::Completed(result)) => result,
             Ok(Outcome::Interrupted) => {
-                eprintln!("ortak-worker: local shutdown; durable work remains recoverable; remote execution is unchanged");
+                eprintln!(
+                    "ortak-worker: local shutdown; durable work remains recoverable; remote execution is unchanged"
+                );
                 Ok(())
             }
             Err(_) => Err("shutdown signal failed"),
@@ -160,6 +171,13 @@ async fn run() -> Result<(), &'static str> {
     if !can_start {
         eprintln!("ortak-worker: bridge start capabilities unavailable; recovery only");
     }
+    let mut encrypted = WorkerEncrypted::new(
+        control.clone(),
+        &scope,
+        adapter.clone(),
+        config.encrypted_dm,
+        capabilities.supports(RuntimeCapability::ConfidentialDmV1),
+    )?;
     let supervisor_config = SupervisorConfig::default();
     if config.memory.is_none() {
         eprintln!("ortak-worker: memory configuration unavailable; new work is paused");
@@ -174,9 +192,34 @@ async fn run() -> Result<(), &'static str> {
             }
         })
         .unwrap_or_else(WorkerMemory::disabled);
+    let workspace = match config.workspace {
+        Some(config) if capabilities.supports(RuntimeCapability::WorkspaceTextRead) => {
+            match WorkerWorkspace::new(control.clone(), &scope, config).await {
+                Ok(workspace) => workspace,
+                Err(_) => {
+                    eprintln!(
+                        "ortak-worker: selected workspace unavailable; file reads are paused"
+                    );
+                    WorkerWorkspace::default()
+                }
+            }
+        }
+        Some(_) => {
+            eprintln!(
+                "ortak-worker: runtime lacks selected workspace capability; file reads are paused"
+            );
+            WorkerWorkspace::default()
+        }
+        None => WorkerWorkspace::default(),
+    };
     let supervisor =
         RunSupervisor::new(control.clone(), adapter.clone(), supervisor_config.clone())
-            .with_memory(&memory);
+            .with_run_memory(ortak_runtime::reviewed_memory::ReviewedRunMemory::new(
+                &memory,
+                control.clone(),
+                scope.clone(),
+            ))
+            .with_workspace(&workspace);
     let routing_config = RoutingWorkerConfig::default();
     let worker_id = routing_config.worker_id.clone();
     let router = InboxRoutingService::new(
@@ -190,8 +233,14 @@ async fn run() -> Result<(), &'static str> {
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         interval.tick().await;
+        // Independent default-off confidential lane. Keyless retained recovery
+        // runs even with no ordinary Office signer, memory or current binding.
+        encrypted.step().await?;
         // Failures propagate to process supervision; all work remains in its
         // durable inbox/outbox/stop queue with leases and bounded retry budgets.
+        ortak_server::worker_workspace_tools::recover_reader(&control, &scope)
+            .await
+            .map_err(|_| "workspace reader recovery remains unresolved")?;
         reconcile_runtime(
             &control,
             &adapter,
@@ -201,6 +250,18 @@ async fn run() -> Result<(), &'static str> {
         )
         .await
         .map_err(|_| "runtime reconciliation failed")?;
+        ortak_runtime::postgres::workspace_tools::settle_workspace_receipts(
+            &control,
+            &scope,
+            &adapter,
+            &workspace.selected_revisions(),
+        )
+        .await
+        .map_err(|_| "workspace receipt recovery remains pending")?;
+        workspace
+            .step(&scope, &adapter)
+            .await
+            .map_err(|_| "workspace tool attempt failed")?;
         let active: bool = sqlx::query_scalar(
             "SELECT EXISTS (SELECT 1 FROM companies c
                JOIN office_company_bindings b ON b.company_id=c.id
@@ -218,7 +279,21 @@ async fn run() -> Result<(), &'static str> {
                     }
                 );
             }
+            memory
+                .advertise_reviewed(&control, &scope)
+                .await
+                .map_err(|_| "reviewed memory target advertisement failed")?;
         }
+        // Cleanup uses its retained binding after admission loss. Preparation
+        // refuses new publication; the community fence still forbids writes
+        // behind canonical quiescence, which first requires completed cleanup.
+        ortak_server::reviewed_export_worker::schedule_one(&control, &scope, &memory)
+            .await
+            .map_err(|_| "reviewed memory export attempt failed")?;
+        memory
+            .schedule_employee_export(&control, &scope)
+            .await
+            .map_err(|_| "employee memory export attempt failed")?;
         if active && can_start && delivery.is_some() && memory.ready() {
             router
                 .claim_and_route(&scope)
@@ -244,7 +319,7 @@ async fn run() -> Result<(), &'static str> {
             }
         }
         let runs = sqlx::query(
-            "SELECT id FROM runs r WHERE company_id=$1 AND runtime_adapter=$2
+            "SELECT id FROM runs r WHERE company_id=$1 AND runtime_adapter=$2 AND r.payload_mode='ordinary'
                AND status IN ('queued','running','waiting') AND runtime_run_ref IS NOT NULL
                AND ($3::uuid IS NULL OR id>$3)
                AND NOT EXISTS (SELECT 1 FROM runtime_cancellations x WHERE x.company_id=r.company_id AND x.run_id=r.id)
@@ -265,6 +340,9 @@ async fn run() -> Result<(), &'static str> {
         schedule_office_outputs(&control, &scope, config.batch_limit)
             .await
             .map_err(|_| "Office completion scheduling failed")?;
+        ortak_work::schedule_work_outputs(&control, &scope, 1)
+            .await
+            .map_err(|_| "Work completion scheduling failed")?;
         if memory.ready() {
             ortak_runtime::memory_output::schedule_memory_output(&control, &memory, &scope)
                 .await

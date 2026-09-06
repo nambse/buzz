@@ -82,11 +82,9 @@ async fn prepare() -> Result<(tokio::net::TcpListener, axum::Router), &'static s
     let redis = deadpool_redis::Config::from_url(redis_url)
         .create_pool(Some(deadpool_redis::Runtime::Tokio1))
         .map_err(|_| "Redis pool configuration failed")?;
-    let router = product_router(
-        PgControlPlane::new(pool),
-        config,
-        Arc::new(RedisNip98ReplayGuard::new(redis)),
-    )?;
+    let control = PgControlPlane::new(pool);
+    ortak_server::management::synchronize_authorizations(&control, &config).await?;
+    let router = product_router(control, config, Arc::new(RedisNip98ReplayGuard::new(redis)))?;
     let listener = tokio::net::TcpListener::bind(bind)
         .await
         .map_err(|_| "API listener bind failed")?;

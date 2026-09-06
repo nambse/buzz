@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use ortak_control::memory::MemoryResourceRequest;
 use ortak_control::{adapter::ResourceOutcome, memory::MemoryResourceOutcome};
 use ortak_domain::{EmployeeId, ProvisioningMode};
@@ -22,17 +20,10 @@ struct Page {
     pages: usize,
 }
 
-#[derive(Clone, Deserialize, Eq, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct NativeIds {
-    workspace: String,
-    peers: BTreeMap<String, String>,
-}
-
 #[derive(Clone, Eq, PartialEq)]
 pub(crate) struct ResourceIdentity {
     pub request_hash: String,
-    native_ids: NativeIds,
+    pub native_ids: crate::HonchoNativeResourceIds,
 }
 
 pub(crate) struct Resources {
@@ -86,6 +77,14 @@ impl HonchoMemoryAdapter {
                 "memory ownership receipt differs from create request",
             ));
         }
+        self.retain_verified_identity(allowed, identity)
+    }
+
+    pub(crate) fn retain_verified_identity(
+        &self,
+        allowed: &HonchoEmployeeBinding,
+        identity: ResourceIdentity,
+    ) -> Result<(), MemoryError> {
         let mut receipts = self
             .creation_receipts
             .lock()
@@ -115,7 +114,7 @@ impl HonchoMemoryAdapter {
             employee_peer: String,
             ownership: String,
             request_hash: String,
-            native_ids: NativeIds,
+            native_ids: crate::HonchoNativeResourceIds,
         }
         let b = &allowed.binding;
         let (_, value) = self
@@ -143,17 +142,7 @@ impl HonchoMemoryAdapter {
                 .request_hash
                 .bytes()
                 .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-            || !config::name(&result.native_ids.workspace)
-            || result.native_ids.peers.len() != 2
-            || ![&b.user_peer, &b.employee_peer].iter().all(|name| {
-                result
-                    .native_ids
-                    .peers
-                    .get(*name)
-                    .is_some_and(|id| config::name(id))
-            })
-            || result.native_ids.peers.get(&b.user_peer)
-                == result.native_ids.peers.get(&b.employee_peer)
+            || !result.native_ids.matches_binding(b)
         {
             return Err(rejected("memory ownership inspection differs from binding"));
         }
@@ -241,7 +230,7 @@ impl HonchoMemoryAdapter {
             .map_err(|_| unavailable("memory creation receipt state unavailable"))?
             .get(&allowed.employee_id)
             .cloned();
-        let owned = if allowed.mode == ProvisioningMode::Create && peers.len() == 2 {
+        let owned = if peers.len() == 2 {
             if let Some(expected) = expected {
                 if self.inspect_owned_identity(allowed).await? != expected {
                     return Err(rejected("memory native resource identity changed"));

@@ -39,14 +39,20 @@ use crate::repository::{
 use crate::state::{fold_status, RunStatus, TerminalRecord};
 
 mod authority;
+pub(crate) use authority::authorize_on as authorize_memory_selection_on;
 mod memory_context;
+mod reviewed_memory;
+pub(crate) mod work;
+pub mod workspace_tools;
+#[cfg(feature = "encrypted-dm")]
+pub mod confidential;
 
 /// Ceiling for `runs.error_code`.
 const MAX_ERROR_CODE_BYTES: usize = 64;
 /// Ceiling for `runs.error_message` and `runs.cancel_reason`.
 const MAX_ROW_TEXT_BYTES: usize = 2048;
 
-fn invalid(detail: String) -> RunSupervisionError {
+pub(crate) fn invalid(detail: String) -> RunSupervisionError {
     RunSupervisionError::Control(ControlError::InvalidData(detail))
 }
 
@@ -62,7 +68,7 @@ async fn lock_run(
 ) -> Result<Option<(RunStatus, Option<RuntimeRunRef>)>> {
     let row = sqlx::query(
         "SELECT status, runtime_run_ref FROM runs
-          WHERE company_id = $1 AND id = $2 FOR UPDATE",
+          WHERE company_id = $1 AND id = $2 AND payload_mode='ordinary' FOR UPDATE",
     )
     .bind(scope.company_id())
     .bind(run_id)
@@ -116,6 +122,9 @@ impl RunDispatchRepository for PgControlPlane {
         scope: &CompanyScope,
         authority: &DispatchAuthority,
     ) -> Result<PrepareOutcome> {
+        if authority.work_origin().is_some() {
+            return work::prepare(self, scope, authority).await;
+        }
         if authority.company_id() != scope.company_id() {
             return Err(invalid(
                 "dispatch authority company does not match the scope".to_owned(),
@@ -163,8 +172,8 @@ impl RunDispatchRepository for PgControlPlane {
         .bind(authority.employee_id().as_str())
         .bind(authority.employee_revision_id())
         .bind(authority.routing_decision_id())
-        .bind(authority.message_id().as_bytes().as_slice())
-        .bind(authority.root_message_id().as_bytes().as_slice())
+        .bind(authority.message_id().map(|id| id.as_bytes().to_vec()))
+        .bind(authority.root_message_id().map(|id| id.as_bytes().to_vec()))
         .bind(&authority.binding().adapter)
         .bind(witness.generation())
         .bind(witness.valid_before())
@@ -202,7 +211,7 @@ impl RunDispatchRepository for PgControlPlane {
             "SELECT id, status, runtime_run_ref, employee_revision_id, message_id, root_message_id,
                     runtime_adapter
                FROM runs
-              WHERE company_id = $1 AND routing_decision_id = $2 AND employee_id = $3
+              WHERE company_id = $1 AND routing_decision_id = $2 AND employee_id = $3 AND payload_mode='ordinary'
               FOR UPDATE",
         )
         .bind(company_id)
@@ -216,8 +225,16 @@ impl RunDispatchRepository for PgControlPlane {
         let pinned_root: Option<Vec<u8>> = run.try_get("root_message_id")?;
         let pinned_adapter: String = run.try_get("runtime_adapter")?;
         if pinned_revision != authority.employee_revision_id()
-            || pinned_message.as_deref() != Some(authority.message_id().as_bytes().as_slice())
-            || pinned_root.as_deref() != Some(authority.root_message_id().as_bytes().as_slice())
+            || pinned_message.as_deref()
+                != authority
+                    .message_id()
+                    .map(|id| id.as_bytes().to_vec())
+                    .as_deref()
+            || pinned_root.as_deref()
+                != authority
+                    .root_message_id()
+                    .map(|id| id.as_bytes().to_vec())
+                    .as_deref()
             || pinned_adapter != authority.binding().adapter
         {
             tx.rollback().await?;
@@ -375,7 +392,7 @@ impl RunDispatchRepository for PgControlPlane {
                     (SELECT count(*) FROM run_events
                       WHERE company_id = r.company_id AND run_id = r.id) AS event_count
                FROM runs r
-              WHERE r.company_id = $1 AND r.id = $2",
+              WHERE r.company_id = $1 AND r.id = $2 AND r.payload_mode='ordinary'",
         )
         .bind(scope.company_id())
         .bind(run_id)
@@ -554,5 +571,13 @@ pub(crate) async fn refresh_run_office_authority(
     scope: &CompanyScope,
     run_id: Uuid,
 ) -> Result<bool> {
+    let ordinary:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM runs WHERE company_id=$1 AND id=$2 AND payload_mode='ordinary')")
+        .bind(scope.company_id()).bind(run_id).fetch_one(control.pool()).await?;
+    if !ordinary { return Ok(false); }
+    let is_work: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM runs WHERE company_id=$1 AND id=$2 AND work_item_id IS NOT NULL)")
+        .bind(scope.company_id()).bind(run_id).fetch_one(control.pool()).await?;
+    if is_work {
+        return work::refresh(control, scope, run_id).await;
+    }
     authority::refresh_admission(control, scope, run_id).await
 }

@@ -1,19 +1,31 @@
 //! Immutable pre-start context; persisted input is never concurrency authority.
 
+mod conversation;
+mod employee;
 mod recall;
+mod reviewed;
+pub use conversation::{
+    ConversationMemoryOrigin, MAX_RENDERED_CONTEXT_BYTES, ReviewedContextRecord,
+    ReviewedConversationContext, ReviewedConversationPin, ReviewedConversationRecord,
+};
+pub use employee::{
+    EmployeeContextRecord, EmployeeMemoryOrigin, ReviewedEmployeeContext, ReviewedEmployeePin,
+    ReviewedEmployeeRecord,
+};
 pub use recall::{AdapterRunMemory, NoRunMemory, RunMemory};
+pub use reviewed::{ReviewedMemoryContext, ReviewedMemoryPin, ReviewedMemoryRecord};
 
+use ortak_control::CompanyScope;
 use ortak_control::adapter::Detail;
 use ortak_control::memory::{MemoryRecall, MemoryScope};
 use ortak_control::outbox::OutboxLease;
 use ortak_control::runtime::{RunSpec, RuntimeError};
-use ortak_control::CompanyScope;
 use ortak_domain::MemoryBinding;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::authority::{DispatchAuthority, DispatchRefusal};
 use crate::Result;
+use crate::authority::{DispatchAuthority, DispatchRefusal};
 
 /// Hard ceiling on an encoded specification and its provenance.
 pub const MAX_SNAPSHOT_BYTES: usize = 256 * 1024;
@@ -27,14 +39,25 @@ pub const MAX_CONTEXT_BYTES: usize = 16 * 1024;
 struct SnapshotWire {
     version: u8,
     company_id: Uuid,
-    routing_decision_id: Uuid,
-    message_id: String,
-    root_message_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    routing_decision_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    message_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    root_message_id: Option<String>,
     event_kind: i32,
     input_truncated: bool,
     memory_binding: Option<MemoryBinding>,
     recall: MemoryRecall,
     spec: RunSpec,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    work_origin: Option<crate::authority::WorkRunOrigin>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reviewed: Option<ReviewedMemoryContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    conversation: Option<ReviewedConversationContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    employee: Option<ReviewedEmployeeContext>,
 }
 
 /// Bounded, immutable full RunSpec and provenance. Decoding retains the exact
@@ -70,16 +93,24 @@ impl FrozenRunSnapshot {
         let mut spec = authority.run_spec(run_id)?;
         spec.context.memory_context = rendered(&recall)?;
         let wire = SnapshotWire {
-            version: 1,
+            version: if authority.work_origin().is_some() {
+                2
+            } else {
+                1
+            },
             company_id: authority.company_id(),
             routing_decision_id: authority.routing_decision_id(),
-            message_id: authority.message_id().to_hex(),
-            root_message_id: authority.root_message_id().to_hex(),
+            message_id: authority.message_id().map(|id| id.to_hex()),
+            root_message_id: authority.root_message_id().map(|id| id.to_hex()),
             event_kind: authority.input().event_kind,
             input_truncated: authority.input().truncated,
             memory_binding: authority.memory_binding().cloned(),
             recall,
             spec,
+            work_origin: authority.work_origin().cloned(),
+            reviewed: None,
+            conversation: None,
+            employee: None,
         };
         let bytes = serde_json::to_vec(&wire).map_err(|_| rejected())?;
         Self::decode(&bytes, authority, run_id)
@@ -91,7 +122,18 @@ impl FrozenRunSnapshot {
         if bytes.is_empty() || bytes.len() > MAX_SNAPSHOT_BYTES {
             return Err(rejected());
         }
-        let wire = serde_json::from_slice(bytes).map_err(|_| rejected())?;
+        // Decode the closed typed wire first so duplicate fields remain invalid.
+        let wire: SnapshotWire = serde_json::from_slice(bytes).map_err(|_| rejected())?;
+        // Absence is part of the version contract, including explicit nulls.
+        // Do not tighten the historical reviewed-null behavior of versions1–3.
+        let fields: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| rejected())?;
+        if (wire.version != 4 && fields.get("conversation").is_some())
+            || (wire.version == 4 && fields.get("reviewed").is_some())
+            || (wire.version != 5 && fields.get("employee").is_some())
+            || (wire.version == 5 && fields.get("reviewed").is_some())
+        {
+            return Err(rejected());
+        }
         let value = Self {
             wire,
             bytes: bytes.to_vec(),
@@ -110,6 +152,57 @@ impl FrozenRunSnapshot {
         &self.wire.spec
     }
 
+    /// Exact reviewed attribution included in a version-three Work snapshot.
+    /// Older snapshots remain byte-identical and contain no reviewed uses.
+    pub fn reviewed(&self) -> Option<&ReviewedMemoryContext> {
+        self.wire.reviewed.as_ref()
+    }
+
+    pub(crate) fn with_reviewed(
+        mut self,
+        authority: &DispatchAuthority,
+        context: ReviewedMemoryContext,
+    ) -> Result<Self> {
+        if authority.work_origin().is_none()
+            || authority.memory_binding().is_none()
+            || self.wire.conversation.is_some()
+            || self.wire.employee.is_some()
+        {
+            return Err(rejected());
+        }
+        context.validate()?;
+        // Reviewed context is prioritized, but never broadens the total budget.
+        let remaining = MAX_CONTEXT_RECORDS.saturating_sub(context.records.len());
+        if self.wire.recall.records.len() > remaining {
+            self.wire.recall.records.truncate(remaining);
+            self.wire.recall.truncated = true;
+        }
+        let reviewed_bytes: usize = context.records.iter().map(|r| r.content.len()).sum();
+        while self
+            .wire
+            .recall
+            .records
+            .iter()
+            .map(|r| r.content.len())
+            .sum::<usize>()
+            + reviewed_bytes
+            > MAX_CONTEXT_BYTES
+        {
+            self.wire.recall.records.pop();
+            self.wire.recall.truncated = true;
+        }
+        self.wire.version = 3;
+        self.wire.spec.context.memory_context = rendered(&self.wire.recall)?;
+        self.wire
+            .spec
+            .context
+            .memory_context
+            .extend(context.rendered()?);
+        self.wire.reviewed = Some(context);
+        let bytes = serde_json::to_vec(&self.wire).map_err(|_| rejected())?;
+        Self::decode(&bytes, authority, self.wire.spec.run_id)
+    }
+
     /// Verifies fresh canonical pins and same-run provenance without trusting an
     /// old admission witness. Transactional authority must still be re-derived.
     pub fn validate_for(&self, authority: &DispatchAuthority, run_id: Uuid) -> Result<()> {
@@ -118,11 +211,25 @@ impl FrozenRunSnapshot {
             .map_err(|_| rejected())?;
         let wire = &self.wire;
         if run_id.is_nil()
-            || wire.version != 1
+            || !matches!(
+                (
+                    wire.version,
+                    authority.work_origin().is_some(),
+                    wire.reviewed.is_some(),
+                    wire.conversation.is_some(),
+                    wire.employee.is_some()
+                ),
+                (1, false, false, false, false)
+                    | (2, true, false, false, false)
+                    | (3, true, true, false, false)
+                    | (4, _, false, true, false)
+                    | (5, _, false, false, true)
+            )
             || wire.company_id != authority.company_id()
             || wire.routing_decision_id != authority.routing_decision_id()
-            || wire.message_id != authority.message_id().to_hex()
-            || wire.root_message_id != authority.root_message_id().to_hex()
+            || wire.message_id != authority.message_id().map(|id| id.to_hex())
+            || wire.root_message_id != authority.root_message_id().map(|id| id.to_hex())
+            || wire.work_origin.as_ref() != authority.work_origin()
             || wire.event_kind != authority.input().event_kind
             || wire.input_truncated != authority.input().truncated
             || wire.memory_binding.as_ref() != authority.memory_binding()
@@ -135,6 +242,82 @@ impl FrozenRunSnapshot {
         validate_recall(authority, run_id, &wire.recall)?;
         let mut expected = authority.run_spec(run_id)?;
         expected.context.memory_context = rendered(&wire.recall)?;
+        if let Some(reviewed) = &wire.reviewed {
+            reviewed.validate()?;
+            let bytes: usize = wire
+                .recall
+                .records
+                .iter()
+                .map(|r| r.content.len())
+                .sum::<usize>()
+                + reviewed
+                    .records
+                    .iter()
+                    .map(|r| r.content.len())
+                    .sum::<usize>();
+            if authority.memory_binding().is_none()
+                || wire.recall.records.len() + reviewed.records.len() > MAX_CONTEXT_RECORDS
+                || bytes > MAX_CONTEXT_BYTES
+            {
+                return Err(rejected());
+            }
+            expected.context.memory_context.extend(reviewed.rendered()?);
+        }
+        if let Some(conversation) = &wire.conversation {
+            conversation.validate_for(authority)?;
+            let bytes = wire
+                .recall
+                .records
+                .iter()
+                .map(|r| r.content.len())
+                .sum::<usize>()
+                + conversation
+                    .records
+                    .iter()
+                    .map(|r| r.content().len())
+                    .sum::<usize>();
+            if wire.recall.records.len() + conversation.records.len() > MAX_CONTEXT_RECORDS
+                || bytes > MAX_CONTEXT_BYTES
+            {
+                return Err(rejected());
+            }
+            expected
+                .context
+                .memory_context
+                .extend(conversation.rendered()?);
+        }
+        if let Some(employee) = &wire.employee {
+            employee.validate_for(authority)?;
+            let bytes = wire
+                .recall
+                .records
+                .iter()
+                .map(|r| r.content.len())
+                .sum::<usize>()
+                + employee
+                    .records
+                    .iter()
+                    .map(|r| r.content().len())
+                    .sum::<usize>();
+            if wire.recall.records.len() + employee.records.len() > MAX_CONTEXT_RECORDS
+                || bytes > MAX_CONTEXT_BYTES
+            {
+                return Err(rejected());
+            }
+            expected.context.memory_context = employee.rendered()?;
+            expected
+                .context
+                .memory_context
+                .extend(rendered(&wire.recall)?);
+            if expected
+                .context
+                .memory_context
+                .iter()
+                .any(|s| s.len() > MAX_RENDERED_CONTEXT_BYTES)
+            {
+                return Err(rejected());
+            }
+        }
         if expected != wire.spec || wire.spec.validate().is_err() {
             return Err(rejected());
         }

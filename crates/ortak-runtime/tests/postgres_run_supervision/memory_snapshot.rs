@@ -10,8 +10,8 @@ fn empty_snapshot(authority: &ortak_runtime::DispatchAuthority, run_id: Uuid) ->
     let wire = serde_json::json!({
         "version":1,"company_id":authority.company_id(),
         "routing_decision_id":authority.routing_decision_id(),
-        "message_id":authority.message_id().to_hex(),
-        "root_message_id":authority.root_message_id().to_hex(),
+        "message_id":authority.message_id().unwrap().to_hex(),
+        "root_message_id":authority.root_message_id().unwrap().to_hex(),
         "event_kind":authority.input().event_kind,
         "input_truncated":authority.input().truncated,
         "memory_binding":authority.memory_binding(),

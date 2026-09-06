@@ -53,9 +53,11 @@ async fn http_contract_rechecks_expiry_after_delayed_owned_inspection() {
         service.recall(&recall).await,
         Err(MemoryError::Unsupported { .. })
     ));
-    assert!(server.state.lock().unwrap().calls[before..]
-        .iter()
-        .all(|(_, path, _)| !path.ends_with("/remember") && !path.ends_with("/recall")));
+    assert!(
+        server.state.lock().unwrap().calls[before..]
+            .iter()
+            .all(|(_, path, _)| !path.ends_with("/remember") && !path.ends_with("/recall"))
+    );
     refresh_short_witness();
     assert!(!service.health(&allowed.binding).await.unwrap().is_healthy());
     refresh_short_witness();
@@ -97,9 +99,11 @@ async fn http_contract_replaced_native_ids_cannot_reuse_matching_metadata() {
             .await,
         Err(MemoryError::Rejected { .. })
     ));
-    assert!(server.state.lock().unwrap().calls[before..]
-        .iter()
-        .all(|(_, path, _)| !path.ends_with("/recall")));
+    assert!(
+        server.state.lock().unwrap().calls[before..]
+            .iter()
+            .all(|(_, path, _)| !path.ends_with("/recall"))
+    );
 }
 
 #[tokio::test]
@@ -118,24 +122,32 @@ async fn http_contract_resume_is_read_only_and_requires_original_receipt() {
     let before = server.state.lock().unwrap().calls.len();
     restarted.resume_created_resources(&request).await.unwrap();
     assert!(!restarted.witnessed(allowed).unwrap());
-    assert!(server.state.lock().unwrap().calls[before..]
-        .iter()
-        .all(|(_, path, _)| path == "/v3/ortak/protocol" || path.ends_with("/resources/inspect")));
+    assert!(
+        server.state.lock().unwrap().calls[before..]
+            .iter()
+            .all(
+                |(_, path, _)| path == "/v3/ortak/protocol" || path.ends_with("/resources/inspect")
+            )
+    );
     restarted
         .validate_memory_roundtrip(&gate(&config))
         .await
         .unwrap();
     let mut wrong = request.clone();
     wrong.idempotency_key = "other-create".into();
-    assert!(adapter(Uuid::from_u128(1), config.clone())
-        .resume_created_resources(&wrong)
-        .await
-        .is_err());
+    assert!(
+        adapter(Uuid::from_u128(1), config.clone())
+            .resume_created_resources(&wrong)
+            .await
+            .is_err()
+    );
     server.state.lock().unwrap().fault = Some("inspect_absent");
-    assert!(adapter(Uuid::from_u128(1), config.clone())
-        .resume_created_resources(&request)
-        .await
-        .is_err());
+    assert!(
+        adapter(Uuid::from_u128(1), config.clone())
+            .resume_created_resources(&request)
+            .await
+            .is_err()
+    );
     assert_eq!(
         server
             .state

@@ -16,6 +16,7 @@ const INSTRUCTION: &str = "Score relevance of the human message to every supplie
 
 pub(crate) struct Request {
     pub bytes: Vec<u8>,
+    pub data: serde_json::Value,
     pub key: [u8; 32],
     pub redacted: bool,
 }
@@ -61,12 +62,11 @@ pub(crate) fn build(
             "domains": candidate.domains().iter().map(|s| clean(s)).collect::<Result<Vec<_>,_>>()?,
         }));
     }
-    let data = serde_json::to_string(&json!({"message":message,"candidates":candidates}))
-        .map_err(|_| "input_encoding")?;
+    let data = json!({"message":message,"candidates":candidates});
     let body = json!({
         "model":config.model, "n":1, "stream":false, "store":false,
         "max_completion_tokens":4096,
-        "messages":[{"role":"system","content":INSTRUCTION},{"role":"user","content":data}],
+        "messages":[{"role":"system","content":INSTRUCTION},{"role":"user","content":data.to_string()}],
         "response_format":{"type":"json_schema","json_schema":{
             "name":"ortak_routing_scores","strict":true,"schema":{
                 "type":"object","additionalProperties":false,"required":["scores"],
@@ -116,6 +116,7 @@ pub(crate) fn build(
     let identity = serde_json::to_vec(&identity).map_err(|_| "input_encoding")?;
     Ok(Request {
         bytes,
+        data,
         key: Sha256::digest(identity).into(),
         redacted,
     })

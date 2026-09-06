@@ -22,9 +22,17 @@ pub async fn lock_office_authority_on(
         .fetch_one(&mut *connection)
         .await?;
     let valid_before: Option<DateTime<Utc>> = sqlx::query_scalar(
-        "SELECT min(boundary) FROM employee_office_bindings b
+        "SELECT min(boundary) FROM (
+         SELECT boundary FROM employee_office_bindings b
          CROSS JOIN LATERAL (VALUES (b.valid_from), (b.valid_until)) AS dates(boundary)
-         WHERE b.company_id = $1 AND boundary > clock_timestamp()",
+         WHERE b.company_id = $1
+         UNION ALL
+         SELECT ch.ttl_deadline FROM office_routing_cohorts c
+         JOIN office_routing_channels s ON s.company_id=c.company_id AND s.community_id=c.community_id
+         JOIN channels ch ON ch.community_id=s.community_id AND ch.id=s.channel_id
+         WHERE c.company_id=$1 AND c.state='enabled' AND ch.channel_type='dm'
+           AND ch.archived_at IS NULL AND ch.deleted_at IS NULL
+         ) boundaries WHERE boundary > clock_timestamp()",
     )
     .bind(scope.company_id())
     .fetch_one(&mut *connection)

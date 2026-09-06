@@ -29,12 +29,26 @@
     "entrypoint.sh": "8f7a87566028375997837320d80b683a9c97749fd0c0bd8d3db99c2e9e2ead4e",
     "honcho-source-lock.json": "19881b3434d0373e292d579037feb97e90a7f411eb1ae0f1bd98d3258a206acb",
     "ortak_honcho/__init__.py": "bf7a9e8111c620523aea99e55d1fb253cd2b190d9411d1ae5de18a8f06b94697",
-    "ortak_honcho/app.py": "e4424672d74a58469d6ec1402d4a3d848a318f6facb5c6403c61199f4753d2eb",
+    "ortak_honcho/app.py": "4c1f64a4dd19490730d11dbf63d61c70de9d384f614bb2e57cebeee89a4d5eac",
     "ortak_honcho/database.py": "7ba7af33aa25c7f6b349828a32686ef24308b60d455e371267e3316a12eb92b0",
-    "ortak_honcho/init_db.py": "a6b75b0e91cfb690351744bf9ac4c22b6e907bcb0f7a3a8e94d0d6b24fb9cb05",
-    "ortak_honcho/models.py": "43d7f2a344252bd6a9304a6dbea715e5c4be3f5b68a774a85f4b5e624a684577",
+    "ortak_honcho/init_db.py": "52b098d42a9c382a827e2a2ff7d07f16a670b8c1559fedd82d83240c66314628",
+    "ortak_honcho/models.py": "e268c298bdff20102dfcc2aff58e6b9e75d76632d5836329e51ff19ebb8c2fc7",
     "ortak_honcho/recall.py": "6072e745d9528a9481911614097654f47ce76142dcb1280732e32e9e306c66c2",
     "ortak_honcho/resources.py": "fe35b7aa43ff4def9882bf8b0ba957eee66e125a94199cee2303abc7f06cdba1",
+    "ortak_honcho/reviewed.py": "d1afd456292714cb092e18bcabe7d8a7296cb2e1bc5e355f663fcbbd3f8d61a1",
+    "ortak_honcho/reviewed_employee.py": "7666d987eaea2e295f6ee13fd79cdc339f5fc2ac9c94ba5517d6bf24b6e2705a",
+    "ortak_honcho/reviewed_employee_diagnostics.py": "89e2859ca80c1714c3f2537c4ed9964cda33d8014d9d9482744c235b7568ca8a",
+    "ortak_honcho/reviewed_employee_guards.py": "7c618b555ca8e139ae9862647fbd5cb471bd5c6b77bb607f339488d31d2b6aba",
+    "ortak_honcho/reviewed_employee_models.py": "ad02ac1330fda8fe0d84f88d2150d6734b3219a30d18ca7c6d640497d59fdfdc",
+    "ortak_honcho/reviewed_employee_provenance.py": "e6adc696322facffc4fc427cf2b219b2773faea7a6ef5f16c59b3366f40654da",
+    "ortak_honcho/reviewed_employee_routes.py": "907c2d54699ceab966e96f06ca0590952900199173af39dd20842b4642b80dca",
+    "ortak_honcho/reviewed_employee_schemas.py": "398a1d29df51119eab6e5bb91d170f90e254d75e95933f530ad32d6e2eec78a4",
+    "ortak_honcho/reviewed_employee_store.py": "a2ed6f08e7f921420cc23af7ed368f28f0b4571bc4987eb78df0f9c46d2bc01d",
+    "ortak_honcho/reviewed_guards.py": "82dcbadc3fce26dd7f9eabe163abfacbd9cce55843b1efede9bd8da32536b147",
+    "ortak_honcho/reviewed_models.py": "f37b15854af8fdb18902077be081871f5c5d78d9fcda5b60fe905571526dd3d9",
+    "ortak_honcho/reviewed_routes.py": "18451da76594c670a4895a150f817cfdeb7c8779ea577c920073e22210edf115",
+    "ortak_honcho/reviewed_schemas.py": "10b06d2bf4a25d1f80e7ecbb8468706c2380eb5b25e11ad82a62a7459647837c",
+    "ortak_honcho/reviewed_store.py": "8c2de52de7ede542d27a484bf64e2cb1f818f286cd0b834fe6774da805bfd380",
     "ortak_honcho/schemas.py": "d17e8110eb6b76b7aa45d6159ebc8154817e46bb4642e29417bcae16ff8536bd",
     "ortak_honcho/service.py": "4b5640e7c78a8260671bfd76f8f20f1cbc91d5ba551921712a483950c4fe1022",
     "prepare_source.py": "2010621292e731b879052b228e6c3c7e748e6ae6cac28e535eb75082924c303d",
@@ -42,17 +56,87 @@
     "smoke_http.py": "c7428e9e37c33e3167855070172eda5960837ee1ef181f89388148168600e796",
     "test_build_image.py": "b4e79042b60d63b9a315ff03a94afd3cf6e809e31829cabe51f45a5a6762fe6f",
     "tests/__init__.py": "45c4f63a203c1b3b603114f48ebe1864657229d785bce1a045263d10cd158b15",
-    "tests/conftest.py": "af997fb42d7241601fe5c804d02ebe01c7b780cc3b28b54835acd831b602f519",
+    "tests/conftest.py": "3559766c2d831470eadfd2759ecb7e0935acd1fcb99e8fe41b36b64e6d9d5187",
+    "tests/employee_reviewed_fixture.py": "8711287147748cb44ec7555e73597cee7a6ab6d8cc3becea9b573209ac2d2573",
     "tests/restart_probe.py": "e4d5160002df3fa841a07fab443e7e4c59813e3e217420bbbb708d661e35f2d4",
     "tests/test_atomic.py": "5aebac3a67683d756f6d0a8f7ba63d7ad5ed9857bd60964fe944c544b002dfd4",
     "tests/test_authority.py": "db23a860663fa1d01604ddaf85d7ab10924bef147a50cda88b3670e41df68610",
+    "tests/test_employee_reviewed_atomic.py": "d5962aab525c6112c2df8570051c4c956806fde9d068f8d16acb123b677c2e8e",
+    "tests/test_employee_reviewed_authority.py": "a5d3bac19defb1b1f5ccfff96fde482d430ddef791f3b1486bc718a3deb7f354",
+    "tests/test_employee_reviewed_diagnostics.py": "8c70f02fa7aa5fc14d7f018e03ed67f02d812945816e9d4d74ebe6d7693ab211",
+    "tests/test_employee_reviewed_records.py": "22a2e818ce6fd0727a6347eff83f9c715d46af775caa4041f7073e15e5268bc0",
     "tests/test_recall.py": "4af5668783d35a7a669f07c254712df3047faec3d1ec5ed9f18bb7f6ba019ea7",
-    "tests/test_resource_inspect.py": "458514b83d89833bd3176f31ea38a78bae5edb2ab3855445aeaf7c6d848497d7"
+    "tests/test_resource_inspect.py": "458514b83d89833bd3176f31ea38a78bae5edb2ab3855445aeaf7c6d848497d7",
+    "tests/test_reviewed_records.py": "34c50ae3153e31439c290c5fc205e06a1cf6f4943059f2d01b65731be96cd6de",
+    "tests/test_reviewed_selected.py": "5ebaa9764c5bbd4dc76a0e6719a8bff7a0e1d951d1ec60c8c27043908d827380"
   },
   "read_only_resource_inspection": {
     "method": "POST",
     "path": "/v3/ortak/workspaces/{workspace_id}/resources/inspect",
     "authorization": "native workspace JWT",
     "identity": "immutable creation request hash and native IDs checked against current locked rows"
+  },
+  "additional_protocols": [
+    "reviewed-project/1",
+    "reviewed-employee/1"
+  ],
+  "reviewed_record_tables": {
+    "ortak_reviewed_records": [
+      "workspace_id",
+      "project_id",
+      "record_id"
+    ],
+    "ortak_reviewed_record_content": [
+      "workspace_id",
+      "project_id",
+      "record_id"
+    ],
+    "ortak_reviewed_tombstones": [
+      "workspace_id",
+      "project_id",
+      "record_id"
+    ],
+    "ortak_reviewed_operations": [
+      "workspace_id",
+      "project_id",
+      "idempotency_key"
+    ]
+  },
+  "employee_reviewed_tables": {
+    "ortak_employee_reviewed_records": [
+      "workspace_id",
+      "employee_id",
+      "record_id"
+    ],
+    "ortak_employee_reviewed_content": [
+      "workspace_id",
+      "employee_id",
+      "record_id"
+    ],
+    "ortak_employee_reviewed_tombstones": [
+      "workspace_id",
+      "employee_id",
+      "record_id"
+    ],
+    "ortak_employee_reviewed_operations": [
+      "workspace_id",
+      "employee_id",
+      "idempotency_key"
+    ],
+    "ortak_employee_diagnostics": [
+      "workspace_id",
+      "employee_id",
+      "operation_id"
+    ],
+    "ortak_employee_diagnostic_content": [
+      "workspace_id",
+      "employee_id",
+      "operation_id"
+    ],
+    "ortak_employee_diagnostic_tombstones": [
+      "workspace_id",
+      "employee_id",
+      "operation_id"
+    ]
   }
 }

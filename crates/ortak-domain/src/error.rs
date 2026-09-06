@@ -112,6 +112,9 @@ pub enum DomainError {
     /// The dependency already exists.
     #[error("dependency already exists")]
     DuplicateWorkDependency,
+    /// Only an existing active dependency can be removed.
+    #[error("work dependency is not active")]
+    UnknownWorkDependency,
     /// The criterion does not belong to the work item.
     #[error("unknown acceptance criterion")]
     UnknownCriterion,
@@ -127,6 +130,9 @@ pub enum DomainError {
     /// The employee already holds an active assignment on the item.
     #[error("employee is already assigned")]
     DuplicateAssignment,
+    /// Only an active assignment can be released or replaced.
+    #[error("employee has no active assignment on this work item")]
+    AssignmentNotActive,
     /// The record is already attached.
     #[error("record is already attached")]
     DuplicateAttachment,

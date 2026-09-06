@@ -6,6 +6,8 @@ from sqlalchemy import text
 from src.db import Base, engine
 
 from .models import TABLES
+from .reviewed_guards import install as install_reviewed_guards
+from .reviewed_employee_guards import install as install_employee_reviewed_guards
 
 
 async def initialize():
@@ -18,6 +20,8 @@ async def initialize():
         await connection.run_sync(
             lambda sync: Base.metadata.create_all(sync, tables=TABLES)
         )
+        await install_reviewed_guards(connection)
+        await install_employee_reviewed_guards(connection)
     await engine.dispose()
 
 

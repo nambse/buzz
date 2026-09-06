@@ -63,9 +63,10 @@ class Containment(unittest.TestCase):
                      'context': {}, 'idempotency_key': self.key}
         self.engine = Engine()
 
-    def executor(self):
+    def executor(self, *, workspace=False):
         executor = DockerExecutor(self.journal, self.company, [self.profile], IMAGE,
-                                  'ortak-private-test', self.engine, validated_digest=IMAGE)
+                                  'ortak-private-test', self.engine, validated_digest=IMAGE,
+                                  workspace_validated_digest=IMAGE if workspace else None)
         self.addCleanup(executor.close)
         return executor
 
@@ -73,6 +74,44 @@ class Containment(unittest.TestCase):
         for image, digest in [('example:latest', None), (IMAGE, None)]:
             with self.subTest(image=image), self.assertRaises(BridgeError):
                 DockerExecutor(self.journal, self.company, [self.profile], image, 'ortak-private', self.engine, validated_digest=digest)
+
+    def test_workspace_grant_enters_stdin_without_any_new_mount_or_credential_path(self):
+        from test_workspace_tools import selected
+        grant, _ = selected(self.spec, self.company)
+        executor = self.executor(workspace=True)
+        self.journal.reserve(self.spec, workspace=grant)
+        executor.start(self.spec, self.journal, workspace=grant)
+        _, args, payload = self.engine.calls[-1]
+        request = json.loads(payload)
+        self.assertEqual(request, {'company_id': self.company, 'spec': self.spec, 'workspace': grant})
+        mounts = [args[index + 1] for index, arg in enumerate(args) if arg == '--mount']
+        self.assertEqual(mounts, [f'type=bind,src={self.profile_dir},dst=/profile,readonly',
+                                  f'type=bind,src={self.root / "state"},dst=/ortak-state'])
+        self.assertNotIn(grant['files'][0]['file_id'], repr(args))
+        with patch.object(executor, 'validate_profile', side_effect=AssertionError('credential/profile I/O before policy gate')) as validate:
+            with self.assertRaisesRegex(BridgeError, 'invalid_workspace'):
+                executor.start(self.spec, self.journal, workspace={**grant, 'manifest_hash': '0' * 64})
+            validate.assert_not_called()
+
+    def test_workspace_capability_requires_second_exact_image_validation(self):
+        from test_workspace_tools import selected
+        grant, _ = selected(self.spec, self.company)
+        executor = self.executor()
+        bridge = Bridge(self.journal, self.company, [self.profile], executor)
+        self.assertTrue(executor.available)
+        self.assertFalse(executor.workspace_text_read)
+        self.assertNotIn('workspace_text_read', bridge.dispatch('GET', '/v1/capabilities')['capabilities'])
+        with self.assertRaisesRegex(BridgeError, 'unsupported_permission_policy'):
+            bridge.dispatch('POST', '/v1/runs', {'company_id': self.company, 'spec': self.spec, 'workspace': grant})
+        self.assertIsNone(self.journal.lookup(self.key))
+        self.assertEqual(self.engine.calls, [])
+        with patch.object(executor, 'validate_profile', side_effect=AssertionError('profile access before capability gate')) as validate:
+            with self.assertRaisesRegex(BridgeError, 'unsupported_permission_policy'):
+                executor.start(self.spec, self.journal, workspace=grant)
+            validate.assert_not_called()
+        with self.assertRaisesRegex(BridgeError, 'workspace_executor_validation_required'):
+            DockerExecutor(self.journal, self.company, [self.profile], IMAGE, 'ortak-private-test',
+                           self.engine, validated_digest=IMAGE, workspace_validated_digest='sha256:' + 'b' * 64)
 
     def test_launch_is_contained_no_gateway_entrypoint_no_secret_argv(self):
         executor = self.executor()
@@ -173,6 +212,66 @@ class Containment(unittest.TestCase):
         with patch.object(engine, 'command', return_value=(1, '')):
             self.assertFalse(engine.stop(self.key, IMAGE))
             self.assertFalse(engine.stopped(container_name(self.key)))
+
+    def test_stop_proof_survives_auto_remove_between_list_and_inspect(self):
+        engine = DockerEngine()
+        name = container_name(self.key)
+        # The deadline loop observes exited, then the separate whole-container
+        # proof races --rm. Both proofs need successful daemon evidence.
+        replies = [(0, name), (0, 'false'), (0, name), (1, ''), (0, '')]
+        with patch.object(engine, 'command', side_effect=replies) as command:
+            self.assertTrue(engine.stopped(name))
+            self.assertTrue(engine.stopped(name))
+            self.assertEqual(command.call_count, 5)
+            self.assertEqual(command.call_args_list[4].args[0],
+                             command.call_args_list[2].args[0])
+
+    def test_failed_inspect_requires_fresh_successful_empty_list(self):
+        engine = DockerEngine()
+        name = container_name(self.key)
+        for final_list in ((1, ''), (0, name), (0, 'unexpected-name')):
+            with self.subTest(final_list=final_list), patch.object(
+                    engine, 'command', side_effect=[(0, name), (1, ''), final_list]) as command:
+                self.assertFalse(engine.stopped(name))
+                self.assertEqual(command.call_count, 3)
+        with patch.object(engine, 'command', side_effect=[
+                (0, name), (1, ''), BridgeError('container_engine_unavailable', 503)]):
+            with self.assertRaisesRegex(BridgeError, 'container_engine_unavailable'):
+                engine.stopped(name)
+
+    def test_running_or_invalid_inspect_does_not_retry_into_absence(self):
+        engine = DockerEngine()
+        name = container_name(self.key)
+        for state in ('true', '', 'False', 'false\ntrue'):
+            with self.subTest(state=state), patch.object(
+                    engine, 'command', side_effect=[(0, name), (0, state)]) as command:
+                self.assertFalse(engine.stopped(name))
+                self.assertEqual(command.call_count, 2)
+
+    def test_auto_remove_proof_uses_bounded_real_cli_commands(self):
+        name = container_name(self.key)
+        binary = self.root / 'fixture-docker'
+        trace = self.root / 'fixture-docker-calls.json'
+        for last_code, expected in ((0, True), (1, False)):
+            with self.subTest(last_code=last_code):
+                trace.write_text('[]')
+                replies = [(0, name), (1, ''), (last_code, '')]
+                binary.write_text(f'#!{sys.executable}\n' +
+                    'import json, sys\nfrom pathlib import Path\n' +
+                    f'trace = Path({str(trace)!r})\n' +
+                    'calls = json.loads(trace.read_text())\n' +
+                    f'code, value = {replies!r}[len(calls)]\n' +
+                    'calls.append(sys.argv[1:])\ntrace.write_text(json.dumps(calls))\n' +
+                    'print(value)\nsys.exit(code)\n')
+                binary.chmod(0o700)
+                self.assertEqual(DockerEngine(str(binary)).stopped(name), expected)
+                calls = json.loads(trace.read_text())
+                self.assertEqual(len(calls), 3)
+                self.assertEqual(calls[0], calls[2])
+                self.assertEqual(calls[0], ['container', 'ls', '--all', '--filter',
+                    f'name=^/{name}$', '--format', '{{.Names}}'])
+                self.assertEqual(calls[1], ['container', 'inspect', '--format',
+                    '{{.State.Running}}', name])
 
     def test_wrong_image_or_owner_is_never_removed(self):
         engine = DockerEngine()

@@ -1,14 +1,14 @@
 use axum::{
+    Extension, Json, Router,
     extract::{
-        rejection::{JsonRejection, QueryRejection},
         Path, Query, State,
+        rejection::{JsonRejection, QueryRejection},
     },
     http::StatusCode,
     routing::{get, post},
-    Extension, Json, Router,
 };
 use ortak_work::{WorkListCursor, WorkListQuery, WorkMutation};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -31,12 +31,88 @@ pub(crate) fn router() -> Router<ApiState> {
         .route("/api/v1/projects", get(projects).post(create_project))
         .route("/api/v1/projects/{project_id}", get(project))
         .route(
+            "/api/v1/projects/{project_id}/conversation-memory",
+            get(super::conversation_memory::list).post(super::conversation_memory::approve),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/conversation-memory/preview",
+            post(super::conversation_memory::preview),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/conversation-memory/{fact_id}/stop",
+            post(super::conversation_memory::revoke),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/conversation-memory/{fact_id}/publish",
+            post(super::reviewed_exports::publish_conversation),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/conversation-memory/{fact_id}/exports/{action}/retry",
+            post(super::reviewed_exports::retry_conversation),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/reviewed-memory",
+            get(super::facts::list).post(super::facts::approve),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/reviewed-memory/recall",
+            post(super::facts::recall),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/reviewed-memory/{fact_id}/stop",
+            post(super::facts::revoke),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/reviewed-memory/{fact_id}/publish",
+            post(super::reviewed_exports::publish),
+        )
+        .route(
+            "/api/v1/projects/{project_id}/reviewed-memory/{fact_id}/exports/{action}/retry",
+            post(super::reviewed_exports::retry),
+        )
+        .route(
             "/api/v1/projects/{project_id}/work-items",
             get(work_list).post(create_work),
         )
         .route("/api/v1/projects/{project_id}/promotions", post(promote))
         .route("/api/v1/work-items/{item_id}", get(work_detail))
+        .route(
+            "/api/v1/work-items/{item_id}/decomposition",
+            get(super::decomposition::list),
+        )
+        .route(
+            "/api/v1/work-items/{item_id}/children",
+            post(super::decomposition::create),
+        )
+        .route(
+            "/api/v1/work-items/{item_id}/dependencies",
+            get(super::dependencies::list).post(super::dependencies::add),
+        )
+        .route(
+            "/api/v1/work-items/{item_id}/dependencies/{dependency_id}/remove",
+            post(super::dependencies::remove),
+        )
+        .route(
+            "/api/v1/work-items/{item_id}/executions",
+            get(super::execution::list).post(super::execution::start),
+        )
+        .route(
+            "/api/v1/work-items/{item_id}/artifacts/{artifact_id}",
+            get(super::execution::artifact),
+        )
+        .route(
+            "/api/v1/work-items/{item_id}/definition",
+            post(super::definition::edit),
+        )
         .route("/api/v1/work-items/{item_id}/assignments", post(assign))
+        .route(
+            "/api/v1/work-items/{item_id}/assignments/{employee_id}/release",
+            post(super::assignment::release),
+        )
+        .route(
+            "/api/v1/work-items/{item_id}/assignments/{employee_id}/reassign",
+            post(super::assignment::reassign),
+        )
         .route("/api/v1/work-items/{item_id}/transitions", post(transition))
         .route(
             "/api/v1/work-items/{item_id}/criteria/{criterion_id}/satisfy",
@@ -298,7 +374,7 @@ async fn resolve(
     .await
 }
 
-async fn mutate(
+pub(super) async fn mutate(
     state: &ApiState,
     p: &Principal,
     operation: Uuid,

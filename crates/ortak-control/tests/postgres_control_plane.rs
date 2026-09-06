@@ -34,6 +34,8 @@ use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
+mod cohort_support;
+
 const DEFAULT_DATABASE_URL: &str = "postgres://buzz:buzz_dev@localhost:5432/buzz"; // sadscan:disable np.postgres.1 -- local test-only credentials
 
 fn database_url() -> String {
@@ -108,6 +110,19 @@ impl Fixture {
             .await
             .expect("resolve company through the binding");
         assert_eq!(scope.company_id(), company_id);
+        if !revisions.is_empty() {
+            let channel: Uuid = sqlx::query_scalar(
+                "INSERT INTO channels(community_id,name,created_by) VALUES ($1,$2,$3) RETURNING id",
+            )
+            .bind(community_id)
+            .bind(format!("control-cohort-{company_id}"))
+            .bind([7u8; 32].as_slice())
+            .fetch_one(&pool)
+            .await
+            .expect("cohort fixture channel");
+            let employees: Vec<_> = revisions.keys().map(|id| employee_id(id)).collect();
+            cohort_support::select_and_reconcile(&control, &scope, &[channel], &employees).await;
+        }
         Self {
             pool,
             control,
@@ -1194,7 +1209,11 @@ impl SemanticScorer for RevisionChangingScorer {
         }
     }
 
-    async fn score(&self, input: &SemanticScoringInput) -> ScoringOutcome {
+    async fn score(
+        &self,
+        input: &SemanticScoringInput,
+        _budget: ortak_control::ScoringBudget,
+    ) -> ScoringOutcome {
         assert_eq!(input.company_id(), self.company_id);
         assert_eq!(input.candidates().len(), input.request().candidates().len());
         let request = input.request();
@@ -1338,3 +1357,6 @@ mod semantic;
 
 #[path = "postgres_control_plane/claim_expiry.rs"]
 mod claim_expiry;
+
+#[path = "postgres_control_plane/cohort.rs"]
+mod cohort;

@@ -28,6 +28,10 @@ pub enum DispatchRefusal {
     CompanyNotActive,
     /// Canonical Office authorization changed since the committed decision.
     OfficeAuthorityChanged,
+    /// Current Work project, source, assignment or execution version changed.
+    WorkAuthorityChanged,
+    /// A disable invalidated the employee lifecycle pinned by this work.
+    EmployeeLifecycleChanged,
     /// The outbox row names no routing decision.
     DecisionMissing,
     /// The decision has no recipient row for the employee.
@@ -114,6 +118,8 @@ impl fmt::Display for DispatchRefusal {
             Self::CancellationRequested => formatter.write_str("run cancellation requested"),
             Self::CompanyNotActive => formatter.write_str("company is not active"),
             Self::OfficeAuthorityChanged => formatter.write_str("Office authorization changed"),
+            Self::WorkAuthorityChanged => formatter.write_str("Work authorization changed"),
+            Self::EmployeeLifecycleChanged => formatter.write_str("employee lifecycle changed"),
             Self::DecisionMissing => formatter.write_str("routing decision missing"),
             Self::RecipientMissing => formatter.write_str("routing recipient missing"),
             Self::RecipientNotWake { action } => {
@@ -355,13 +361,31 @@ pub struct DispatchAuthority {
     company_id: Uuid,
     outbox_id: Uuid,
     lease_token: Uuid,
-    routing_decision_id: Uuid,
+    routing_decision_id: Option<Uuid>,
     employee_id: EmployeeId,
     employee_revision_id: Uuid,
-    message_id: MessageId,
-    root_message_id: MessageId,
+    message_id: Option<MessageId>,
+    root_message_id: Option<MessageId>,
+    work: Option<WorkRunOrigin>,
+    work_generation: Option<i64>,
     configuration: ValidatedRunConfiguration,
     input: RunInput,
+}
+
+/// Immutable provenance of a human-requested Work run, never dispatch authority itself.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkRunOrigin {
+    /// Durable run created by the request transaction.
+    pub run_id: Uuid,
+    /// Owning Work item.
+    pub work_item_id: Uuid,
+    /// Owning project.
+    pub project_id: Uuid,
+    /// Work version created by execution request.
+    pub execution_version: i64,
+    /// Digest of immutable canonical definition bytes.
+    pub definition_hash: String,
 }
 
 impl DispatchAuthority {
@@ -384,14 +408,54 @@ impl DispatchAuthority {
             company_id,
             outbox_id,
             lease_token,
-            routing_decision_id,
+            routing_decision_id: Some(routing_decision_id),
             employee_id,
             employee_revision_id,
-            message_id,
-            root_message_id,
+            message_id: Some(message_id),
+            root_message_id: Some(root_message_id),
+            work: None,
+            work_generation: None,
             configuration,
             input,
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_work(
+        company_id: Uuid,
+        outbox_id: Uuid,
+        lease_token: Uuid,
+        employee_id: EmployeeId,
+        employee_revision_id: Uuid,
+        configuration: ValidatedRunConfiguration,
+        input: RunInput,
+        work: WorkRunOrigin,
+        generation: i64,
+    ) -> Self {
+        Self {
+            office_authority: None,
+            company_id,
+            outbox_id,
+            lease_token,
+            routing_decision_id: None,
+            employee_id,
+            employee_revision_id,
+            message_id: None,
+            root_message_id: None,
+            work: Some(work),
+            work_generation: Some(generation),
+            configuration,
+            input,
+        }
+    }
+
+    /// Work execution provenance, absent for conversational routing.
+    pub fn work_origin(&self) -> Option<&WorkRunOrigin> {
+        self.work.as_ref()
+    }
+
+    pub(crate) fn work_generation(&self) -> Option<i64> {
+        self.work_generation
     }
 
     /// Company boundary.
@@ -424,7 +488,7 @@ impl DispatchAuthority {
     }
 
     /// Routing decision that woke the employee.
-    pub fn routing_decision_id(&self) -> Uuid {
+    pub fn routing_decision_id(&self) -> Option<Uuid> {
         self.routing_decision_id
     }
 
@@ -439,12 +503,12 @@ impl DispatchAuthority {
     }
 
     /// Triggering message, from the decision row.
-    pub fn message_id(&self) -> MessageId {
+    pub fn message_id(&self) -> Option<MessageId> {
         self.message_id
     }
 
     /// Delivery-chain root, from the decision row.
-    pub fn root_message_id(&self) -> MessageId {
+    pub fn root_message_id(&self) -> Option<MessageId> {
         self.root_message_id
     }
 
@@ -485,9 +549,13 @@ impl DispatchAuthority {
             permissions: self.permissions().clone(),
             input: self.input.body.clone(),
             context: RunContext {
-                conversation_ref: self.input.channel_id.map(|channel| channel.to_string()),
-                reply_to_message_id: Some(self.message_id.to_hex()),
-                work_item_id: None,
+                conversation_ref: self
+                    .input
+                    .channel_id
+                    .filter(|_| self.work.is_none())
+                    .map(|channel| channel.to_string()),
+                reply_to_message_id: self.message_id.map(|id| id.to_hex()),
+                work_item_id: self.work.as_ref().map(|work| work.work_item_id),
                 memory_context: Vec::new(),
             },
             idempotency_key: run_idempotency_key(self.company_id, run_id),

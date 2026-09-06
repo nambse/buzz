@@ -186,3 +186,6 @@ fn superseded_validation_cannot_restore_or_inherit_a_witness() {
     assert!(!service.witnessed(&allowed).unwrap());
     assert!(service.publish_validation(&allowed, current).is_err());
 }
+
+#[path = "tests/reviewed.rs"]
+mod reviewed;

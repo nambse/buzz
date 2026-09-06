@@ -378,3 +378,6 @@ mod receipts;
 
 #[path = "authorized/queue.rs"]
 mod queue;
+
+#[path = "authorized/definition.rs"]
+mod definition;

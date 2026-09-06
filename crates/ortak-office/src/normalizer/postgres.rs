@@ -381,6 +381,13 @@ pub async fn channel_eligible_employees<'e>(
     let rows = sqlx::query(
         "SELECT DISTINCT e.id AS employee_id
            FROM employees e
+           JOIN office_routing_cohorts cohort
+             ON cohort.company_id=e.company_id AND cohort.community_id=$2 AND cohort.state='enabled'
+           JOIN office_routing_channels selected_channel
+             ON selected_channel.company_id=cohort.company_id AND selected_channel.community_id=$2
+            AND selected_channel.channel_id=$3
+           JOIN office_routing_employees selected_employee
+             ON selected_employee.company_id=e.company_id AND selected_employee.employee_id=e.id
            JOIN employee_revisions rev
              ON rev.company_id = e.company_id
             AND rev.employee_id = e.id
