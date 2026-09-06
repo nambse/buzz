@@ -7,7 +7,9 @@ API. Compilation alone does not establish a working Hermes deployment.
 
 ## Startup configuration
 
-Apply the repository migrations through 0052 before starting either process.
+The original worker baseline required migrations through0052. Use the schema
+required by the selected worker artifact; the explicit conversation-memory
+selection described below requires migration0076 and its matching runtime.
 Use a fresh isolated database, Redis namespace, company, Office channel and
 employee identities. Existing external test resources are not a default source
 of configuration or credentials.
@@ -76,6 +78,14 @@ bounded backoff. Memory I/O evidence does not prove model-provider health.
 
 The worker does not create profiles, choose provider credentials, activate
 employees, or enable independently subscribed Office gateways.
+
+Reviewed memory uses three default-empty employee selections:
+`reviewed_projects`, `reviewed_runtime_projects` and `reviewed_conversations`.
+The [worker reviewed-memory recipe](WORKER_REVIEWED_MEMORY_RECIPE.md) gives the
+exact project/channel mapping, independent consumption flags, limits and
+prepared ownership requirements. Adding a mapping is explicit opt-in; neither
+a binary upgrade nor publication alone selects it. No selection publishes a
+fact without the separate authorized action.
 
 An optional `semantic` selection enables bounded relevance evidence for
 untargeted human messages. Omission performs no credential lookup or provider
@@ -154,8 +164,9 @@ capability declarations for this evidence.
 
 Before first start the supervisor freezes the entire admitted RunSpec plus its
 bounded RunScratch recall/provenance once. Retries reuse those exact bytes and
-still require fresh Office and memory authority. No cross-run employee/project
-recall or promotion is enabled in this slice.
+still require fresh Office and memory authority. This is the default scratch
+path. Separately selected project facts use v3; explicitly selected conversation
+facts use v4 under the [reviewed-memory recipe](WORKER_REVIEWED_MEMORY_RECIPE.md).
 
 Only an acknowledged signed Office reply creates an automatic memory write job.
 The worker revalidates canonical source and pinned/current bindings, then writes

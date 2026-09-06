@@ -1,10 +1,17 @@
 # Private stack operator handoff
 
 This dated local stack uses `/private/tmp/ortak-private-20260905` and fresh
-resources. Its current recipes demonstrate parts of a private development
-installation. They do not satisfy the full install, upgrade, backup/restore,
-legacy removal or deployed workflow gates of
-[`REMAINING_WORK_V1.md` slice G](../../docs/ortak/REMAINING_WORK_V1.md).
+resources. The [current continuation record](../../docs/ortak/CONTINUATION_PROGRESS_2026-09-05.md)
+supersedes the historical gaps and artifact selections below. Schema78 fresh
+installation, baseline44→78 upgrade, populated full capture, isolated offline
+physical restore and original-source resume have now passed. The latest shared
+ChatGPT enrollment was separately verified after the captured backup.
+
+The original status command and bootstrap interfaces below retain their narrow
+scope; they do not select the latest artifacts automatically. Historical launch
+PIDs and one-shot recovery intents are not reusable start commands. Final
+reduced-package cutover is deployed; the [current user runbook](../../docs/ortak/PRIVATE_V0_RUNBOOK.md)
+contains the verified reopen command and the manual service-lifecycle limit.
 
 ## Read-only status
 

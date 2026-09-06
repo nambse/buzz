@@ -116,7 +116,8 @@ class BootstrapTests(unittest.TestCase):
 
     def run_bootstrap(self, **kwargs):
         return subject.bootstrap(self.root, kwargs.get("deployment", DEPLOYMENT),
-                                 kwargs.get("token_env", TOKEN_ENV), self.service)
+                                 kwargs.get("token_env", TOKEN_ENV), self.service,
+                                 export_prepared=kwargs.get("export_prepared", False))
 
     def state(self):
         return json.loads((self.root / "memory/bootstrap.json").read_text())
@@ -164,7 +165,8 @@ class BootstrapTests(unittest.TestCase):
         self.run_bootstrap()
         before = {path.name: path.read_bytes() for path in (self.root / "memory").iterdir()}
         self.service.calls.clear()
-        result = self.run_bootstrap()
+        with patch.object(subject, "uuid4", side_effect=AssertionError("must retain diagnostic ID")):
+            result = self.run_bootstrap()
         self.assertEqual(result["roundtrip"], "previously_verified")
         self.assertEqual(len(self.service.calls), 2)
         self.assertTrue(self.service.calls[-1][1].endswith("/resources/inspect"))
@@ -242,6 +244,116 @@ class BootstrapTests(unittest.TestCase):
         with self.assertRaises(OSError):
             self.run_bootstrap()
         self.assertEqual(self.service.calls, [])
+
+    def test_prepared_export_shares_original_receipt_and_preserves_legacy_files(self):
+        self.run_bootstrap()
+        state = self.state()
+        before = {path.name: path.read_bytes() for path in (self.root / "memory").iterdir()}
+        self.service.calls.clear()
+        with patch.object(subject, "uuid4", side_effect=AssertionError("must retain diagnostic ID")):
+            result = self.run_bootstrap(export_prepared=True)
+        self.assertEqual(result["result"], "prepared_receipts_exported")
+        self.assertEqual(result["roundtrip"], "previously_verified")
+        worker = json.loads(Path(result["worker_config"]).read_text())
+        prepared = json.loads(Path(result["prepared_memory_config"]).read_text())
+        self.assertTrue(worker["require_creation_receipts"])
+        entry = worker["employees"][0]
+        self.assertEqual(entry["creation_receipt"], prepared["creation_receipt"])
+        receipt = prepared["creation_receipt"]
+        self.assertEqual(set(receipt), {"company_id", "deployment_id", "employee_id", "binding",
+                                        "creation_key", "request_hash", "native_ids", "resources"})
+        self.assertEqual(receipt["company_id"], COMPANY)
+        self.assertEqual(receipt["deployment_id"], DEPLOYMENT)
+        self.assertEqual(receipt["creation_key"], state["intent"]["creation_key"])
+        self.assertEqual(receipt["request_hash"], state["resource_identity"]["request_hash"])
+        self.assertEqual(receipt["native_ids"], state["resource_identity"]["native_ids"])
+        workspace = state["intent"]["binding"]["workspace"]
+        self.assertEqual(receipt["resources"], {
+            "workspace": {"resource_ref": f"workspace:{workspace}", "ownership": "created"},
+            "user_peer": {"resource_ref": f"peer:{workspace}/operator-private", "ownership": "created"},
+            "employee_peer": {"resource_ref": f"peer:{workspace}/ada-private", "ownership": "created"}})
+        for key in ("validation_run_id", "validation_recorded_at"):
+            self.assertEqual(prepared[key], entry[key])
+            self.assertEqual(prepared[key], state["intent"][key])
+        self.assertEqual(set(prepared), {"origin", "token_ref", "token_env", "creation_receipt",
+                                         "validate_memory_io", "validation_run_id", "validation_recorded_at"})
+        for filename, original in before.items():
+            self.assertEqual((self.root / "memory" / filename).read_bytes(), original)
+        self.assertEqual(len(self.service.calls), 2)
+        self.assertTrue(self.service.calls[-1][1].endswith("/resources/inspect"))
+        self.assertFalse(result["employee_activated"] or result["worker_started"])
+
+    def test_prepared_export_retry_is_immutable_and_read_only(self):
+        self.run_bootstrap()
+        self.run_bootstrap(export_prepared=True)
+        before = {path.name: path.read_bytes() for path in (self.root / "memory").iterdir()}
+        self.service.calls.clear()
+        with patch.object(subject, "uuid4", side_effect=AssertionError("must retain diagnostic ID")):
+            self.run_bootstrap(export_prepared=True)
+        self.assertEqual({path.name: path.read_bytes() for path in (self.root / "memory").iterdir()}, before)
+        self.assertEqual(len(self.service.calls), 2)
+
+    def test_prepared_export_refuses_missing_or_incomplete_bootstrap(self):
+        with self.assertRaisesRegex(subject.Refused, "completed_memory_bootstrap_required"):
+            self.run_bootstrap(export_prepared=True)
+        self.assertFalse((self.root / "memory/bootstrap.json").exists())
+        self.assertEqual(self.service.calls, [])
+        self.service.lose_write_reply = True
+        with self.assertRaises(TimeoutError):
+            self.run_bootstrap()
+        self.service.calls.clear()
+        with self.assertRaisesRegex(subject.Refused, "completed_memory_bootstrap_required"):
+            self.run_bootstrap(export_prepared=True)
+        self.assertEqual(self.service.calls, [])
+        self.assertFalse((self.root / "memory/worker-memory-prepared.json").exists())
+
+    def test_prepared_export_requires_current_original_native_identity(self):
+        self.run_bootstrap()
+        self.service.calls.clear()
+        self.service.replace_identity = True
+        with self.assertRaisesRegex(subject.Refused, "native_resource_identity_changed"):
+            self.run_bootstrap(export_prepared=True)
+        self.assertFalse((self.root / "memory/worker-memory-prepared.json").exists())
+        self.assertFalse((self.root / "memory/prepared-memory.json").exists())
+        self.assertFalse(any(path.endswith("/create") or path.endswith("/remember")
+                             for _, path, _ in self.service.calls))
+
+    def test_prepared_export_tamper_and_symlink_fail_before_network(self):
+        self.run_bootstrap()
+        self.run_bootstrap(export_prepared=True)
+        path = self.root / "memory/prepared-memory.json"
+        original = path.read_bytes()
+        altered = json.loads(original)
+        altered["creation_receipt"]["native_ids"]["workspace"] = "forged-native-id"
+        subject.save(path, altered)
+        self.service.calls.clear()
+        with self.assertRaisesRegex(subject.Refused, "prepared_memory_config_changed"):
+            self.run_bootstrap(export_prepared=True)
+        self.assertEqual(self.service.calls, [])
+        path.unlink()
+        path.symlink_to(self.root / "missing")
+        with self.assertRaises(OSError):
+            self.run_bootstrap(export_prepared=True)
+        self.assertEqual(self.service.calls, [])
+
+    def test_interrupted_prepared_export_recovers_without_new_io(self):
+        self.run_bootstrap()
+        original_save = subject.save
+        def interrupt(path, value):
+            if path.name == "prepared-memory.json":
+                raise OSError("fixture interrupted second export")
+            original_save(path, value)
+        with patch.object(subject, "save", side_effect=interrupt), self.assertRaises(OSError):
+            self.run_bootstrap(export_prepared=True)
+        worker = self.root / "memory/worker-memory-prepared.json"
+        self.assertTrue(worker.exists())
+        before = worker.read_bytes()
+        self.service.calls.clear()
+        self.run_bootstrap(export_prepared=True)
+        self.assertEqual(worker.read_bytes(), before)
+        self.assertTrue((self.root / "memory/prepared-memory.json").exists())
+        self.assertEqual(len(self.service.calls), 2)
+        self.assertEqual(len(self.service.writes), 1)
 
 
 class TransportTests(unittest.TestCase):

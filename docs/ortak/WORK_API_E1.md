@@ -197,3 +197,39 @@ backup restored into a new verification database with matching103 tables,
 migration checksums and schema. Native queue rebuild passed in43.77s after
 clearing only regenerable task artifacts; its production frontend matrix also
 passed. Native OS visual interaction remains unverified.
+
+
+## Manual definition editing (E follow-up)
+
+The definition endpoint is `POST /api/v1/work-items/{item_id}/definition`.
+Central verification passed five domain tests, three actual PostgreSQL facade
+tests, two signed HTTP tests and the backend build. SQL62 is applied to the
+disposable verification databases; nine focused desktop Work tests also pass.
+Private deployment and visual/runtime acceptance for this newer editing path
+remain separate from the earlier E1 evidence above.
+
+The request contains `operation_id`, `expected_version`, and a nested
+`definition` with nullable `title` and `description`, every existing criterion
+in its original order as `{id,text}`, and optional `additional_criteria` strings.
+A null replacement preserves the canonical current value under the version
+lock; an empty description clears it. The desktop sends null for unchanged
+safe projections so redacted display text cannot overwrite canonical values
+while editing another field. Changed text keeps the existing UTF-8 byte and
+secret-like text validation. The API caps the complete criteria list at16 and
+keeps the16KiB request/receipt fingerprint limit.
+
+Only a current contributor/owner with existing human operator authority can
+edit. The project must be active; the item must be proposed, ready, in_progress
+or blocked, with every criterion and approval gate still pending. Review,
+terminal and resolved-evidence items explain why definition editing is read-only.
+Existing criterion identities/order and all recorded review evidence are retained;
+criteria may be amended or appended, never removed. Empty edits are refused.
+
+One accepted edit changes all supplied fields and children, advances one version,
+appends one bounded `work.definition_edited` history event, and records its
+operation receipt in one transaction. Replays reauthorize current project,
+channel and canonical source access, then return current state without applying
+the edit again. No runtime, dispatch, delivery or artifact action is initiated.
+History records changed field flags, criterion IDs and a canonical previous
+creation-definition hash. The first such hash preserves original promotion
+retries after definition changes, including legacy company-service retries.

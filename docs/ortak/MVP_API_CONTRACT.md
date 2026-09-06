@@ -73,6 +73,7 @@ All endpoints require fresh signed authentication. Responses are `no-store`.
 | `GET /api/v1/runs?employee_id=<id>&status=<status>&cursor=<cursor>&limit=25` | Existing Activity `RunListPage`, filtered before keyset paging. |
 | `GET /api/v1/runs/{id}` | `{detail: RunDetail, cancellation: null | Cancellation, can_request_cancel: boolean, office_delivery: null | OfficeDelivery, memory: RunMemory}` from durable Activity, delivery and request records. |
 | `GET /api/v1/runs/{id}/events?after_sequence=0&limit=100` | Existing Activity `RunEventPage`: ordered entries, exclusive next sequence, `has_more`, explicit gap signal. No raw payload option. |
+| `GET /api/v1/runs/{id}/stream?after_sequence=0` | Signed short-lived SSE; current run detail plus durable event pages, followed by pushed updates. |
 | `POST /api/v1/runs/{id}/cancel` with body `{}` | One auditable durable cancellation request. Returns202 with `status: pending` while the worker has not acknowledged a stop. |
 
 Run-list limits clamp to1–25; event pages to1–100. Run cursors retain the existing
@@ -95,16 +96,49 @@ SQL query, then reads each selected run through the real Activity query service.
 This costs at most25 detail reads per list page. Replace the bounded fan-out
 with a shared audience-aware Activity query before widening the deployment.
 
-Clients reconnect/poll with their last *rendered* sequence, append only entries
-with larger sequence values, and do not advance beyond `gap`. On a gap they must
-resynchronize, not silently discard missing entries. Empty pages retain the
-cursor and do not imply completion; lifecycle state comes from the run detail.
-This transport is durable cursor polling, not a claimed realtime push service.
+Clients reconnect with their last *rendered* sequence, append only larger
+sequences, and never advance beyond `gap`. Empty pages retain the cursor and do
+not imply completion; lifecycle state comes from the run detail.
 
-`OfficeDelivery` reports `status` (`pending`, `delivered`, or `failed`), a bounded
-`error_code` and optional `delivered_at`. Completed execution does not imply an
-Office reply was published. Clients keep polling while delivery is pending,
-including after the final run event, and display terminal delivery failure.
+### Live Activity
+
+Migration0060 adds transactional PostgreSQL notifications. The signed streaming
+GET uses the same NIP-98, Redis replay and configured company/audience boundary;
+there is no query-string bearer token. `LISTEN` completes before backfill, so
+concurrent commits are either in that read or wake another read. Notifications
+contain company/run UUID hints only. The server never forwards notification
+content or treats it as a cursor.
+
+SSE `activity` data is `{detail: <GET run response>, page: <RunEventPage>}`; `id`
+is the page's `next_after_sequence` when present. Each page contains at most25
+events and the serialized frame is capped at4MiB. `heartbeat` data is `{}`;
+`control` data has one code: `renew` asks for fresh signed authentication,
+`retry` closes a failed connection, `revoked` clears private state, and `resync`
+requires explicit timeline reload after a cursor gap. Every activity frame and
+idle heartbeat rechecks current human/company/channel membership and configured
+audience under the shared Office fence. Authority mutations notify immediately;
+idle revalidation occurs every5seconds. Configured role/grant changes are
+process configuration changes and require API restart.
+
+A stream lives at most45seconds and uses one of four separate listener
+connections. A one-frame queue bounds backpressure; cancellation or the absolute
+deadline releases its listener even if the HTTP peer stops reading. Query
+capacity is shared with ordinary HTTP handlers, so even a2connection query pool
+can progress. No fence/query permit spans a notification wait or network send;
+each stream read has an8second deadline,500ms lock wait and2second statement cap.
+
+The desktop keeps the last dense cursor through up to five failed reconnect
+attempts with bounded exponential backoff. An initial replay alone does not
+reset a repeated-disconnect loop. A normal45second renewal signs a new request;
+reload/remount replays persisted history from the start. The display retains
+500events and writes no private content to browser storage. Disconnected,
+reconnecting and paused states remain explicit, with manual reload available.
+
+`OfficeDelivery` reports `pending`, `delivered` or `failed`, a bounded error code
+and optional delivery time. Completion does not imply publication. Streams stay
+open after terminal execution and push late cancellation, Office delivery,
+context and memory receipt changes even when no new run event is appended.
+Every reconnect also rereads these current durable details.
 
 ## Cancellation and audit
 
@@ -169,7 +203,7 @@ migration lanes are active:
 ```sh
 cargo test -p ortak-server
 ORTAK_TEST_DATABASE_URL=postgres://ortak:ortak@127.0.0.1:55432/ortak_api_20260905 \
-  cargo test -p ortak-server --test authenticated_routes -- --ignored
+  cargo test -p ortak-server --test postgres_authenticated_routes -- --ignored
 ```
 
 Runtime cancellation, durable Hermes event reconstruction, signed reply delivery,
@@ -198,6 +232,5 @@ credential references, input prompts and memory binding options are excluded.
 redacted published content and its signed Office source, and the durable
 receipt/acknowledgement time when present. The original frozen source facts and
 revision/channel pins must still match the current visible run. This prevents a
-retargeted run from exposing an older conversation's notes. Pending memory keeps
-Activity polling after Office delivery; acknowledgement or terminal failure
-stops that additional polling. No employee-global or project memory is exposed.
+retargeted run from exposing an older conversation's notes. Memory status and receipts push through Activity after Office delivery,
+including after run completion. No employee-global or project memory is exposed.

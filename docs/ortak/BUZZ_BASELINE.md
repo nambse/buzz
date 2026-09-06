@@ -78,6 +78,31 @@ The labels describe ownership, not upstream compatibility.
 | Mobile, pairing, push gateway, moderation, culture extras | Remove/defer | Re-evaluate after the desktop company workflow is complete | `mobile`, pairing crates, push gateway, moderation features |
 | Buzz branding, onboarding, community UX | Rewrite | Office, Employees, Work, Projects, Memory, Activity, Settings | desktop routes and navigation |
 
+### Private relay source boundary (2026-09-06)
+
+The inherited relay mesh/huddle, workflow engine, and git forge are archived
+behind the default-on `legacy-mesh`, `legacy-workflow`, and `legacy-git` Cargo
+features. Ortak private relay artifacts select `--no-default-features`; ordinary
+development builds retain their inherited defaults. The private source graph
+omits workflow construction, cron/event wake hooks, workflow commands/webhooks,
+and git HTTP/policy routes, git cache/store construction and conformance probes.
+The shared ingest path refuses writes to those workflow and NIP-34 families.
+Explicit git GUI/probe or mesh/huddle activation settings fail before startup
+I/O when their feature is absent.
+
+This boundary retains canonical Office ingest, central routing, membership and
+identity recovery, media storage, historical event/DB projections, and authorized
+cleanup of historical workflow definitions. It does not reclassify a Buzz
+project event as an Ortak Project. The direct relay `buzz-workflow`,
+`buzz-relay-mesh`, git S3/tempfile/compression, and mesh postcard edges become
+optional; the unused direct `buzz-admin` workflow edge is removed. Shared media
+may still require S3 and test fixtures may still require tempfile. Workspace
+source and historical data are preserved. The integration owner deployed this
+private boundary on 2026-09-06 with selected normal/build graph evidence,
+four production-seam tests and actual404 workflow/git route observations.
+The current artifact/owner references are in `CONTINUATION_PROGRESS_2026-09-05.md`;
+this private cutover does not claim full repository CI or a public release.
+
 ## Code-import policy
 
 1. The pinned Buzz commit remains recorded in this document and in git history.

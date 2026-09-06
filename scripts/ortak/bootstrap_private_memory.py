@@ -63,9 +63,7 @@ def token_variable(value):
     return value
 
 
-def fresh_intent(company, deployment, token_env):
-    timestamp = datetime.now(timezone.utc)
-    recorded_at = timestamp.isoformat(timespec="microseconds" if timestamp.microsecond else "seconds")
+def selected_intent(company, deployment, token_env):
     return {
         "format": FORMAT, "project": PROJECT, "company_id": uuid(company),
         "employee_id": "ada-private", "deployment_id": uuid(deployment),
@@ -74,6 +72,14 @@ def fresh_intent(company, deployment, token_env):
                     "workspace": "ortak_ada_" + UUID(company).hex,
                     "user_peer": "operator-private", "employee_peer": "ada-private", "options": {}},
         "creation_key": f"ortak-memory:{company}:ada-private:{deployment}",
+    }
+
+
+def fresh_intent(company, deployment, token_env):
+    timestamp = datetime.now(timezone.utc)
+    recorded_at = timestamp.isoformat(timespec="microseconds" if timestamp.microsecond else "seconds")
+    return {
+        **selected_intent(company, deployment, token_env),
         "validation_run_id": str(uuid4()),
         "validation_recorded_at": recorded_at.replace("+00:00", "Z"),
     }
@@ -81,7 +87,7 @@ def fresh_intent(company, deployment, token_env):
 
 def validate_intent(intent, company, deployment, token_env):
     require(isinstance(intent, dict), "invalid_bootstrap_intent")
-    expected = fresh_intent(company, deployment, token_env)
+    expected = selected_intent(company, deployment, token_env)
     for key in ("validation_run_id", "validation_recorded_at"):
         expected[key] = intent.get(key)
     require(intent == expected, "bootstrap_intent_changed")
@@ -162,6 +168,44 @@ def worker_config(intent):
             "validate_memory_io": True, "employees": [{
                 key: intent[key] for key in ("employee_id", "binding", "creation_key",
                                             "validation_run_id", "validation_recorded_at")}]}
+
+
+def creation_receipt(state):
+    """Normalize the original server receipt without changing its ownership or IDs."""
+    intent = state["intent"]
+    binding = intent["binding"]
+    require(state["completed"] is True and state["resource_receipt"] == expected_resource(intent),
+            "completed_original_memory_receipt_required")
+    validate_identity(intent, state["resource_identity"])
+    validate_write(intent, state["roundtrip_receipt"])
+    def resource(reference):
+        return {"resource_ref": reference, "ownership": "created"}
+    return {**{key: intent[key] for key in ("company_id", "deployment_id", "employee_id",
+                                           "binding", "creation_key")},
+            "request_hash": state["resource_identity"]["request_hash"],
+            "native_ids": state["resource_identity"]["native_ids"],
+            "resources": {"workspace": resource("workspace:" + binding["workspace"]),
+                          "user_peer": resource(f"peer:{binding['workspace']}/{binding['user_peer']}"),
+                          "employee_peer": resource(f"peer:{binding['workspace']}/{binding['employee_peer']}")}}
+
+
+def prepared_configs(state):
+    """Both consumers receive the same frozen ownership and diagnostic evidence."""
+    intent = state["intent"]
+    receipt = creation_receipt(state)
+    worker = worker_config(intent)
+    worker["require_creation_receipts"] = True
+    worker["employees"][0]["creation_receipt"] = receipt
+    prepared = {"origin": ORIGIN, "token_ref": TOKEN_REF, "token_env": intent["token_env"],
+                "creation_receipt": receipt, "validate_memory_io": True,
+                "validation_run_id": intent["validation_run_id"],
+                "validation_recorded_at": intent["validation_recorded_at"]}
+    return {"worker-memory-prepared.json": worker, "prepared-memory.json": prepared}
+
+
+def unchanged_output(path, expected):
+    if path.exists() or path.is_symlink():
+        require(json.loads(private_file(path)) == expected, "prepared_memory_config_changed")
 
 
 def save(path, value):
@@ -249,7 +293,7 @@ class Http:
             connection.close()
 
 
-def bootstrap(root, deployment, token_env, http):
+def bootstrap(root, deployment, token_env, http, *, export_prepared=False):
     """One attempt only; durable original keys make an explicit retry safe."""
     identities = json.loads(private_file(root / "identities.json"))
     require(identities.get("project") == PROJECT and identities.get("employee_id") == "ada-private",
@@ -265,6 +309,7 @@ def bootstrap(root, deployment, token_env, http):
                 "intent", "resource_receipt", "resource_identity", "roundtrip_receipt", "completed"}, "invalid_bootstrap_state")
             validate_intent(state["intent"], company, deployment, token_env)
         else:
+            require(not export_prepared, "completed_memory_bootstrap_required")
             require(all(child.name == ".bootstrap.lock" for child in directory.iterdir()), "unmarked_memory_state")
             state = {"intent": fresh_intent(company, deployment, token_env), "resource_receipt": None,
                      "resource_identity": None, "roundtrip_receipt": None, "completed": False}
@@ -280,6 +325,11 @@ def bootstrap(root, deployment, token_env, http):
             validate_identity(intent, state["resource_identity"])
         if state["roundtrip_receipt"] is not None:
             validate_write(intent, state["roundtrip_receipt"])
+        if export_prepared:
+            require(state["completed"], "completed_memory_bootstrap_required")
+            exports = prepared_configs(state)
+            for filename, fragment in exports.items():
+                unchanged_output(directory / filename, fragment)
         output = directory / "worker-memory.json"
         if output.exists() or output.is_symlink():
             require(state["completed"] and json.loads(private_file(output)) == worker_config(intent), "worker_config_changed")
@@ -298,6 +348,15 @@ def bootstrap(root, deployment, token_env, http):
         if state["resource_identity"] is None:
             state["resource_identity"] = received
             save(path, state)
+        if export_prepared:
+            for filename, fragment in exports.items():
+                target = directory / filename
+                if not target.exists():
+                    save(target, fragment)
+            return {"result": "prepared_receipts_exported", "employee_id": "ada-private",
+                    "worker_config": str(directory / "worker-memory-prepared.json"),
+                    "prepared_memory_config": str(directory / "prepared-memory.json"),
+                    "roundtrip": "previously_verified", "employee_activated": False, "worker_started": False}
         validated_now = not state["completed"]
         if validated_now:
             _, session, write, recall = diagnostic(intent)
@@ -323,6 +382,8 @@ def main():
     parser.add_argument("--state-dir", required=True, type=Path)
     parser.add_argument("--deployment-id", required=True)
     parser.add_argument("--token-env", required=True)
+    parser.add_argument("--export-prepared", action="store_true",
+                        help="Read-only verify an existing completed bootstrap and export immutable activation/worker receipts")
     args = parser.parse_args()
     root = selected_root(args.state_dir)
     token_variable(args.token_env)
@@ -334,7 +395,8 @@ def main():
     previous = signal.signal(signal.SIGALRM, deadline)
     signal.setitimer(signal.ITIMER_REAL, 20)
     try:
-        result = bootstrap(root, args.deployment_id, args.token_env, transport)
+        result = bootstrap(root, args.deployment_id, args.token_env, transport,
+                           export_prepared=args.export_prepared)
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, previous)

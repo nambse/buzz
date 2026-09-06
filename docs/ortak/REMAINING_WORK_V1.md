@@ -1,7 +1,19 @@
 # Ortak Remaining Work v1
 
-Status: Product work remains; unattended execution paused at12:00 Istanbul
-on2026-09-05. The existing continuation heartbeat is confirmed paused.
+Status: Active goal in task `01a078f7-e36b-7d92-b157-f1c0919b9af2` from
+2026-09-07, with no deadline or token budget. The old heartbeat is removed.
+[The new goal](GOAL_CONVERSATION_AND_V0_2026-09-07.md) and the top of
+[the continuation ledger](CONTINUATION_PROGRESS_2026-09-05.md) govern current
+scope, ownership and evidence. The historical A–G inventory below remains
+useful for dependency order; it is not the current deployment inventory.
+
+Current remaining gates: secure Git checkpoints/push; bounded authorized
+conversation/team/thread/Work context and Ada→Bora acceptance; conversational
+Work/artifact revision flow; truthful Employee identity and availability;
+repeatable service lifecycle and durable state location; changed-schema
+install/recovery validation; required integration and full CI; final GitHub
+review link and Turkish operating notes. Existing schema78 and single-turn
+acceptance do not close these conversation gates.
 
 This is the dependency-ordered working plan. It supersedes stale per-milestone
 implementation notes, not [Architecture v0](ARCHITECTURE_V0.md) or its acceptance
@@ -9,11 +21,15 @@ criteria. The owner's deadline and execution authority are recorded in the
 [overnight plan](OVERNIGHT_DELIVERY_PLAN_2026-09-05.md); current source/process
 ownership is in the [CLI handoff](CLI_HANDOFF_2026-09-05.md).
 
-**A private local stack and manual product workflow are demonstrated. The real
-employee MVP and full v0 are not complete.** Ada remains draft, central routing
-is off, no real model/provider is selected, and no provider-backed employee
-message→run→Office reply has occurred. Preserved external Cem/Zeynep resources
-remain optional adoption targets, not prerequisites or default credentials.
+**The private stack now demonstrates real employee activation, Office replies,
+cancellation, model changes, completed assigned Work and actual reviewed-memory
+consumption/publication/withdrawal, plus a real selected-file read through saved
+deliverable and native operator review/completion. Full v0 remains incomplete.** Ada is active with
+GPT-5.6 Sol/high through Hermes and the selected ChatGPT OAuth enrollment.
+The inventory below records the earlier baseline, not current deployment.
+Current evidence and remaining acceptance boundaries are in the continuation
+ledger. Preserved external Cem/Zeynep resources remain optional adoption targets,
+not prerequisites or default credentials.
 
 ## 1. Current implementation and evidence
 

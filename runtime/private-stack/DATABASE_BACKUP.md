@@ -45,9 +45,13 @@ The operation:
    schema evidence from that snapshot, then creates a custom-format `pg_dump`
    using `--snapshot`.
 3. Creates the new verification database from `template0` in this same fresh
-   container. It invokes `pg_restore --exit-on-error --single-transaction`
-   against that generated name. It never uses `--clean`, `--create`, `dropdb`,
-   or restoration to the original database.
+   container. It invokes bounded pre-data, data and post-data sections of
+   `pg_restore --exit-on-error --single-transaction` against that generated name.
+   Each section has its own transaction; partial targets are retained on failure.
+   It never uses `--clean`, `--create`, `dropdb`, or restoration to the original
+   database. The exact temporary function compatibility below brackets the data
+   and post-data phases; original function configuration must be restored before
+   any success claim.
 4. Compares every public ordinary/partitioned table's row count, successful
    SQLx migration versions/checksums, private-company count, employee lifecycle
    counts, server version and the selected catalog SHA256. The catalog digest
@@ -80,6 +84,7 @@ actual verification receipt follows it.
 
 ```sh
 python3 scripts/ortak/test_backup_private_database.py
+python3 scripts/ortak/test_private_restore_credential_functions.py
 ```
 
 The focused tests exercise the helper's production command bounds and state
@@ -87,6 +92,45 @@ machine: private outputs, snapshot handoff, fresh restore destination, retained
 failure artifacts, byte/time limits, exited-parent process-group cleanup,
 diagnostic privacy, remote-environment rejection, invalid counts, and mismatched
 container/volume ownership.
+
+## Populated credential-array restore compatibility
+
+Migration45's immutable SQL helper `public.ortak_all_credential_refs(jsonb)` calls
+`ortak_is_credential_ref(text)` without a schema qualifier. A populated array
+fails during `pg_restore`, whose empty search path hides the nested public
+function. Earlier empty-array archives did not exercise this branch.
+
+`private_restore_credential_functions.py` is a required shared helper dependency
+for database-only and offline main-database restoration. After pre-data, it
+requires the exact two historical function body hashes, signatures, language,
+owner, volatility, strictness, parallel/security/leakproof attributes and NULL
+`proconfig`; unknown bodies, overloads or settings refuse. Only the newly created
+destination's array helper temporarily receives `search_path=pg_catalog, public`.
+Guards run in the same transaction as the temporary ALTER and final RESET ALL.
+Data and post-data must complete before the setting is reset. The final catalog
+must equal the original; the existing full schema/count/checksum comparison then
+must equal the source snapshot. No source function or immutable migration changes.
+Future qualified function revisions need an explicitly reviewed compatibility
+entry; they cannot silently enter this historical allowlist. Freeze this module
+alongside the backup helper whenever preparing an immutable operator code copy.
+
+Each phase has an intent and completion record. A failure leaves a visibly failed
+fresh target, possibly with the temporary setting still present; it is never
+promoted, reused or relabeled as verified. Tests refuse unknown configuration,
+ensure configuration precedes data, ensure reset precedes verification and retain
+failed phase evidence.
+
+The real populated-array regression passed on 2026-09-05. Receipt:
+`/private/tmp/ortak-private-20260905/backups/20260905T194158Z_ca2ceb1df1ea41c1bbacceffef8535d6/manifest.json`.
+The 625476-byte archive SHA256 is
+`adc454126387f33c702454c66ce680103a6816c26e465a4c1ad36973a29cafce`.
+New retained target `ortak_verify_e2fb7ba3743640f7a9885811446f3ec9` has schema61,
+109 tables and one binding with a populated credential array. Full source and
+restored metadata match, including original function definitions. A read-only
+negative control on that target reproduces the original empty-search-path error;
+metadata remains unchanged afterward. Its sanitized evidence is
+`credential-regression/proof.json` beside the manifest. The earlier failed target
+`ortak_verify_9c49746c75504a4ab080cf66e9fddc02` remains retained.
 
 PostgreSQL's documentation explains [custom-format dumps and synchronized
 snapshots](https://www.postgresql.org/docs/17/app-pgdump.html),

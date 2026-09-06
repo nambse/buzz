@@ -14,8 +14,10 @@ import selectors
 import signal
 import shutil
 import stat
+import struct
 import subprocess
 import time
+import zlib
 from uuid import uuid4
 
 from init_private_stack import PROJECT, create_file
@@ -83,6 +85,10 @@ SELECT jsonb_build_object(
 class Refused(Exception):
     """A bounded, non-sensitive failure code suitable for the private manifest."""
 
+    def __init__(self, code, *, receipt_path=None):
+        super().__init__(code)
+        self.receipt_path = receipt_path
+
 
 def environment():
     """No ambient Docker endpoint, context, credential, PG or proxy overrides."""
@@ -122,6 +128,40 @@ def digest(path):
         for block in iter(lambda: stream.read(65536), b""):
             result.update(block)
     return result.hexdigest()
+
+
+class GzipOutput:
+    """One level1 gzip member: zero mtime, no filename, bounded physical writes."""
+
+    def __init__(self, sink, ceiling, remaining):
+        self.sink, self.ceiling, self.remaining = sink, ceiling, remaining
+        self.compressor = zlib.compressobj(level=1, wbits=-15)
+        self.physical = self.uncompressed = self.crc = 0
+        self.hashed = hashlib.sha256()
+        # RFC1952: deflate, no flags/name, mtime0, fastest compression, unknown OS.
+        self.emit(b'\x1f\x8b\x08\x00\x00\x00\x00\x00\x04\xff')
+
+    def emit(self, data):
+        """Check deadline and physical allowance before every write, including the footer."""
+        self.remaining()
+        if self.physical + len(data) > self.ceiling:
+            raise Refused('command_output_limit_exceeded')
+        self.sink.write(data)
+        self.physical += len(data)
+
+    def write(self, data):
+        """Compress one already-bounded command stdout block without a raw temporary file."""
+        self.uncompressed += len(data)
+        self.hashed.update(data)
+        self.crc = zlib.crc32(data, self.crc)
+        self.emit(self.compressor.compress(data))
+
+    def finish(self):
+        """Write the complete footer only after successful child exit and empty stderr."""
+        self.emit(self.compressor.flush(zlib.Z_FINISH))
+        self.emit(struct.pack('<II', self.crc & 0xffffffff, self.uncompressed & 0xffffffff))
+        return {'bytes': self.physical, 'uncompressed_bytes': self.uncompressed,
+            'uncompressed_sha256': self.hashed.hexdigest()}
 
 
 class Commands:
@@ -172,7 +212,17 @@ class Commands:
             if stream is not None and not stream.closed:
                 stream.close()
 
-    def run(self, label, args, *, sql=None, archive=None, output=None, ceiling=MAX_OUTPUT):
+    def run(self, label, args, *, sql=None, archive=None, output=None, ceiling=MAX_OUTPUT,
+            gzip_output=False, output_ceiling=None):
+        """Default returns bytes; explicit gzip output returns counts/hash after footer and fsync.
+
+        ``ceiling`` still bounds uncompressed stdout. ``output_ceiling`` bounds
+        physical gzip bytes independently; gzip is available only with an output path.
+        """
+        if (type(gzip_output) is not bool or (not gzip_output and output_ceiling is not None)
+                or (gzip_output and (output is None or type(ceiling) is not int or ceiling <= 0
+                    or type(output_ceiling) is not int or output_ceiling <= 0))):
+            raise Refused('command_gzip_options_refused')
         source = None
         if sql is not None:
             source = self.root / (label + ".sql")
@@ -186,9 +236,13 @@ class Commands:
             process = subprocess.Popen(args, stdin=incoming, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, env=environment(), start_new_session=True)
             sink = None
+            compressed = None
+            compressed_result = None
             try:
                 if output:
                     sink = private_binary(output)
+                    if gzip_output:
+                        compressed = GzipOutput(sink, output_ceiling, self.remaining)
                 sizes = {"out": 0, "err": 0}
                 with selectors.DefaultSelector() as ready:
                     ready.register(process.stdout, selectors.EVENT_READ, "out")
@@ -209,7 +263,7 @@ class Commands:
                             if kind == "err":
                                 errors.write(block)
                             elif sink:
-                                sink.write(block)
+                                (compressed or sink).write(block)
                             else:
                                 result.extend(block)
                 if process.wait(timeout=self.remaining()) != 0:
@@ -218,13 +272,17 @@ class Commands:
                     # Warnings must not silently become verified backup evidence.
                     raise Refused("command_reported_diagnostics")
                 if sink:
+                    if compressed:
+                        compressed_result = compressed.finish()
                     sink.flush()
                     os.fsync(sink.fileno())
             finally:
-                self.stop(process)
-                if sink:
-                    sink.close()
-        return bytes(result)
+                try:
+                    self.stop(process)
+                finally:
+                    if sink:
+                        sink.close()
+        return compressed_result if gzip_output else bytes(result)
 
     def inspect(self):
         # Only selected public identity fields, never docker inspect's Env array.
@@ -335,8 +393,14 @@ def backup(root, commands_type=Commands):
             "/var/run/postgresql", "-U", "ortak", "--maintenance-db=ortak", "--template=template0",
             "--owner=ortak", verification))
         manifest["verification_created"] = True
-        command.run("restore", command.command("pg_restore", "--no-password", "--exit-on-error",
-            "--single-transaction", "-h", "/var/run/postgresql", "-U", "ortak", "-d", verification), archive=archive)
+        from private_restore_credential_functions import restore_sections, Refused as RestoreRefused
+        try:
+            manifest["restore_compatibility"] = restore_sections(command, verification, archive)
+        except RestoreRefused as error:
+            # A directly executed CLI is __main__, while the shared helper
+            # imports this module by name. Normalize that exception identity so
+            # an allowlist refusal still writes the private failed manifest.
+            raise Refused(str(error)) from None
         restored = command.metadata(verification, "restored")
         manifest["restored"] = restored
         if restored != manifest["expected"]:
@@ -352,7 +416,7 @@ def backup(root, commands_type=Commands):
         manifest["status"] = "failed"
         manifest["error_code"] = str(error) if isinstance(error, Refused) else "backup_operation_failed"
         create_file(destination / "manifest.json", json.dumps(manifest, indent=2) + "\n")
-        raise Refused("backup_failed_private_manifest_retained") from None
+        raise Refused("backup_failed_private_manifest_retained", receipt_path=destination / 'manifest.json') from None
     create_file(destination / "manifest.json", json.dumps(manifest, indent=2) + "\n")
     return destination
 

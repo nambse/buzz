@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 import json
+import importlib.util
 import os
 from pathlib import Path
 import sys
@@ -66,12 +67,15 @@ class FakeCommands:
             # The original intent must precede creation, even if its reply is lost.
             assert json.loads((self.root / "intent.json").read_text())["verification_database"] == args[-1]
             subject.verification_name(args[-1])
-        if label == "restore":
+        if label.startswith("restore-") and "pg_restore" in args:
             assert not self.held
             assert "--single-transaction" in args and "--exit-on-error" in args
             assert "--clean" not in args and "--create" not in args
             subject.verification_name(args[-1])
             assert kwargs["archive"].read_bytes() == b"PGDMP:fixture-private-data"
+        if label in ('restore-original-functions', 'restore-final-functions'):
+            from private_restore_credential_functions import EXPECTED
+            return json.dumps(EXPECTED).encode()
         return b""
 
 
@@ -103,7 +107,7 @@ class BackupTests(unittest.TestCase):
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
     def test_restore_failure_or_mismatch_retains_archive_and_failed_manifest(self):
-        for failure, mismatch in [("restore", False), (None, True), ("create-verification", False)]:
+        for failure, mismatch in [("restore-data", False), (None, True), ("create-verification", False)]:
             FakeCommands.failure, FakeCommands.mismatch = failure, mismatch
             with patch.object(subject.shutil, "disk_usage") as usage:
                 usage.return_value.free = 1024**3
@@ -117,6 +121,19 @@ class BackupTests(unittest.TestCase):
                 self.assertEqual(receipt["different_fields"], ["tables"])
                 self.assertEqual(receipt["restored"]["tables"]["public.companies"], 2)
         self.assertFalse(any("dropdb" in args or "--clean" in args for args in FakeCommands.calls))
+
+    def test_direct_cli_module_retains_shared_helper_allowlist_failure(self):
+        # Reproduce __main__ versus named-module exception identity without
+        # launching Docker. The shared helper still imports the named module.
+        spec = importlib.util.spec_from_file_location('backup_cli_fixture', subject.__file__)
+        cli = importlib.util.module_from_spec(spec); spec.loader.exec_module(cli)
+        with patch('private_restore_credential_functions.restore_sections', side_effect=subject.Refused('restore_credential_function_allowlist_refused')), \
+            patch.object(cli.shutil, 'disk_usage') as usage:
+            usage.return_value.free = 1024**3
+            with self.assertRaises(cli.Refused): cli.backup(self.root, FakeCommands)
+        receipt = json.loads(next((self.root / 'backups').glob('*/manifest.json')).read_text())
+        self.assertEqual(receipt['status'], 'failed')
+        self.assertEqual(receipt['error_code'], 'restore_credential_function_allowlist_refused')
 
     def test_unsafe_targets_and_ambient_remote_settings_are_refused(self):
         for name in ["ortak", "ortak_api_20260905", "ortak_verify_../x", "ortak_verify_" + "g" * 32]:
