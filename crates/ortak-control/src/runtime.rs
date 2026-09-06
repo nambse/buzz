@@ -128,6 +128,10 @@ pub struct RunContext {
     /// Bounded, provenance-tagged memory snippets already recalled by the
     /// control layer.
     pub memory_context: Vec<String>,
+    /// Server-selected ordinary Office history and public employee facts.
+    /// Missing on historical snapshots; never populated by encrypted DM input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_context: Option<crate::conversation_context::ConversationContext>,
 }
 
 /// Everything a runtime needs to start one run.
@@ -185,6 +189,19 @@ impl RunSpec {
             return Err(RuntimeError::InvalidSpec {
                 detail: Detail::new("memory context exceeds bounds"),
             });
+        }
+        if let Some(context) = &self.context.conversation_context {
+            if !context.valid_for(self.run_id, &self.employee_id, self.revision_id)
+                || self.context.conversation_ref.as_deref()
+                    != Some(context.channel_id.to_string().as_str())
+                || self.context.reply_to_message_id.as_deref()
+                    != Some(context.trigger_message_id.as_str())
+                || self.context.work_item_id.is_some()
+            {
+                return Err(RuntimeError::InvalidSpec {
+                    detail: Detail::new("conversation context is invalid"),
+                });
+            }
         }
         Ok(())
     }

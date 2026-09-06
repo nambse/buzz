@@ -55,16 +55,41 @@ def main():
             if not callable(getattr(AIAgent, boundary, None)):
                 raise RuntimeError('pinned provider request boundary changed')
         journal = Journal(Path(temporary) / 'journal.sqlite')
-        for tool in (False, True):
+        for tool, with_history in ((False, False), (True, False), (False, True)):
             run, company = str(uuid4()), str(uuid4())
             key = f'ortak-run:{company}:{run}'
             spec = {'run_id': run, 'employee_id': 'fixture', 'revision_id': str(uuid4()),
                     'binding': {'model': 'gpt-4o-mini', 'options': {}}, 'permissions': EMPTY_POLICY,
                     'input': 'Reply with the fixed fixture answer.', 'context': {}, 'idempotency_key': key}
+            if with_history:
+                context = json.loads(Path(__file__).with_name('conversation-context-v1.json').read_text())
+                context['snapshot_id'] = run
+                spec['employee_id'] = context['employee']['employee_id']
+                spec['revision_id'] = context['employee']['revision_id']
+                spec['input'] = "Bora, translate Ada's answer."
+                spec['context'] = {'conversation_ref': context['channel_id'],
+                                   'reply_to_message_id': context['trigger_message_id'],
+                                   'work_item_id': None, 'memory_context': [], 'conversation_context': context}
             calls = []
             def fixture_request(self, *args, **kwargs):
                 if journal.lookup(key)['status'] != 'running' or calls:
                     raise RuntimeError('provider fixture called outside admission or more than once')
+                if with_history:
+                    request = args[0] if args else kwargs.get('api_kwargs')
+                    if not isinstance(request, dict):
+                        raise RuntimeError('pinned provider request boundary changed')
+                    messages = request.get('messages', request.get('input'))
+                    if not isinstance(messages, list):
+                        raise RuntimeError('pinned provider request message boundary changed')
+                    reference = [m for m in messages if m.get('role') == 'user'
+                                 and 'ORTAK REFERENCE CONTEXT' in str(m.get('content', ''))]
+                    encoded = json.dumps(reference, ensure_ascii=False)
+                    if (not reference or 'Ürün hedefini' not in encoded or 'Ada' not in encoded
+                            or not any(spec['input'] in str(m.get('content', '')) for m in messages)):
+                        raise RuntimeError('attributed history/current request lost before actual provider boundary')
+                    if any('ORTAK REFERENCE CONTEXT' in str(m.get('content', ''))
+                           for m in messages if m.get('role') == 'assistant'):
+                        raise RuntimeError('another employee was forged as the receiving assistant')
                 calls.append(True)
                 return response(tool)
             fixture_agent = type('ProviderFixtureAIAgent', (AIAgent,), {
@@ -90,7 +115,7 @@ def main():
         if attempted:
             raise RuntimeError('real run loop attempted network or subprocess access')
     print(json.dumps({'source_revision': HERMES_REVISION, 'verified_source_files': len(lock['source_files']),
-                      'real_run_loop': 'passed', 'real_loop_tool_denial': 'passed',
+                      'real_run_loop': 'passed', 'attributed_history_provider_boundary': 'passed', 'real_loop_tool_denial': 'passed',
                       'fixture_responses': sum(counts), 'provider_requests': 0,
                       'network_calls': 0, 'scope': 'real Hermes loop with provider I/O fixtures'}, sort_keys=True))
 

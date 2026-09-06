@@ -71,7 +71,10 @@ async fn load(
         .map(|row| decode(row, authority, run_id))
         .transpose()?;
     if result.as_ref().is_some_and(|s| {
-        s.reviewed().is_some() || s.conversation().is_some() || s.employee().is_some()
+        s.reviewed().is_some()
+            || s.conversation().is_some()
+            || s.employee().is_some()
+            || s.spec().context.conversation_context.is_some()
     }) {
         let current: bool = sqlx::query_scalar("SELECT ortak_run_reviewed_memory_current($1,$2)")
             .bind(scope.company_id())
@@ -129,6 +132,22 @@ async fn freeze(
         DispatchAuthorization::StaleLease => return Ok(FreezeSnapshotOutcome::StaleLease),
     };
     candidate.validate_for(&fresh, run_id)?;
+    let existing: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM run_context_snapshots WHERE company_id=$1 AND run_id=$2)",
+    )
+    .bind(scope.company_id())
+    .bind(run_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    let mut selected = candidate.clone();
+    if !existing && selected.spec().context.conversation_context.is_none() {
+        if let Some(context) =
+            super::conversation_context::select(&mut tx, scope, &fresh, run_id).await?
+        {
+            selected = selected.with_conversation_context(&fresh, context)?;
+        }
+    }
+    let candidate = &selected;
     if !super::reviewed_memory::validate_candidate(&mut tx, scope, &fresh, candidate).await? {
         return Ok(FreezeSnapshotOutcome::Refused(
             DispatchRefusal::MemoryContextRejected,
@@ -202,7 +221,8 @@ async fn freeze(
     // current locks instead of admitting text protected only by our stale set.
     if (winner.reviewed().is_some()
         || winner.conversation().is_some()
-        || winner.employee().is_some())
+        || winner.employee().is_some()
+        || winner.spec().context.conversation_context.is_some())
         && winner.encode()? != bytes
     {
         return Ok(FreezeSnapshotOutcome::Refused(

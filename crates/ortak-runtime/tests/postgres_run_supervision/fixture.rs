@@ -3,7 +3,7 @@ use ortak_control::fakes::FakeMemoryAdapter;
 use ortak_runtime::memory_context::AdapterRunMemory;
 
 #[path = "../../../ortak-control/tests/cohort_support.rs"]
-mod cohort_support;
+pub(super) mod cohort_support;
 
 pub(super) const PROFILE_REF: &str = "fake://profiles/cem";
 
@@ -175,6 +175,22 @@ impl Fixture {
         channel_id: Option<Uuid>,
         content: &str,
     ) -> Uuid {
+        self.route_kind_with_reply(kind, channel_id, content, None)
+            .await
+    }
+
+    pub(super) async fn route_kind_with_reply(
+        &self,
+        kind: i32,
+        channel_id: Option<Uuid>,
+        content: &str,
+        reply: Option<(
+            MessageId,
+            chrono::DateTime<Utc>,
+            MessageId,
+            chrono::DateTime<Utc>,
+        )>,
+    ) -> Uuid {
         let id = message_id();
         if let Some(channel_id) = channel_id {
             sqlx::query(
@@ -229,6 +245,12 @@ impl Fixture {
         .execute(&self.pool)
         .await
         .expect("insert event");
+        if let Some((parent, parent_at, root, root_at)) = reply {
+            sqlx::query("INSERT INTO thread_metadata(community_id,event_created_at,event_id,channel_id,parent_event_id,parent_event_created_at,root_event_id,root_event_created_at,depth) VALUES($1,$2,$3,$4,$5,$6,$7,$8,1)")
+                .bind(self.community_id).bind(created_at).bind(id.as_bytes().as_slice()).bind(channel_id)
+                .bind(parent.as_bytes().as_slice()).bind(parent_at).bind(root.as_bytes().as_slice()).bind(root_at)
+                .execute(&self.pool).await.expect("canonical reply metadata before routing");
+        }
         self.control
             .insert_accepted_event(
                 self.community_id,
@@ -275,11 +297,11 @@ impl Fixture {
             origin: MessageOrigin::Human("sefa".to_owned()),
             input_hash: [3; 32],
             candidates: vec![CandidateRevision {
-                employee_id: employee_id("cem"),
+                employee_id: self.employee.id.clone(),
                 revision_id: self.revision_id,
             }],
             roster_scope: RosterScope::Targets,
-            eligible_employee_ids: std::iter::once(employee_id("cem")).collect(),
+            eligible_employee_ids: std::iter::once(self.employee.id.clone()).collect(),
             decision: RoutingDecision {
                 message_id: id.to_hex(),
                 mode: RoutingMode::Deterministic,
@@ -287,7 +309,7 @@ impl Fixture {
                 policy_version: self.policy.version.clone(),
                 policy_fingerprint: self.policy.fingerprint(),
                 recipients: vec![RecipientDecision {
-                    employee_id: employee_id("cem"),
+                    employee_id: self.employee.id.clone(),
                     action: RecipientAction::Wake,
                     reason: RoutingReason::StructuredDispatch,
                     score: None,

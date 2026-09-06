@@ -86,7 +86,7 @@ def trigger_row(table, name, kind, deferred, function, arguments=(), parent=None
 
 
 def check(value, refused):
-    """Require reviewed77 metadata and the exact78 replacement body on both catalogs."""
+    """Require reviewed77 metadata and the exact78/79 replacement bodies on both catalogs."""
     functions = {row[0]: row for row in value.get('functions', [])}
     for name, metadata in FUNCTIONS.items():
         row = functions.get(name)
@@ -130,7 +130,7 @@ def check(value, refused):
         raise refused('extensions77_community_fence_missing')
 
 
-# Exact final bodies from immutable77 plus the sole78 epoch replacement,
+# Exact final bodies from immutable77 plus the78 epoch and79 context replacements,
 # independent of either compared catalog. All storage metadata remains77.
 FUNCTION_NAMES = ('ortak_check_routing_claim_expiry',
  'ortak_commit_confidential_dm',
@@ -264,11 +264,11 @@ FUNCTION_BODY_SHA256 = {'ortak_check_routing_claim_expiry': '2db9ad04b8380da33d8
  'ortak_lock_confidential_dm': '06d8c00a3975db165ea3d53acc1a5507ebcd2477cb3eaba65232df25d480fa62',
  'ortak_lock_run_reviewed_memory': '31e10b2fb948ba92a786e6cdea0746a9e6d37f1a89c65d6cb3b840e3cdb842d2',
  'ortak_register_employee_memory_authorities': 'f3a843c90fccbec3812ac2d0fdb1ce83e5358e0f1c0d2b91d235f5f3460acd04',
- 'ortak_reviewed_run_admission': 'cc330881167c005a4b9f7c47d4b936f7a4dcaadba3cc466fc0f75cd75e390b06',
+ 'ortak_reviewed_run_admission': 'afecc29c908a4eff8099251509ab0c218b23b9af3cedafae51934e6fd2673dde',
  'ortak_reviewed_snapshot_consistent': 'a99491b2b318f25a27caff02b6489f1ed3ea1414cea2c3c1d97180d357e1d80c',
  'ortak_routing_notify': 'd814bbf301bee5050e36150f88c2b06234c50547f044dec38d4bfc129dd5a2ba',
  'ortak_run_employee_memory_current': 'a70a3fa0ccf9d44b33933bff7a4a974fcec8139b4563f9ad99e2f10f2b207da6',
- 'ortak_run_reviewed_memory_current': '61d968c41bdafabad2f56a85f6fe8def92485ddc61a5634f9a4eba339ddbfd17',
+ 'ortak_run_reviewed_memory_current': '575417fb8507b8c8d5af5f3d025640183d36650b9336dea17a3d8216f2c10a39',
  'ortak_schedule_completed_office_output': 'd74df588e15b373fb4552520fac2436660880945323c64d0a019f218e0c2d0cd'}
 
 

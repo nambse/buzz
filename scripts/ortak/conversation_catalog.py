@@ -38,7 +38,8 @@ FUNCTIONS = {
 
 FUNCTION_DEFAULTS = sorted([
     [name, 1, '0'] if name == 'ortak_conversation_json75' else [name, 0, None]
-    for name in (*FUNCTIONS, 'ortak_fence_office_mutation')
+    for name in (*FUNCTIONS, 'ortak_fence_office_mutation', 'ortak_conversation_plaintext79',
+                 'ortak_run_conversation_context_current', 'ortak_conversation_snapshot_admission79')
 ])
 
 # table, trigger, event/type mask, deferred, function. These are independent of

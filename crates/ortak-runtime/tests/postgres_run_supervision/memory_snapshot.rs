@@ -6,7 +6,10 @@ use ortak_runtime::memory_context::{
     FreezeSnapshotOutcome, FrozenRunSnapshot, RunContextRepository,
 };
 
-fn empty_snapshot(authority: &ortak_runtime::DispatchAuthority, run_id: Uuid) -> FrozenRunSnapshot {
+pub(super) fn empty_snapshot(
+    authority: &ortak_runtime::DispatchAuthority,
+    run_id: Uuid,
+) -> FrozenRunSnapshot {
     let wire = serde_json::json!({
         "version":1,"company_id":authority.company_id(),
         "routing_decision_id":authority.routing_decision_id(),
@@ -70,9 +73,16 @@ async fn snapshot_first_writer_is_immutable_and_reloaded_under_a_new_dispatch_le
         FreezeSnapshotOutcome::Ready(snapshot) => snapshot,
         other => panic!("expected durable winner: {other:?}"),
     };
+    let mut without_office_context = winner.spec().clone();
+    assert!(without_office_context
+        .context
+        .conversation_context
+        .take()
+        .is_some());
     assert_eq!(
-        winner.encode().expect("bytes"),
-        candidate.encode().expect("candidate bytes")
+        &without_office_context,
+        candidate.spec(),
+        "recall candidate is retained alongside canonical Office selection"
     );
     assert!(
         sqlx::query(

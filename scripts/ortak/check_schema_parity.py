@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Probe migration 78 versus real pgschema on disposable port 55432; retain both DBs.
+"""Probe migration 79 versus real pgschema on disposable port 55432; retain both DBs.
 
 Requires Python >=3.11 with psycopg2, the cached pgschema 1.7.4, and an explicitly
 selected compiled buzz-db test binary. Reads only ORTAK_SCHEMA_PARITY_TEST_URL.
@@ -24,6 +24,7 @@ from uuid import uuid4
 import workspace_catalog
 import conversation_catalog
 import extensions77_catalog
+import context79_catalog
 
 PGSCHEMA = Path("/Users/nambse/Library/Caches/hermit/pkg/pgschema-1.7.4/pgschema")
 URL_ENV = "ORTAK_SCHEMA_PARITY_TEST_URL"
@@ -47,6 +48,7 @@ FUNCTIONS += ['ortak_work_generation_guard', 'ortak_advance_work_authority', 'or
 TABLES += ['employees', 'routing_recipients', 'employee_lifecycle_events', 'runtime_office_outputs', 'runtime_memory_writes']
 FUNCTIONS += ['ortak_guard_lifecycle_event_insert', 'ortak_pin_employee_lifecycle', 'ortak_check_run_lifecycle', 'ortak_check_provisioning_lifecycle', 'ortak_guard_employee_lifecycle', 'ortak_check_lifecycle_activation', 'ortak_check_output_lifecycle']
 FUNCTIONS += ['ortak_work_dependency_edit_guard']
+FUNCTIONS += ['ortak_conversation_plaintext79', 'ortak_run_conversation_context_current', 'ortak_conversation_snapshot_admission79']
 TABLES += ['provisioning_runtime_probes']
 FUNCTIONS += ['ortak_provisioning_runtime_probe_guard']
 TABLES += ['reviewed_memory_facts', 'reviewed_memory_operations']
@@ -229,6 +231,20 @@ SELECT jsonb_build_object(
  'extensions77_function_defaults',(SELECT jsonb_agg(jsonb_build_array(proname,pronargdefaults,
    pg_get_expr(proargdefaults,0)) ORDER BY proname) FROM functions
    WHERE proname=ANY(ARRAY[__EXTENSIONS77_FUNCTIONS__])),
+ 'context79_triggers',(SELECT jsonb_agg(jsonb_build_array(c.relname,t.tgname,t.tgenabled,t.tgtype,
+   t.tgdeferrable,t.tginitdeferred,pn.nspname,p.proname,encode(t.tgargs,'hex'),t.tgnargs,
+   ARRAY(SELECT a.attname FROM unnest(t.tgattr::smallint[]) WITH ORDINALITY k(attnum,ord)
+     JOIN pg_attribute a ON a.attrelid=t.tgrelid AND a.attnum=k.attnum ORDER BY ord),
+   t.tgqual IS NULL,t.tgisinternal,
+   CASE WHEN t.tgparentid=0 THEN NULL ELSE jsonb_build_array(parent_n.nspname,parent_c.relname,parent_t.tgname) END)
+   ORDER BY c.relname,t.tgname)
+   FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace
+   JOIN pg_proc p ON p.oid=t.tgfoid JOIN pg_namespace pn ON pn.oid=p.pronamespace
+   LEFT JOIN pg_trigger parent_t ON parent_t.oid=t.tgparentid
+   LEFT JOIN pg_class parent_c ON parent_c.oid=parent_t.tgrelid
+   LEFT JOIN pg_namespace parent_n ON parent_n.oid=parent_c.relnamespace
+   WHERE n.nspname='public' AND NOT t.tgisinternal
+     AND (t.tgname='ortak_conversation_snapshot_admission79' OR p.proname='ortak_conversation_snapshot_admission79')),
  'extensions77_triggers',(SELECT jsonb_agg(jsonb_build_array(c.relname,t.tgname,t.tgenabled,t.tgtype,
    t.tgdeferrable,t.tginitdeferred,pn.nspname,p.proname,encode(t.tgargs,'hex'),t.tgnargs,
    ARRAY(SELECT a.attname FROM unnest(t.tgattr::smallint[]) WITH ORDINALITY k(attnum,ord)
@@ -644,6 +660,7 @@ def checked_catalog(value):
     workspace_catalog.check(value, Refused)
     conversation_catalog.check(value, Refused)
     extensions77_catalog.check(value, Refused)
+    context79_catalog.check(value, Refused)
     return value
 
 
@@ -672,7 +689,7 @@ def probe(value, binary, receipt_parent, commands_type=Commands, database_type=D
         write_private(directory / name, source)
     receipt = {"format": "ortak-schema-parity/v1", "status": "started", "host": "127.0.0.1", "port": 55432,
                "desired_database": desired, "migrated_database": migrated, "databases_retained": True,
-               "created_at": datetime.now(timezone.utc).isoformat(), "migration_target": 78,
+               "created_at": datetime.now(timezone.utc).isoformat(), "migration_target": 79,
                "migration_test_binary": str(binary), "migration_test_sha256": digest(binary),
                "pgschema_binary": str(PGSCHEMA), "pgschema_sha256": digest(PGSCHEMA),
                "schema_sha256": digest(directory / "schema.sql"),
@@ -702,8 +719,8 @@ def probe(value, binary, receipt_parent, commands_type=Commands, database_type=D
         env["BUZZ_TEST_DATABASE_URL"] = (f"postgres://{selected['user']}:{quote(selected['password'], safe='')}@127.0.0.1:55432/{migrated}")
         commands.run("migration-test", [str(binary), "--exact", TEST, "--ignored", "--test-threads=1"], env)
         versions = db.query(migrated, "SELECT json_agg(version ORDER BY version) FROM _sqlx_migrations WHERE success")
-        if versions != list(range(1, 79)):
-            raise Refused("migration78_not_proven")
+        if versions != list(range(1, 80)):
+            raise Refused("migration79_not_proven")
         migrated_catalog = checked_catalog(db.query(migrated, CATALOG, (TABLES, FUNCTIONS, TABLES)))
         document(directory / "migrated-catalog.json", migrated_catalog)
         different = sorted(key for key in desired_catalog if desired_catalog[key] != migrated_catalog.get(key))

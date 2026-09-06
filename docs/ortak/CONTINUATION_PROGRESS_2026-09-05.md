@@ -17,7 +17,48 @@ new task is the sole implementation owner and continues under an active goal,
 without a deadline or token budget. The old account/login notes below are
 historical; the new shared Hermes OAuth enrollment is already ready.
 
-## Current checkpoint — 2026-09-07, conversation goal takeover
+## Current checkpoint — 2026-09-07, bounded conversation context79
+
+The inherited984 paths are preserved in three pushed DCO checkpoints:
+`ebc11ca` (runtime/authority), `e4d02b2` (desktop), and `ecd9c1b`
+(tooling/documentation), on `codex/ortak-v0-delivery`. No full CI or PR is
+claimed. The applied78 migration's historical trailing blank line was preserved
+rather than silently changing its checksum.
+
+The new [conversation design](CONVERSATION_CONTEXT_V0.md) separates immutable,
+server-selected near history and employee/team facts from reviewed long-term
+memory, Work inputs, and delivery-chain authority. Ordinary runs freeze source
+IDs, author attribution, canonical thread boundaries, trigger cutoff and bounded
+text in their existing RunSpec. Retry reuses identical bytes; source deletion and
+recipient membership loss are checked again before runtime admission/delivery.
+Hermes receives attributed reference data plus the separate current request.
+Encrypted DM and Work context are not broadened by this slice.
+
+Evidence from this source increment:
+- Control context tests:3 passed; runtime tests compile. Four new real PostgreSQL
+  context cases passed on disposable55432, including Ada→Bora source selection,
+  cutoff/foreign/deleted exclusion, explicit thread, bounds, immutable replay,
+  and membership loss. The full49-case runtime supervision run had47 passes and
+  two fixture/expected-error failures; both corrected cases passed individually.
+  One lost-ACK fixture now binds the real freeze seam before starting its runtime.
+- Bridge unit suite:159 passed. Actual pinned Hermes loop with provider I/O
+  replaced, no network and no credential mounts: attributed history reached the
+  Responses request boundary; no-tool completion and forged-tool denial passed.
+  This is an existing-image source-overlay test, not a new deployed artifact.
+- Parity unit suite:31 passed. Real migration1–79 vs pgschema + two reconciliations
+  passed with both disposable databases retained. Private receipt:
+  `/private/tmp/ortak-v0-evidence/schema-parity-03a18819784f49a8b57d6637af5a05f8/receipt.json`.
+  New function metadata/body hashes and the unconditional deferred snapshot guard
+  are checked independently, so equal weakened catalogs cannot pass.
+- The live55433 database remains78 and the live service/image owners are unchanged.
+  No new native multi-turn/provider acceptance is claimed yet.
+
+Next: (1) build and verify immutable pinned worker/controller/backend artifacts,
+then perform an owned cutover and real Ada→Bora acceptance; (2) finish Work/artifact
+revision context, truthful Employee UI and durable service lifecycle. Full v0,
+final integration/CI, review URL and operating notes remain open.
+
+## Historical checkpoint — 2026-09-07, conversation goal takeover
 
 The new owner read the goal/handoff and verified the original dirty worktree,
 branch `codex/ortak-v0-delivery` and HEAD `afbb891732a584404e9c21ffc7b5028da2c389d5`.

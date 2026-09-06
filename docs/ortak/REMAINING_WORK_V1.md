@@ -7,7 +7,11 @@ Status: Active goal in task `01a078f7-e36b-7d92-b157-f1c0919b9af2` from
 scope, ownership and evidence. The historical A–G inventory below remains
 useful for dependency order; it is not the current deployment inventory.
 
-Current remaining gates: secure Git checkpoints/push; bounded authorized
+Inherited work is preserved in three pushed DCO checkpoints (ebc11ca, e4d02b2,
+ecd9c1b). Context79 source and disposable schema parity are verified; live
+services remain78.
+
+Current remaining gates: bounded authorized
 conversation/team/thread/Work context and Ada→Bora acceptance; conversational
 Work/artifact revision flow; truthful Employee identity and availability;
 repeatable service lifecycle and durable state location; changed-schema

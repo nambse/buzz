@@ -557,6 +557,7 @@ impl DispatchAuthority {
                 reply_to_message_id: self.message_id.map(|id| id.to_hex()),
                 work_item_id: self.work.as_ref().map(|work| work.work_item_id),
                 memory_context: Vec::new(),
+                conversation_context: None,
             },
             idempotency_key: run_idempotency_key(self.company_id, run_id),
         };

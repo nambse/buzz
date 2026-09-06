@@ -27,7 +27,7 @@ COPY --from=sqlite_build /opt/sqlite-fixed /opt/sqlite-fixed
 WORKDIR /opt/hermes
 COPY --from=hermes_source . /opt/hermes
 COPY ortak_hermes_bridge /opt/bridge/ortak_hermes_bridge
-COPY checks/run_loop_check.py checks/codex_oauth_check.py checks/codex_sdk_fixture.py checks/semantic_transport_check.py checks/semantic_lifecycle_check.py checks/workspace_tool_check.py /opt/bridge/checks/
+COPY checks/conversation-context-v1.json checks/run_loop_check.py checks/codex_oauth_check.py checks/codex_sdk_fixture.py checks/semantic_transport_check.py checks/semantic_lifecycle_check.py checks/workspace_tool_check.py /opt/bridge/checks/
 COPY hermes-source-lock.json /opt/bridge/hermes-source-lock.json
 RUN python -m ortak_hermes_bridge.verify_source --write-marker && \
     uv sync --python /usr/local/bin/python --frozen --no-dev --no-install-project && \

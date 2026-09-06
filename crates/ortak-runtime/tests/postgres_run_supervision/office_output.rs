@@ -359,7 +359,7 @@ async fn frozen_channel_output_cannot_be_rebound_to_another_decision_in_the_same
         .bind(fixture.scope.company_id()).bind(run_id).fetch_one(&fixture.pool).await.expect("original output preserved");
     assert_eq!(
         row.get::<String, _>("last_error_code"),
-        "office_output_target_changed"
+        "office_output_authority_changed"
     );
     assert_eq!(row.get::<String, _>("draft_content"), "old prompt answer");
     assert_eq!(output_count(&fixture, run_id).await, 0);

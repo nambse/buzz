@@ -40,12 +40,13 @@ use crate::state::{fold_status, RunStatus, TerminalRecord};
 
 mod authority;
 pub(crate) use authority::authorize_on as authorize_memory_selection_on;
+#[cfg(feature = "encrypted-dm")]
+pub mod confidential;
+mod conversation_context;
 mod memory_context;
 mod reviewed_memory;
 pub(crate) mod work;
 pub mod workspace_tools;
-#[cfg(feature = "encrypted-dm")]
-pub mod confidential;
 
 /// Ceiling for `runs.error_code`.
 const MAX_ERROR_CODE_BYTES: usize = 64;
@@ -573,7 +574,9 @@ pub(crate) async fn refresh_run_office_authority(
 ) -> Result<bool> {
     let ordinary:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM runs WHERE company_id=$1 AND id=$2 AND payload_mode='ordinary')")
         .bind(scope.company_id()).bind(run_id).fetch_one(control.pool()).await?;
-    if !ordinary { return Ok(false); }
+    if !ordinary {
+        return Ok(false);
+    }
     let is_work: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM runs WHERE company_id=$1 AND id=$2 AND work_item_id IS NOT NULL)")
         .bind(scope.company_id()).bind(run_id).fetch_one(control.pool()).await?;
     if is_work {

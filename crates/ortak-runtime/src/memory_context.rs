@@ -5,8 +5,8 @@ mod employee;
 mod recall;
 mod reviewed;
 pub use conversation::{
-    ConversationMemoryOrigin, MAX_RENDERED_CONTEXT_BYTES, ReviewedContextRecord,
-    ReviewedConversationContext, ReviewedConversationPin, ReviewedConversationRecord,
+    ConversationMemoryOrigin, ReviewedContextRecord, ReviewedConversationContext,
+    ReviewedConversationPin, ReviewedConversationRecord, MAX_RENDERED_CONTEXT_BYTES,
 };
 pub use employee::{
     EmployeeContextRecord, EmployeeMemoryOrigin, ReviewedEmployeeContext, ReviewedEmployeePin,
@@ -15,17 +15,17 @@ pub use employee::{
 pub use recall::{AdapterRunMemory, NoRunMemory, RunMemory};
 pub use reviewed::{ReviewedMemoryContext, ReviewedMemoryPin, ReviewedMemoryRecord};
 
-use ortak_control::CompanyScope;
 use ortak_control::adapter::Detail;
 use ortak_control::memory::{MemoryRecall, MemoryScope};
 use ortak_control::outbox::OutboxLease;
 use ortak_control::runtime::{RunSpec, RuntimeError};
+use ortak_control::CompanyScope;
 use ortak_domain::MemoryBinding;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::Result;
 use crate::authority::{DispatchAuthority, DispatchRefusal};
+use crate::Result;
 
 /// Hard ceiling on an encoded specification and its provenance.
 pub const MAX_SNAPSHOT_BYTES: usize = 256 * 1024;
@@ -140,6 +140,16 @@ impl FrozenRunSnapshot {
         };
         value.validate_for(authority, run_id)?;
         Ok(value)
+    }
+
+    pub(crate) fn with_conversation_context(
+        mut self,
+        authority: &DispatchAuthority,
+        context: ortak_control::conversation_context::ConversationContext,
+    ) -> Result<Self> {
+        self.wire.spec.context.conversation_context = Some(context);
+        let bytes = serde_json::to_vec(&self.wire).map_err(|_| rejected())?;
+        Self::decode(&bytes, authority, self.wire.spec.run_id)
     }
 
     /// Returns an unchanged copy of the original persisted bytes.
@@ -318,6 +328,10 @@ impl FrozenRunSnapshot {
                 return Err(rejected());
             }
         }
+        // This attributed context is a frozen source selection, not a fresh
+        // authority witness. PostgreSQL revalidates its sources on admission
+        // and delivery; retries preserve the exact chosen bytes.
+        expected.context.conversation_context = wire.spec.context.conversation_context.clone();
         if expected != wire.spec || wire.spec.validate().is_err() {
             return Err(rejected());
         }

@@ -6173,7 +6173,29 @@ CREATE INDEX idx_run_reviewed_memory_fact ON run_reviewed_memory_uses(company_id
 CREATE INDEX idx_run_reviewed_memory_expiry ON run_reviewed_memory_uses(company_id,expires_at,run_id);
 SELECT attach_community_write_fence('run_reviewed_memory_uses');
 
-CREATE FUNCTION ortak_run_reviewed_memory_current(company UUID, run UUID)
+CREATE OR REPLACE FUNCTION ortak_conversation_plaintext79(value TEXT) RETURNS TEXT
+LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE AS $$
+    SELECT translate(value,(SELECT string_agg(chr(i),'') FROM generate_series(1,159) i
+        WHERE (i<32 AND i NOT IN(9,10,13)) OR i>=127),'')
+$$;
+
+CREATE OR REPLACE FUNCTION ortak_run_conversation_context_current(company UUID, run UUID)
+RETURNS BOOLEAN LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RAISE EXCEPTION 'ortak: schema79 bootstrap requires reconciliation' USING ERRCODE='object_not_in_prerequisite_state';
+END
+$$;
+
+CREATE OR REPLACE FUNCTION ortak_conversation_snapshot_admission79() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    PERFORM ortak_lock_office_authority(NEW.company_id);
+    IF NOT ortak_run_conversation_context_current(NEW.company_id,NEW.run_id) THEN
+        RAISE EXCEPTION 'ortak: conversation context no longer permitted' USING ERRCODE='check_violation';
+    END IF;
+    RETURN NEW;
+END $$;
+
+CREATE OR REPLACE FUNCTION ortak_run_reviewed_memory_current(company UUID, run UUID)
 RETURNS BOOLEAN LANGUAGE sql STABLE AS $$
     SELECT false
 $$;
@@ -6321,13 +6343,14 @@ CREATE CONSTRAINT TRIGGER ortak_reviewed_snapshot_consistent AFTER INSERT ON run
 CREATE CONSTRAINT TRIGGER ortak_reviewed_use_consistent AFTER INSERT ON run_reviewed_memory_uses
     DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION ortak_reviewed_snapshot_consistent();
 
-CREATE FUNCTION ortak_reviewed_run_admission() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+CREATE OR REPLACE FUNCTION ortak_reviewed_run_admission() RETURNS TRIGGER LANGUAGE plpgsql AS $$
 DECLARE selected_run UUID; conversation BOOLEAN;
 BEGIN
     IF TG_TABLE_NAME='runs' THEN selected_run=NEW.id; ELSE selected_run=NEW.run_id; END IF;
     SELECT EXISTS(SELECT 1 FROM run_reviewed_memory_uses u WHERE u.company_id=NEW.company_id
         AND u.run_id=selected_run AND u.conversation_audience_hash IS NOT NULL) OR EXISTS(SELECT 1 FROM run_employee_reviewed_memory_uses u
-        WHERE u.company_id=NEW.company_id AND u.run_id=selected_run) INTO conversation;
+        WHERE u.company_id=NEW.company_id AND u.run_id=selected_run) OR EXISTS(SELECT 1 FROM run_context_snapshots s WHERE s.company_id=NEW.company_id AND s.run_id=selected_run
+            AND (ortak_snapshot_scratch_jsonb(convert_from(s.spec_bytes,'UTF8')::json)#>'{spec,context}') ? 'conversation_context') INTO conversation;
     IF TG_TABLE_NAME='runs' THEN
         IF NOT conversation THEN
             -- Preserve the reviewed-project admission trigger's legacy effect.
@@ -10207,3 +10230,12 @@ CREATE TRIGGER trg_routing_decisions_notify AFTER INSERT ON routing_decisions
 
 CREATE TRIGGER trg_routing_authority_notify AFTER INSERT OR UPDATE ON office_authority_generations
     FOR EACH ROW EXECUTE FUNCTION ortak_routing_notify();
+
+
+
+
+
+
+
+CREATE CONSTRAINT TRIGGER ortak_conversation_snapshot_admission79 AFTER INSERT ON run_context_snapshots
+    DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION ortak_conversation_snapshot_admission79();

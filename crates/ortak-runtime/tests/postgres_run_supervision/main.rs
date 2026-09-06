@@ -42,6 +42,9 @@ use fixture::*;
 mod authority;
 mod cancellation;
 mod cohort;
+#[cfg(feature = "encrypted-dm")]
+mod confidential;
+mod conversation_context;
 mod delivery_contention;
 mod direct;
 mod fencing;
@@ -55,5 +58,3 @@ mod permissions;
 mod reconciliation;
 mod stop_contention;
 mod supervision;
-#[cfg(feature = "encrypted-dm")]
-mod confidential;

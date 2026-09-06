@@ -441,3 +441,29 @@ and [Honcho](https://api.github.com/repos/plastic-labs/honcho/security-advisorie
 each returned an empty list; that is published-metadata evidence, not a security
 assurance. No source checkout, import, dependency installation, test, build,
 container or deployment action occurred. Only checkpoint documentation changed.
+
+### 2026-09-07 conversation-context integration checkpoint
+
+Observed Buzz remains `3c7f288c60d67df78577b237e27c3dfc8831aaa1`; Honcho
+remains `be54355545b64ddb10203829d323861f52423685`. Hermes main is now
+`693641aa8b4359c602283bdbbc14041e03bc47bc`. The official compare from prior
+observed `8d4b7f874d59841394536c72445bf7d0c6c18f2c` contains131 commits and242
+changed files. Four relevant patches were read in full: conversation-loop lazy
+imports/usage anchor, Responses-history preparation/session usage anchor and
+memory prefetch, strict-provider tool-result name removal, and workspace snapshot
+clearing on session reset. This is a bounded leaf review, not review of the
+entire delta. No upstream import or deployed revision advancement was performed.
+[Observed delta](https://github.com/NousResearch/hermes-agent/compare/8d4b7f874d59841394536c72445bf7d0c6c18f2c...693641aa8b4359c602283bdbbc14041e03bc47bc).
+
+Selected source stays `29112bef099274229cadff79cdff7bf7b99c4b77`. Its actual
+`agent/turn_context.py` history-copy/current-input path was read and added to the
+reviewed source lock (SHA256 `86a4f6c61183167850046b025a8f5c7b8601fb910f8a9ee464535afccc541c06`),
+now23 files. An existing-worker-image/source-overlay fixture verified all23 hashes
+and actual AIAgent history propagation to the Responses provider request boundary
+with synthetic provider results, no network and no credentials. Attribution lives
+in reference JSON, with no forged assistant role or API message-name field.
+The live worker/controller artifacts are unchanged; overlay verification does
+not establish new artifact installation or real-provider acceptance. Private
+observation/compare evidence lives under `conversation-upstream*-20260907.json`
+in `/private/tmp/ortak-v0-evidence` (compare SHA256
+`2195013446ac0f680ae72fa307aaa8dbe4a3d342c4fe13439c2bdb14a7fd6d66`).

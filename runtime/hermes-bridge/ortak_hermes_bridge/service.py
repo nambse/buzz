@@ -113,7 +113,7 @@ class Bridge:
         if not isinstance(spec['input'], str) or not spec['input'].strip() or len(spec['input'].encode()) > 65536 or '\0' in spec['input']:
             raise BridgeError('invalid_spec')
         context = spec['context']
-        if not isinstance(context, dict) or set(context) - {'conversation_ref', 'reply_to_message_id', 'work_item_id', 'memory_context'}:
+        if not isinstance(context, dict) or set(context) - {'conversation_ref', 'reply_to_message_id', 'work_item_id', 'memory_context', 'conversation_context'}:
             raise BridgeError('invalid_context')
         memory = context.get('memory_context', [])
         if not isinstance(memory, list) or len(memory) > 64 or any(not isinstance(x, str) or len(x.encode()) > 8192 or '\0' in x for x in memory):
@@ -129,6 +129,8 @@ class Bridge:
                     raise ValueError()
             except (ValueError, TypeError, AttributeError):
                 raise BridgeError('invalid_context') from None
+        from .conversation_context import validate as validate_conversation
+        validate_conversation(spec)
         from .workspace_contract import validate_workspace
         validate_workspace(body.get('workspace'), spec, self.company_id)
         return key, spec

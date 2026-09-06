@@ -3466,9 +3466,97 @@ RETURNS BOOLEAN LANGUAGE sql STABLE AS $$
             WHERE stop.company_id=f.company_id AND stop.fact_id=f.id AND stop.action='withdraw'))
 $$;
 
+CREATE OR REPLACE FUNCTION ortak_conversation_plaintext79(value TEXT) RETURNS TEXT
+LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE AS $$
+    SELECT translate(value,(SELECT string_agg(chr(i),'') FROM generate_series(1,159) i
+        WHERE (i<32 AND i NOT IN(9,10,13)) OR i>=127),'')
+$$;
+
+CREATE OR REPLACE FUNCTION ortak_run_conversation_context_current(company UUID, run UUID)
+RETURNS BOOLEAN LANGUAGE plpgsql STABLE AS $$
+DECLARE ctx JSONB; source JSONB; r runs; origin events; channel UUID; community UUID;
+    event_row events; metadata thread_metadata; clean TEXT; total INTEGER=0;
+BEGIN
+    SELECT ortak_snapshot_scratch_jsonb(convert_from(s.spec_bytes,'UTF8')::json)#>'{spec,context,conversation_context}'
+      INTO ctx FROM run_context_snapshots s WHERE s.company_id=company AND s.run_id=run;
+    IF ctx IS NULL THEN RETURN true; END IF;
+    SELECT * INTO r FROM runs WHERE company_id=company AND id=run;
+    IF r.id IS NULL OR r.payload_mode<>'ordinary' OR r.work_item_id IS NOT NULL
+        OR ctx->>'version'<>'1' OR ctx->>'snapshot_id'<>r.id::text
+        OR ctx#>>'{employee,employee_id}'<>r.employee_id
+        OR ctx#>>'{employee,revision_id}'<>r.employee_revision_id::text
+        OR ctx->>'trigger_message_id'<>encode(r.message_id,'hex')
+        OR jsonb_typeof(ctx->'messages') IS DISTINCT FROM 'array'
+        OR jsonb_array_length(ctx->'messages')>32 THEN RETURN false; END IF;
+    channel=(ctx->>'channel_id')::uuid;
+    SELECT community_id INTO community FROM office_company_bindings WHERE company_id=company;
+    SELECT ev.* INTO origin FROM office_inbox i JOIN events ev ON ev.community_id=community
+        AND ev.id=i.event_id AND ev.created_at=i.event_created_at
+        WHERE i.company_id=company AND i.event_id=r.message_id;
+    IF origin.id IS NULL OR origin.channel_id IS DISTINCT FROM channel OR origin.kind NOT IN(9,40002)
+        OR origin.deleted_at IS NOT NULL OR origin.received_at IS DISTINCT FROM (ctx->>'cutoff_received_at')::timestamptz
+        OR NOT EXISTS(SELECT 1 FROM channels c WHERE c.community_id=community AND c.id=channel
+            AND c.deleted_at IS NULL AND c.archived_at IS NULL AND c.channel_type IN('stream','dm')
+            AND (c.ttl_deadline IS NULL OR c.ttl_deadline>clock_timestamp()))
+        OR NOT EXISTS(SELECT 1 FROM employees e JOIN employee_revisions rev
+            ON rev.company_id=e.company_id AND rev.employee_id=e.id AND rev.id=e.active_revision_id
+            JOIN employee_office_bindings b ON b.company_id=e.company_id AND b.employee_id=e.id
+                AND encode(b.public_key,'hex')=lower(rev.manifest#>>'{office,public_key}')
+                AND b.signer_ref=rev.manifest#>>'{office,signer_ref}'
+            JOIN channel_members m ON m.community_id=community AND m.channel_id=channel AND m.pubkey=b.public_key
+            WHERE e.company_id=company AND e.id=r.employee_id AND e.status='active'
+                AND b.verified_at IS NOT NULL AND b.valid_from<=clock_timestamp()
+                AND (b.valid_until IS NULL OR b.valid_until>clock_timestamp()) AND m.removed_at IS NULL)
+        THEN RETURN false; END IF;
+    SELECT * INTO metadata FROM thread_metadata t WHERE t.community_id=community
+        AND t.event_id=origin.id AND t.event_created_at=origin.created_at;
+    IF (CASE WHEN metadata.parent_event_id IS NULL THEN NULL ELSE encode(metadata.root_event_id,'hex') END)
+        IS DISTINCT FROM ctx->>'thread_root_message_id' THEN RETURN false; END IF;
+    IF metadata.parent_event_id IS NOT NULL AND (
+        NOT EXISTS(SELECT 1 FROM jsonb_array_elements(ctx->'messages') s WHERE s->>'message_id'=encode(metadata.parent_event_id,'hex'))
+        OR NOT EXISTS(SELECT 1 FROM jsonb_array_elements(ctx->'messages') s WHERE s->>'message_id'=encode(metadata.root_event_id,'hex'))
+    ) THEN RETURN false; END IF;
+    IF (SELECT count(DISTINCT s->>'message_id') FROM jsonb_array_elements(ctx->'messages') s)
+        <>jsonb_array_length(ctx->'messages') THEN RETURN false; END IF;
+    FOR source IN SELECT * FROM jsonb_array_elements(ctx->'messages') LOOP
+        SELECT ev.* INTO event_row FROM events ev WHERE ev.community_id=community
+            AND ev.id=decode(source->>'message_id','hex') AND ev.created_at=(source->>'created_at')::timestamptz;
+        IF event_row.id IS NULL OR event_row.id=origin.id OR event_row.channel_id IS DISTINCT FROM channel
+            OR event_row.kind NOT IN(9,40002) OR event_row.deleted_at IS NOT NULL
+            OR event_row.created_at>origin.created_at OR event_row.received_at>origin.received_at
+            OR encode(event_row.pubkey,'hex') IS DISTINCT FROM source->>'author_public_key'
+            OR encode(sha256(convert_to(event_row.content,'UTF8')),'hex') IS DISTINCT FROM source->>'source_content_hash'
+            THEN RETURN false; END IF;
+        clean=ortak_conversation_plaintext79(event_row.content);
+        IF nullif(btrim(source->>'content'),'') IS NULL OR octet_length(source->>'content')>8192
+            OR left(clean,char_length(source->>'content')) IS DISTINCT FROM source->>'content'
+            OR (event_row.content IS DISTINCT FROM source->>'content') IS DISTINCT FROM (source->>'truncated')::boolean
+            THEN RETURN false; END IF;
+        total=total+octet_length(source->>'content');
+        IF total>49152 THEN RETURN false; END IF;
+        SELECT * INTO metadata FROM thread_metadata t WHERE t.community_id=community
+            AND t.event_id=event_row.id AND t.event_created_at=event_row.created_at;
+        IF encode(metadata.parent_event_id,'hex') IS DISTINCT FROM source->>'parent_message_id'
+            OR encode(metadata.root_event_id,'hex') IS DISTINCT FROM source->>'thread_root_message_id'
+            OR (ctx->>'thread_root_message_id' IS NOT NULL AND source->>'message_id'<>ctx->>'thread_root_message_id'
+                AND source->>'thread_root_message_id' IS DISTINCT FROM ctx->>'thread_root_message_id')
+            THEN RETURN false; END IF;
+    END LOOP;
+    RETURN true;
+END $$;
+
+CREATE OR REPLACE FUNCTION ortak_conversation_snapshot_admission79() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    PERFORM ortak_lock_office_authority(NEW.company_id);
+    IF NOT ortak_run_conversation_context_current(NEW.company_id,NEW.run_id) THEN
+        RAISE EXCEPTION 'ortak: conversation context no longer permitted' USING ERRCODE='check_violation';
+    END IF;
+    RETURN NEW;
+END $$;
+
 CREATE OR REPLACE FUNCTION ortak_run_reviewed_memory_current(company UUID, run UUID)
 RETURNS BOOLEAN LANGUAGE sql STABLE AS $$
-    SELECT ortak_run_employee_memory_current(company,run) AND NOT EXISTS(SELECT 1 FROM run_reviewed_memory_uses u
+    SELECT ortak_run_conversation_context_current(company,run) AND ortak_run_employee_memory_current(company,run) AND NOT EXISTS(SELECT 1 FROM run_reviewed_memory_uses u
         LEFT JOIN runs r ON r.company_id=u.company_id AND r.id=u.run_id
         LEFT JOIN work_executions wx ON wx.company_id=r.company_id AND wx.run_id=r.id
         LEFT JOIN reviewed_memory_facts f ON f.company_id=u.company_id AND f.id=u.fact_id
@@ -3541,7 +3629,8 @@ BEGIN
     IF TG_TABLE_NAME='runs' THEN selected_run=NEW.id; ELSE selected_run=NEW.run_id; END IF;
     SELECT EXISTS(SELECT 1 FROM run_reviewed_memory_uses u WHERE u.company_id=NEW.company_id
         AND u.run_id=selected_run AND u.conversation_audience_hash IS NOT NULL) OR EXISTS(SELECT 1 FROM run_employee_reviewed_memory_uses u
-        WHERE u.company_id=NEW.company_id AND u.run_id=selected_run) INTO conversation;
+        WHERE u.company_id=NEW.company_id AND u.run_id=selected_run) OR EXISTS(SELECT 1 FROM run_context_snapshots s WHERE s.company_id=NEW.company_id AND s.run_id=selected_run
+            AND (ortak_snapshot_scratch_jsonb(convert_from(s.spec_bytes,'UTF8')::json)#>'{spec,context}') ? 'conversation_context') INTO conversation;
     IF TG_TABLE_NAME='runs' THEN
         IF NOT conversation THEN
             -- Preserve the reviewed-project admission trigger's legacy effect.
@@ -6668,3 +6757,19 @@ BEGIN
         END IF;
     END LOOP;
 END $reconcile77_constraints$;
+
+-- Preserve the deferred context guard when the desired-state tool omits it.
+DO $$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='run_context_snapshots'::regclass
+        AND tgname='ortak_conversation_snapshot_admission79') THEN
+        CREATE CONSTRAINT TRIGGER ortak_conversation_snapshot_admission79 AFTER INSERT ON run_context_snapshots
+            DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION ortak_conversation_snapshot_admission79();
+    END IF;
+    IF NOT EXISTS(SELECT 1 FROM pg_trigger t JOIN pg_proc p ON p.oid=t.tgfoid
+        WHERE t.tgrelid='run_context_snapshots'::regclass AND t.tgname='ortak_conversation_snapshot_admission79'
+            AND t.tgtype=5 AND t.tgdeferrable AND t.tginitdeferred AND t.tgenabled='O'
+            AND p.proname='ortak_conversation_snapshot_admission79') THEN
+        RAISE EXCEPTION 'conversation snapshot admission guard differs' USING ERRCODE='check_violation';
+    END IF;
+END $$;

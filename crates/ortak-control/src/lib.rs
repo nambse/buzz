@@ -36,6 +36,7 @@
 pub mod adapter;
 pub mod cohort;
 pub mod confidential;
+pub mod conversation_context;
 pub mod credentials;
 mod error;
 pub mod fakes;

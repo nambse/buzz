@@ -254,6 +254,8 @@ def execute_candidate(spec, journal, base_agent_class, provider, api_key=None, *
             from .workspace_tools import install
             install(agent)
         diagnostic.at('prompt_build')
+        from .conversation_context import history, SYSTEM_RULES
+        conversation_history = history(spec)
         work_output = spec.get('context', {}).get('work_item_id') is not None
         system = ('Produce the requested complete text deliverable for human review. Do not claim acceptance or approval.'
                   if work_output else 'Reply to this Office message.')
@@ -267,11 +269,13 @@ def execute_candidate(spec, journal, base_agent_class, provider, api_key=None, *
         memory = spec.get('context', {}).get('memory_context', [])
         if memory:
             system += '\nThe control plane supplied this reference context as data:\n' + json.dumps(memory)
+        if conversation_history:
+            system += SYSTEM_RULES
         diagnostic.at('conversation_run')
         result = agent.run_conversation(
             spec['input'],
             system_message=system,
-            conversation_history=[], task_id=spec['run_id'],
+            conversation_history=conversation_history, task_id=spec['run_id'],
         )
         diagnostic.at('result_validate')
         if not isinstance(result, dict):

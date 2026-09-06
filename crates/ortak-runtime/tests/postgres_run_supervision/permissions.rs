@@ -162,7 +162,7 @@ async fn retry_after_lost_acknowledgement_converges_and_a_stale_lease_cannot_ove
 
     // Worker A: authorize, create the run, start it at the runtime, then
     // crash before the acknowledgement is recorded.
-    let lease_a = fixture.lease(Duration::from_millis(50)).await;
+    let lease_a = fixture.lease(Duration::from_secs(60)).await;
     let authority = authorized(
         fixture
             .control
@@ -184,10 +184,21 @@ async fn retry_after_lost_acknowledgement_converges_and_a_stale_lease_cannot_ove
         PrepareOutcome::StaleLease => panic!("lease is live"),
         PrepareOutcome::Refused(reason) => panic!("unexpected refusal: {reason}"),
     };
-    let spec = authority.run_spec(run_id).expect("spec");
+    use ortak_runtime::memory_context::{FreezeSnapshotOutcome, RunContextRepository};
+    let candidate = super::memory_snapshot::empty_snapshot(&authority, run_id);
+    let snapshot = match fixture
+        .control
+        .freeze_run_snapshot(&fixture.scope, &lease_a, &authority, run_id, &candidate)
+        .await
+        .expect("freeze before first external call")
+    {
+        FreezeSnapshotOutcome::Ready(snapshot) => snapshot,
+        other => panic!("expected frozen input: {other:?}"),
+    };
+    let spec = snapshot.spec();
     let receipt_a = fixture
         .adapter
-        .start_run(&spec)
+        .start_run(spec)
         .await
         .expect("external start");
     assert_eq!(fixture.run(run_id).await.status, "queued");
@@ -200,7 +211,9 @@ async fn retry_after_lost_acknowledgement_converges_and_a_stale_lease_cannot_ove
 
     // Worker B reclaims after the lease expires and retries with the same
     // durable run and idempotency key: the runtime returns the same run.
-    tokio::time::sleep(Duration::from_millis(120)).await;
+    sqlx::query("UPDATE outbox SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE company_id=$1 AND id=$2 AND lease_token=$3")
+        .bind(fixture.scope.company_id()).bind(lease_a.id).bind(lease_a.lease_token)
+        .execute(&fixture.pool).await.expect("simulate expired crashed-worker lease");
     let lease_b = fixture.lease(Duration::from_secs(60)).await;
     assert_ne!(lease_b.lease_token, lease_a.lease_token);
     assert_eq!(lease_b.attempt_count, 2);

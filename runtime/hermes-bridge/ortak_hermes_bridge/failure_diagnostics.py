@@ -38,7 +38,7 @@ PROVIDER_REASONS = frozenset({
 # arbitrary paths, exception-provided filenames, source text or local variables.
 HERMES_FILES = frozenset({
     'run_agent.py', 'model_tools.py', 'agent/agent_init.py', 'agent/tool_executor.py',
-    'agent/conversation_loop.py', 'agent/agent_runtime_helpers.py',
+    'agent/conversation_loop.py', 'agent/agent_runtime_helpers.py', 'agent/turn_context.py',
     'agent/process_bootstrap.py', 'hermes_cli/env_loader.py', 'hermes_constants.py',
     'tools/registry.py', 'tools/lazy_deps.py', 'tools/env_probe.py',
     'agent/transports/codex.py', 'agent/transports/chat_completions.py',
