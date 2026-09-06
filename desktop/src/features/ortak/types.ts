@@ -1,3 +1,6 @@
+import type { ConversationAudience } from "./conversationMemory/types";
+import type { EmployeeAudience } from "./employeeMemory/types";
+
 export type RunStatus =
   | "queued"
   | "running"
@@ -13,6 +16,8 @@ export type Employee = {
   active_revision_id: string | null;
 };
 export type EmployeePage = {
+  can_view_provisioning?: boolean;
+  can_execute_provisioning?: boolean;
   employees: Employee[];
   has_more: boolean;
   next_after: string | null;
@@ -28,7 +33,11 @@ export type RunHeader = {
     finished_at: string | null;
     updated_at: string;
   };
-  provenance: { routing_decision_id: string | null; message_id: string | null };
+  provenance: {
+    routing_decision_id: string | null;
+    message_id: string | null;
+    work_item_id?: string | null;
+  };
   last_event: { sequence: number } | null;
 };
 export type RunPage = {
@@ -51,6 +60,12 @@ export type RunDetailResponse = {
   cancellation: Cancellation | null;
   can_request_cancel: boolean;
   memory?: RunMemory;
+  work_output?: {
+    status: "pending" | "materialized" | "failed";
+    artifact_id: string | null;
+    work_item_id: string;
+    error_code: string | null;
+  } | null;
   office_delivery: {
     status: "pending" | "delivered" | "failed";
     error_code: string | null;
@@ -63,12 +78,27 @@ export type ActivityText = {
   truncated?: boolean;
 };
 export type RunMemory = {
-  scope: "run_scratch";
+  scope:
+    | "run_scratch"
+    | "run_scratch_and_reviewed_project"
+    | "run_scratch_and_reviewed_conversation"
+    | "run_scratch_and_reviewed_employee";
   run_id: string;
+  reviewed?: {
+    fact_id: string;
+    approval_id: string;
+    approved_by: string;
+    expires_at: string;
+    current: boolean;
+    content: ActivityText | null;
+    audience_kind?: "project" | "conversation" | "employee";
+    audience?: ConversationAudience | EmployeeAudience | null;
+  }[];
   recall: {
     status: "not_prepared" | "prepared";
     prepared_at: string | null;
     truncated: boolean;
+    withheld?: boolean;
     records: {
       record_ref: string;
       content: ActivityText;
@@ -82,6 +112,7 @@ export type RunMemory = {
     attempts: number;
     next_attempt_at: string | null;
     content: ActivityText;
+    withheld?: boolean;
     source: string;
     recorded_at: string;
     receipt: { reference: string; written: number } | null;
@@ -155,6 +186,7 @@ export interface ProjectPage {
   create_channels: { id: string; name: string }[];
 }
 export interface WorkSummary {
+  source_message_id?: string | null;
   id: string;
   project_id: string;
   title: string;
@@ -165,6 +197,17 @@ export interface WorkSummary {
 export interface WorkPage {
   work_items: WorkSummary[];
   next_cursor: string | null;
+}
+export interface WorkDependencyPage {
+  work_item_id: string;
+  work_version: number;
+  dependencies: { id: string; target: WorkSummary | null }[];
+}
+export interface WorkDecomposition {
+  work_item_id: string;
+  work_version: number;
+  parent: WorkSummary | null;
+  children: WorkSummary[];
 }
 export interface WorkItem extends WorkSummary {
   description: string;
@@ -196,7 +239,7 @@ export interface WorkItem extends WorkSummary {
   }[];
   history_omitted: boolean;
   history_truncated: boolean;
-  execution_available: false;
+  execution_available: boolean;
 }
 
 export interface EmployeeWorkPage {
@@ -205,5 +248,15 @@ export interface EmployeeWorkPage {
     assignment_role: "owner" | "contributor" | "reviewer";
   })[];
   next_cursor: string | null;
-  execution_available: false;
+  execution_available: boolean;
+}
+
+export interface WorkExecution {
+  run_id: string;
+  employee_id: string;
+  execution_version: number;
+  status: RunStatus;
+  artifact_id: string | null;
+  output_code: string | null;
+  reconciled: boolean;
 }

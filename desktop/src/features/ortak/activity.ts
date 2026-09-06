@@ -1,30 +1,6 @@
-import type {
-  ActivityEntry,
-  ActivityPage,
-  ActivityText,
-  RunDetailResponse,
-  RunStatus,
-} from "./types";
+import type { ActivityEntry, ActivityPage, ActivityText } from "./types";
 
 export const DISPLAY_EVENT_LIMIT = 500;
-export function isTerminal(status: RunStatus) {
-  return ["completed", "failed", "cancelled"].includes(status);
-}
-/** Detail and events are independent snapshots; drain the detail's high-water mark. */
-export function needsActivityPoll(
-  detail: RunDetailResponse,
-  page: ActivityPage,
-  cursor: number | null,
-) {
-  return (
-    page.has_more ||
-    !isTerminal(detail.detail.run.status) ||
-    detail.cancellation?.status === "pending" ||
-    detail.office_delivery?.status === "pending" ||
-    detail.memory?.write?.status === "pending" ||
-    (detail.detail.run.last_event?.sequence ?? -1) > (cursor ?? -1)
-  );
-}
 const text = (value?: ActivityText | string | null) =>
   typeof value === "string" ? value : (value?.text ?? "");
 

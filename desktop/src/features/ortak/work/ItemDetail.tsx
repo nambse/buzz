@@ -2,7 +2,14 @@ import { useEffect, useRef } from "react";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
-import type { Employee, WorkItem, WorkProject } from "../types";
+import type { Employee, WorkItem, WorkProject, WorkExecution } from "../types";
+import type { OrtakClient } from "../client";
+import { ExecutionPanel } from "./ExecutionPanel";
+import { DefinitionEditor } from "./DefinitionEditor";
+import { AssignmentPanel } from "./AssignmentPanel";
+import { DependencyPanel } from "./DependencyPanel";
+import { DecompositionPanel } from "./DecompositionPanel";
+import type { WorkSummary } from "../types";
 import { Field, Select, type SubmitWork } from "./fields";
 import { availableTransitions, stateLabel } from "./operations";
 
@@ -12,12 +19,22 @@ export function ItemDetail({
   employees,
   disabled,
   submit,
+  client,
+  executions,
+  revoke,
+  targets: dependencyTargets,
+  selectItem,
 }: {
   item: WorkItem;
   project: WorkProject;
   employees: Employee[];
   disabled: boolean;
   submit: SubmitWork;
+  client: OrtakClient;
+  executions: WorkExecution[];
+  revoke: () => void;
+  targets: WorkSummary[];
+  selectItem: (id: string) => void;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
@@ -26,9 +43,6 @@ export function ItemDetail({
   const path = `/api/v1/work-items/${encodeURIComponent(item.id)}`;
   const terminal = ["completed", "cancelled"].includes(item.state);
   const targets = availableTransitions(item.state, project);
-  const activeEmployees = employees.filter(
-    (employee) => employee.status === "active",
-  );
   return (
     <section
       aria-label="Work item detail"
@@ -47,13 +61,41 @@ export function ItemDetail({
           <Badge variant="outline">{item.priority}</Badge>
         </div>
         <p className="text-xs text-muted-foreground">
-          Saved manual status · Version {item.version}. This does not start or
-          confirm employee execution.
+          Saved work status · Version {item.version}. Execution state is shown
+          separately below.
         </p>
       </header>
       <p className="whitespace-pre-wrap break-words text-sm">
         {item.description || "No description."}
       </p>
+      <ExecutionPanel
+        key={item.id}
+        client={client}
+        item={item}
+        project={project}
+        employees={employees}
+        executions={executions}
+        disabled={disabled}
+        submit={submit}
+        revoke={revoke}
+      />
+      <DefinitionEditor
+        key={`${item.id}:${item.version}:definition`}
+        item={item}
+        project={project}
+        disabled={disabled}
+        submit={submit}
+      />
+      <DecompositionPanel
+        key={`${item.id}:${item.version}:decomposition`}
+        client={client}
+        item={item}
+        project={project}
+        disabled={disabled}
+        submit={submit}
+        revoke={revoke}
+        selectItem={selectItem}
+      />
       {targets.length ? (
         <form
           aria-label="Change manual status"
@@ -206,71 +248,22 @@ export function ItemDetail({
           </p>
         ) : null}
       </section>
-      <section aria-label="Manual assignments" className="flex flex-col gap-3">
-        <h4 className="text-sm font-semibold">Manual assignments</h4>
-        {!item.assignments.length ? (
-          <p className="text-sm text-muted-foreground">
-            No visible assignments.
-          </p>
-        ) : (
-          <ul className="text-sm">
-            {item.assignments.map((assignment) => (
-              <li key={`${assignment.employee_id}:${assignment.role}`}>
-                {employees.find(
-                  (employee) => employee.employee_id === assignment.employee_id,
-                )?.name ?? "Employee outside this directory page"}{" "}
-                · {assignment.role} · {assignment.status}
-              </li>
-            ))}
-          </ul>
-        )}
-        {project.can_contribute && !terminal && activeEmployees.length ? (
-          <form
-            aria-label="Assign employee"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const form = new FormData(event.currentTarget);
-              submit(`${path}/assignments`, "Manual assignment", {
-                expected_version: item.version,
-                employee_id: form.get("employee"),
-                role: form.get("role"),
-              });
-            }}
-          >
-            <fieldset disabled={disabled} className="flex flex-col gap-3">
-              <Field label="Employee from current directory page">
-                {(id) => (
-                  <Select id={id} name="employee" required defaultValue="">
-                    <option value="" disabled>
-                      Choose an employee
-                    </option>
-                    {activeEmployees.map((employee) => (
-                      <option
-                        key={employee.employee_id}
-                        value={employee.employee_id}
-                      >
-                        {employee.name ?? "Unnamed employee"}
-                      </option>
-                    ))}
-                  </Select>
-                )}
-              </Field>
-              <Field label="Assignment role">
-                {(id) => (
-                  <Select id={id} name="role" defaultValue="owner">
-                    <option value="owner">Owner</option>
-                    <option value="contributor">Contributor</option>
-                    <option value="reviewer">Reviewer</option>
-                  </Select>
-                )}
-              </Field>
-              <Button size="sm" variant="outline" type="submit">
-                Save assignment
-              </Button>
-            </fieldset>
-          </form>
-        ) : null}
-      </section>
+      <AssignmentPanel
+        item={item}
+        project={project}
+        employees={employees}
+        disabled={disabled}
+        submit={submit}
+      />
+      <DependencyPanel
+        client={client}
+        item={item}
+        project={project}
+        targets={dependencyTargets}
+        disabled={disabled}
+        submit={submit}
+        revoke={revoke}
+      />
       <details className="text-sm">
         <summary className="cursor-pointer font-medium">Saved history</summary>
         {item.history_omitted || item.history_truncated ? (

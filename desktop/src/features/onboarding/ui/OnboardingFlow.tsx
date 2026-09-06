@@ -27,6 +27,10 @@ import {
 import { useCommunities } from "@/features/communities/useCommunities";
 import { CommunityChangeOverlay } from "@/features/communities/ui/CommunityChangeOverlay";
 import {
+  desktopProductName,
+  privateOrtakMode,
+} from "@/features/ortak/privateMode";
+import {
   type OnboardingTransitionDirection,
   OnboardingSlideTransition,
 } from "./OnboardingSlideTransition";
@@ -445,7 +449,7 @@ export function OnboardingFlow({
   }, [handleLostModeBack, identityLost, keyImportStage, showProfilePage]);
 
   const chromeBackAction =
-    currentPage === "profile"
+    currentPage === "profile" && !privateOrtakMode
       ? {
           disabled: profileStepState.isSaving,
           onClick: () => {
@@ -488,7 +492,7 @@ export function OnboardingFlow({
           }}
           pubkey={deniedPubkey}
         />
-        {isCommunityChangeOpen ? (
+        {isCommunityChangeOpen && !privateOrtakMode ? (
           <CommunityChangeOverlay
             onClose={() => setIsCommunityChangeOpen(false)}
           />
@@ -518,19 +522,25 @@ export function OnboardingFlow({
                 {membershipError.kind === "unreachable" ? (
                   <>
                     <p className="font-medium text-destructive">
-                      Can't reach this relay
+                      {privateOrtakMode
+                        ? "Can't connect to your company"
+                        : "Can't reach this relay"}
                     </p>
                     <p className="mt-1 text-muted-foreground">
-                      Check your connection or change your community.
+                      {privateOrtakMode
+                        ? "Check your connection and try again."
+                        : "Check your connection or change your community."}
                     </p>
-                    <Button
-                      className="mt-3"
-                      onClick={() => setIsCommunityChangeOpen(true)}
-                      size="sm"
-                      variant="outline"
-                    >
-                      Change community
-                    </Button>
+                    {!privateOrtakMode ? (
+                      <Button
+                        className="mt-3"
+                        onClick={() => setIsCommunityChangeOpen(true)}
+                        size="sm"
+                        variant="outline"
+                      >
+                        Change community
+                      </Button>
+                    ) : null}
                   </>
                 ) : (
                   <>
@@ -538,7 +548,9 @@ export function OnboardingFlow({
                       {membershipError.message ?? "Something went wrong"}
                     </p>
                     <p className="mt-1 text-muted-foreground">
-                      The relay returned an error. Try again.
+                      {privateOrtakMode
+                        ? "The company connection returned an error. Try again."
+                        : "The relay returned an error. Try again."}
                     </p>
                   </>
                 )}
@@ -577,9 +589,9 @@ export function OnboardingFlow({
                       </h1>
                       <p className="mt-5 text-sm leading-6 text-muted-foreground">
                         Your identity is no longer in the system keyring.
-                        Re-import your nsec to restore it — Buzz will restart to
-                        finish recovery. Or go back to start a new identity with
-                        a fresh key.
+                        Re-import your nsec to restore it — {desktopProductName}{" "}
+                        will restart to finish recovery. Or go back to start a
+                        new identity with a fresh key.
                       </p>
                     </>
                   ) : (
@@ -589,8 +601,9 @@ export function OnboardingFlow({
                       </h1>
                       <p className="mt-5 text-sm leading-6 text-muted-foreground">
                         Import your Nostr private key to use that identity with
-                        Buzz. If this key already has a profile on the relay,
-                        your name and avatar are restored automatically.
+                        {desktopProductName}. If this key already has a profile
+                        on the relay, your name and avatar are restored
+                        automatically.
                       </p>
                     </>
                   )}
@@ -633,7 +646,7 @@ export function OnboardingFlow({
           </div>
         </OnboardingFooterProvider>
       </div>
-      {isCommunityChangeOpen ? (
+      {isCommunityChangeOpen && !privateOrtakMode ? (
         <CommunityChangeOverlay
           onClose={() => setIsCommunityChangeOpen(false)}
         />

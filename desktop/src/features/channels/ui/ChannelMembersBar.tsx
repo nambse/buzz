@@ -76,8 +76,12 @@ export function ChannelMembersBar({
     channel.id,
     channel.channelType === "dm",
   );
-  const providersQuery = useAvailableAcpRuntimes();
-  const managedAgentsQuery = useManagedAgentsQuery();
+  const providersQuery = useAvailableAcpRuntimes({
+    enabled: !privateOrtakMode,
+  });
+  const managedAgentsQuery = useManagedAgentsQuery({
+    enabled: !privateOrtakMode,
+  });
   const relayAgentsQuery = useRelayAgentsQuery();
   const members = membersQuery.data ?? [];
   const dmProfilesQuery = useUsersBatchQuery(
@@ -161,7 +165,7 @@ export function ChannelMembersBar({
           ? relayAgentsQuery.error.message
           : null;
 
-  const huddleIndicator = (
+  const huddleIndicator = privateOrtakMode ? null : (
     <HuddleIndicator
       channelId={channel.id}
       onStart={async () => {

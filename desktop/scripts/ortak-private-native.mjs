@@ -16,6 +16,7 @@ export const privateNativeIdentity = Object.freeze({
   relayHttp: "http://localhost:3038",
   apiOrigin: "http://127.0.0.1:8787",
   devOrigin: "http://localhost:1427",
+  encryptedDmChannels: Object.freeze(["be203245-5ca3-4a47-9d88-2c20fc65622a"]),
 });
 
 // Carry build tools and OS paths, never ambient application identities, provider
@@ -84,6 +85,8 @@ export function privateNativePlan(mode, sourceEnv = process.env) {
     CARGO_TARGET_DIR: target,
     CARGO_INCREMENTAL: "0",
     CARGO_BUILD_JOBS: "2",
+    CARGO_PROFILE_DEV_DEBUG: "0",
+    ORTAK_PRIVATE_DESKTOP: "1",
     BUZZ_BUILD_DEMO_SLUG: identity.slug,
     BUZZ_BUILD_AUTO_CONNECT_DEFAULT_RELAY: "1",
     BUZZ_RELAY_URL: identity.relayUrl,
@@ -91,6 +94,9 @@ export function privateNativePlan(mode, sourceEnv = process.env) {
     VITE_ORTAK_PRIVATE_MODE: "true",
     VITE_ORTAK_API_BINDINGS_JSON: JSON.stringify({
       [identity.relayHttp]: identity.apiOrigin,
+    }),
+    VITE_ORTAK_ENCRYPTED_DM_CHANNELS_JSON: JSON.stringify({
+      [identity.relayHttp]: identity.encryptedDmChannels,
     }),
     VITE_BUZZ_BESTIE: "0",
     VITE_PORT: "1427",
@@ -105,6 +111,7 @@ export function privateNativePlan(mode, sourceEnv = process.env) {
     args.push("build", "--debug", "--bundles", "app", "--no-sign", "--ci");
   else args.push("dev");
   args.push("--config", configPath);
+  args.push("--features", "system-keyring");
   if (sourceEnv.ORTAK_NATIVE_CARGO) {
     if (!path.isAbsolute(sourceEnv.ORTAK_NATIVE_CARGO))
       throw new Error(
@@ -112,6 +119,9 @@ export function privateNativePlan(mode, sourceEnv = process.env) {
       );
     args.push("--runner", sourceEnv.ORTAK_NATIVE_CARGO);
   }
+  // Tauri forwards Cargo-only switches after its argument separator. Private
+  // builds omit the default-on legacy-terminal and legacy-voice graphs.
+  args.push("--", "--no-default-features");
   return { identity, config, env, args, cwd: desktopRoot, target };
 }
 
@@ -138,6 +148,7 @@ export function runPrivateNative(args, options = {}) {
           allowedWebOrigins: [plan.identity.devOrigin, "tauri://localhost"],
           config: configPath,
           action: "No build or application launched.",
+          nativeExecutionPolicy: "compiled-office-only",
         },
         null,
         2,
@@ -164,6 +175,8 @@ export function runPrivateNative(args, options = {}) {
         [
           "--edition=2021",
           "--test",
+          "--cfg",
+          "ortak_private_desktop",
           "-A",
           "dead_code",
           path.join(desktopRoot, "scripts/ortak-private-native-identity.rs"),
@@ -175,6 +188,7 @@ export function runPrivateNative(args, options = {}) {
           env: {
             ...plan.env,
             BUZZ_DESKTOP_BUILD_DEMO_SLUG: plan.identity.slug,
+            BUZZ_DESKTOP_BUILD_RELAY_URL: plan.env.BUZZ_RELAY_URL,
           },
           stdio: "inherit",
           timeout: 60_000,

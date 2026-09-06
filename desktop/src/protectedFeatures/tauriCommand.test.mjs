@@ -11,6 +11,7 @@ const desktopRoot = path.resolve(
   "../..",
 );
 const wrapper = path.join(desktopRoot, "scripts/tauri-command.mjs");
+const configDir = path.join(desktopRoot, "src-tauri");
 const fakeCli = path.join(tmpdir(), `buzz-fake-tauri-${process.pid}.mjs`);
 
 writeFileSync(
@@ -20,14 +21,16 @@ import path from "node:path";
 const args = process.argv.slice(2);
 const configIndex = args.lastIndexOf("--config");
 const override = JSON.parse(args[configIndex + 1]);
-const output = override.build.frontendDist;
-mkdirSync(output, { recursive: true });
-writeFileSync(path.join(output, "variant.txt"), process.env.VITE_BUZZ_BESTIE);
+const configured = override.build.frontendDist;
+const output = path.resolve(process.env.BUZZ_TEST_CONFIG_DIR, configured);
+const producer = process.env.BUZZ_PROTECTED_BUILD_OUTPUT;
+mkdirSync(producer, { recursive: true });
+writeFileSync(path.join(producer, "variant.txt"), process.env.VITE_BUZZ_BESTIE);
 await new Promise((resolve) => setTimeout(resolve, 100));
 const observed = readFileSync(path.join(output, "variant.txt"), "utf8");
 writeFileSync(
   process.env.BUZZ_TEST_RESULT,
-  JSON.stringify({ args, output, observed }),
+  JSON.stringify({ args, configured, output, observed }),
 );
 `,
 );
@@ -42,6 +45,7 @@ function packageVariant(variant, result, runnerArguments = []) {
         env: {
           ...process.env,
           BUZZ_TAURI_CLI_ENTRYPOINT: fakeCli,
+          BUZZ_TEST_CONFIG_DIR: configDir,
           BUZZ_TEST_RESULT: result,
           VITE_BUZZ_BESTIE: variant,
         },
@@ -92,6 +96,18 @@ test("private config precedes Cargo runner arguments", async () => {
   assert.equal(invocation.args[delimiterIndex + 1], "--locked");
   assert.equal(
     JSON.parse(invocation.args[privateConfigIndex + 1]).build.frontendDist,
-    invocation.output,
+    invocation.configured,
   );
+});
+
+test("private frontendDist remains a config-relative path and reads the produced assets", async () => {
+  const result = path.join(
+    tmpdir(),
+    `buzz-tauri-frontend-dist-${process.pid}.json`,
+  );
+  await packageVariant("0", result);
+  const invocation = JSON.parse(readFileSync(result, "utf8"));
+  assert.ok(!path.isAbsolute(invocation.configured));
+  assert.throws(() => new URL(invocation.configured));
+  assert.equal(invocation.observed, "0");
 });

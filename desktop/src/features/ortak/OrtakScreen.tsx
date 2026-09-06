@@ -14,12 +14,22 @@ import {
 import { Skeleton } from "@/shared/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs";
 import { createOrtakClient, OrtakApiError } from "./client";
+import { EmployeeMemoryRecovery } from "./employeeMemory/EmployeeMemoryRecovery";
 import { EmployeeWorkQueue } from "./work/EmployeeWorkQueue";
 import { WorkScreen } from "./work/WorkScreen";
+import type { WorkSelection } from "./work/selection";
+import { ProvisioningPanel } from "./provisioning/ProvisioningPanel";
+import { ManagementPanel } from "./provisioning/ManagementPanel";
 import { RunPanel } from "./RunPanel";
 import type { EmployeePage, RunPage } from "./types";
 
-export function OrtakScreen({ origin }: { origin: string }) {
+export function OrtakScreen({
+  origin,
+  initialWork,
+}: {
+  origin: string;
+  initialWork?: WorkSelection;
+}) {
   const client = useMemo(
     () => createOrtakClient(origin, signRelayEvent),
     [origin],
@@ -29,10 +39,14 @@ export function OrtakScreen({ origin }: { origin: string }) {
   const [employeeAfter, setEmployeeAfter] = useState<string | undefined>();
   const [runCursor, setRunCursor] = useState<string | undefined>();
   const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null);
+  const [provisioningEmployee, setProvisioningEmployee] = useState<
+    string | null
+  >(null);
+  const provisioningButton = useRef<HTMLButtonElement | null>(null);
   const selectedEmployeeButton = useRef<HTMLButtonElement | null>(null);
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
-  const [tab, setTab] = useState("employees");
-  const [workOpened, setWorkOpened] = useState(false);
+  const [tab, setTab] = useState(initialWork ? "work" : "employees");
+  const [workOpened, setWorkOpened] = useState(Boolean(initialWork));
   const [accessRevoked, setAccessRevoked] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -77,6 +91,7 @@ export function OrtakScreen({ origin }: { origin: string }) {
           setRuns(null);
           setSelectedRun(null);
           setSelectedEmployee(null);
+          setProvisioningEmployee(null);
         }
         failures += 1;
         if (!revoked && failures < 5)
@@ -95,6 +110,12 @@ export function OrtakScreen({ origin }: { origin: string }) {
   const queueEmployee = employees?.employees.find(
     (employee) => employee.employee_id === selectedEmployee,
   );
+  const managedEmployee =
+    employees?.can_view_provisioning === true
+      ? employees.employees.find(
+          (employee) => employee.employee_id === provisioningEmployee,
+        )
+      : undefined;
   const selected = runs?.runs.find((run) => run.run_id === selectedRun);
   const name =
     employees?.employees.find(
@@ -141,6 +162,9 @@ export function OrtakScreen({ origin }: { origin: string }) {
           <TabsTrigger value="work">Projects &amp; Work</TabsTrigger>
         </TabsList>
         <TabsContent value="employees" className="flex flex-col gap-4">
+          {employees?.can_execute_provisioning === true && !accessRevoked ? (
+            <ManagementPanel key={origin} client={client} />
+          ) : null}
           {!employees && !error ? <Skeleton className="h-40 w-full" /> : null}
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {employees?.employees.map((employee) => {
@@ -173,6 +197,26 @@ export function OrtakScreen({ origin }: { origin: string }) {
                     </p>
                   </CardContent>
                   <CardFooter className="flex flex-wrap gap-2">
+                    <EmployeeMemoryRecovery
+                      client={client}
+                      employee={employee}
+                    />
+                    {employees?.can_view_provisioning === true ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        aria-label={`View provisioning for ${employee.name ?? employee.employee_id}`}
+                        aria-pressed={
+                          provisioningEmployee === employee.employee_id
+                        }
+                        onClick={(event) => {
+                          provisioningButton.current = event.currentTarget;
+                          setProvisioningEmployee(employee.employee_id);
+                        }}
+                      >
+                        View provisioning
+                      </Button>
+                    ) : null}
                     <Button
                       variant="outline"
                       size="sm"
@@ -210,6 +254,17 @@ export function OrtakScreen({ origin }: { origin: string }) {
               );
             })}
           </div>
+          {managedEmployee && !accessRevoked ? (
+            <ProvisioningPanel
+              key={`${origin}:${managedEmployee.employee_id}`}
+              client={client}
+              employee={managedEmployee}
+              onClose={() => {
+                setProvisioningEmployee(null);
+                provisioningButton.current?.focus();
+              }}
+            />
+          ) : null}
           {queueEmployee && !accessRevoked ? (
             <EmployeeWorkQueue
               key={`${origin}:${queueEmployee.employee_id}`}
@@ -333,6 +388,7 @@ export function OrtakScreen({ origin }: { origin: string }) {
               client={client}
               employees={employees?.employees ?? []}
               accessRevoked={accessRevoked}
+              initialSelection={initialWork}
             />
           </TabsContent>
         ) : null}

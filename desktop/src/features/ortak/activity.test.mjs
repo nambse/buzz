@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  appendActivity,
-  describeActivity,
-  needsActivityPoll,
-} from "./activity.ts";
+import { appendActivity, describeActivity } from "./activity.ts";
 
 const entry = (sequence) => ({
   sequence,
@@ -78,50 +74,6 @@ test("the display is bounded while the reconnect cursor keeps the full durable p
   assert.equal(result.entries.length, 500);
   assert.equal(result.entries[0].sequence, 2);
   assert.equal(result.cursor, 501);
-});
-
-test("terminal detail cannot stop polling before its final event or cancellation acknowledgement", () => {
-  const detail = {
-    detail: { run: { status: "completed", last_event: { sequence: 2 } } },
-    cancellation: null,
-  };
-  assert.equal(needsActivityPoll(detail, page([entry(1)], 1), 1), true);
-  assert.equal(needsActivityPoll(detail, page([entry(2)], 2), 2), false);
-  assert.equal(
-    needsActivityPoll(
-      { ...detail, office_delivery: { status: "pending" } },
-      page([], 2),
-      2,
-    ),
-    true,
-  );
-  for (const status of ["delivered", "failed"]) {
-    assert.equal(
-      needsActivityPoll(
-        { ...detail, office_delivery: { status } },
-        page([], 2),
-        2,
-      ),
-      false,
-    );
-  }
-  assert.equal(needsActivityPoll(detail, page([entry(2)], 2, true), 2), true);
-  assert.equal(
-    needsActivityPoll(
-      { ...detail, cancellation: { status: "pending" } },
-      page([], 2),
-      2,
-    ),
-    true,
-  );
-  assert.equal(
-    needsActivityPoll(
-      { detail: { run: { status: "running", last_event: null } } },
-      page([], null),
-      null,
-    ),
-    true,
-  );
 });
 
 test("the rendered timeline uses semantic tool, terminal, and silent-completion activity", () => {

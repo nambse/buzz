@@ -2,6 +2,7 @@ import * as React from "react";
 import { Check, Copy, KeyRound, ShieldX, Ticket } from "lucide-react";
 
 import { useCommunityOnboarding } from "@/features/onboarding/communityOnboarding";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 import { nsecToNpub, pubkeyToNpub } from "@/shared/lib/nostrUtils";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
@@ -114,8 +115,9 @@ export function MembershipDenied({
             </h1>
           </div>
           <p className="text-sm leading-6 text-muted-foreground">
-            This relay requires an invitation. Ask a relay admin to add you as a
-            member, then come back and try again.
+            {privateOrtakMode
+              ? "Ask your company administrator to add your identity, then try again. You can also restore your existing key below."
+              : "This relay requires an invitation. Ask a relay admin to add you as a member, then come back and try again."}
           </p>
         </div>
 
@@ -147,13 +149,14 @@ export function MembershipDenied({
             </div>
           </div>
           <p className="text-xs leading-5 text-muted-foreground">
-            This is your public identity — it&apos;s safe to share. Send it to
-            the relay admin so they can invite you.
+            {privateOrtakMode
+              ? "This is your public identity. You can share it with your company administrator."
+              : "This is your public identity — it's safe to share. Send it to the relay admin so they can invite you."}
           </p>
         </div>
 
         <div className="mt-6 flex flex-col gap-2">
-          {isInviteFormOpen ? (
+          {isInviteFormOpen && !privateOrtakMode ? (
             <InviteRedeemForm
               defaultRelayUrl={activeRelayUrl}
               error={null}
@@ -259,24 +262,28 @@ export function MembershipDenied({
                 >
                   Back
                 </Button>
-                <Button
-                  className="flex-1 text-muted-foreground hover:text-accent-foreground"
-                  onClick={onChangeCommunity}
-                  type="button"
-                  variant="ghost"
-                >
-                  Change community
-                </Button>
+                {!privateOrtakMode ? (
+                  <Button
+                    className="flex-1 text-muted-foreground hover:text-accent-foreground"
+                    onClick={onChangeCommunity}
+                    type="button"
+                    variant="ghost"
+                  >
+                    Change community
+                  </Button>
+                ) : null}
               </div>
-              <button
-                className="flex w-full items-center justify-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-                data-testid="membership-denied-redeem-invite"
-                onClick={() => setIsInviteFormOpen(true)}
-                type="button"
-              >
-                <Ticket className="h-4 w-4" />
-                Have an invite?
-              </button>
+              {!privateOrtakMode ? (
+                <button
+                  className="flex w-full items-center justify-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                  data-testid="membership-denied-redeem-invite"
+                  onClick={() => setIsInviteFormOpen(true)}
+                  type="button"
+                >
+                  <Ticket className="h-4 w-4" />
+                  Have an invite?
+                </button>
+              ) : null}
               <button
                 className="flex w-full items-center justify-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
                 data-testid="membership-denied-change-key"

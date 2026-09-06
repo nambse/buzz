@@ -11,6 +11,7 @@ use nostr::{Keys, ToBech32};
 use tauri::{AppHandle, Manager};
 use tokio::sync::Mutex as AsyncMutex;
 
+#[cfg(feature = "legacy-voice")]
 use crate::huddle::HuddleState;
 pub(crate) use crate::identity_storage::{IdentityStorage, RecoveryState, ResolvedIdentity};
 use crate::managed_agents::config_bridge::SessionConfigCache;
@@ -48,7 +49,9 @@ pub struct AppState {
     pub channel_templates_store_lock: Mutex<()>,
     pub managed_agent_processes: Mutex<HashMap<ManagedAgentRuntimeKey, ManagedAgentPairRuntime>>,
     pub provider_deploy_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    #[cfg(feature = "legacy-voice")]
     pub huddle_state: Mutex<HuddleState>,
+    #[cfg(feature = "legacy-voice")]
     pub huddle_audio: crate::huddle::tts_settings::HuddleAudioSettingsState,
     /// Tauri app handle — stored after setup so huddle commands can emit
     /// `huddle-state-changed` events without needing the handle threaded
@@ -225,7 +228,9 @@ pub fn build_app_state() -> AppState {
         managed_agent_processes: Mutex::new(HashMap::new()),
         provider_deploy_locks: Mutex::new(HashMap::new()),
         session_config_cache: Mutex::new(HashMap::new()),
+        #[cfg(feature = "legacy-voice")]
         huddle_state: Mutex::new(HuddleState::default()),
+        #[cfg(feature = "legacy-voice")]
         huddle_audio: Default::default(),
         app_handle: Mutex::new(None),
         media_proxy_port: AtomicU16::new(0),

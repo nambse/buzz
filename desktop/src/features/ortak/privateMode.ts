@@ -2,6 +2,9 @@
 export const privateOrtakMode =
   import.meta.env?.VITE_ORTAK_PRIVATE_MODE === "true";
 
+/** Product copy follows the compiled private installation. */
+export const desktopProductName = privateOrtakMode ? "Ortak" : "Buzz";
+
 const blockedFeatures = new Set([
   "projects",
   "workflows",
@@ -9,13 +12,17 @@ const blockedFeatures = new Set([
   "forum",
   "managed-agents",
   "channel-templates",
+  "huddle",
 ]);
 const blockedSettings = new Set([
+  "voice",
+  "mobile",
   "agents",
   "compute",
   "channel-templates",
   "experimental",
   "hosted-communities",
+  "updates",
 ]);
 const blockedCommands = new Set([
   "create_managed_agent",
@@ -40,6 +47,14 @@ const blockedCommands = new Set([
   "connect_acp_runtime",
   "install_acp_runtime",
   "set_global_agent_config",
+  "start_huddle",
+  "join_huddle",
+  "open_huddle_window",
+  "start_stt_pipeline",
+  "download_voice_models",
+  "mesh_start_node",
+  "relay_reconnect_hook",
+  "terminal_attach",
 ]);
 
 /** Private mode cannot be widened by saved preview preferences. */

@@ -12,7 +12,7 @@ import {
 } from "@/shared/ui/card";
 import { Skeleton } from "@/shared/ui/skeleton";
 import { describeActivity, DISPLAY_EVENT_LIMIT } from "./activity";
-import type { OrtakClient } from "./client";
+import { OrtakApiError, type OrtakClient } from "./client";
 import type { Cancellation } from "./types";
 import { RunMemoryPanel } from "./RunMemoryPanel";
 import { useRunActivity } from "./useActivity";
@@ -21,22 +21,24 @@ export function RunPanel({
   client,
   runId,
   employeeName,
+  onAccessRevoked,
 }: {
   client: OrtakClient;
   runId: string;
   employeeName: string;
+  onAccessRevoked?: () => void;
 }) {
   const [refresh, setRefresh] = useState(0);
   const [request, setRequest] = useState<Cancellation | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
   const [requesting, setRequesting] = useState(false);
   const cancellationController = useRef<AbortController | null>(null);
-  const { detail, entries, error, connected } = useRunActivity(
-    client,
-    runId,
-    refresh,
-  );
+  const { detail, entries, error, connected, reconnecting, accessRevoked } =
+    useRunActivity(client, runId, refresh);
   useEffect(() => () => cancellationController.current?.abort(), []);
+  useEffect(() => {
+    if (accessRevoked) onAccessRevoked?.();
+  }, [accessRevoked, onAccessRevoked]);
   const cancellation = detail?.cancellation ?? request;
   async function cancel() {
     const controller = new AbortController();
@@ -50,6 +52,12 @@ export function RunPanel({
         setRefresh((value) => value + 1);
       }
     } catch (cause) {
+      if (
+        !controller.signal.aborted &&
+        cause instanceof OrtakApiError &&
+        [401, 403, 404].includes(cause.status)
+      )
+        onAccessRevoked?.();
       if (!controller.signal.aborted)
         setRequestError(
           cause instanceof Error
@@ -105,6 +113,15 @@ export function RunPanel({
           {detail?.detail.run.outcome.delivery_intent === "silent" ? (
             <p className="text-sm text-muted-foreground">
               This run finished without an Office reply.
+            </p>
+          ) : null}
+          {detail?.work_output ? (
+            <p role="status" className="text-sm">
+              {detail.work_output.status === "materialized"
+                ? "A text deliverable is saved in Work for human review."
+                : detail.work_output.status === "failed"
+                  ? `No Work deliverable was saved: ${detail.work_output.error_code ?? "output failed"}.`
+                  : "The Work deliverable is being checked and saved."}
             </p>
           ) : null}
           {detail?.office_delivery ? (
@@ -193,7 +210,9 @@ export function RunPanel({
       {detail?.memory ? <RunMemoryPanel memory={detail.memory} /> : null}
       {error ? (
         <Alert variant="destructive">
-          <AlertTitle>Activity disconnected</AlertTitle>
+          <AlertTitle>
+            {reconnecting ? "Activity reconnecting" : "Activity disconnected"}
+          </AlertTitle>
           <AlertDescription>
             {error} Reload the timeline to try again.
           </AlertDescription>
@@ -201,10 +220,12 @@ export function RunPanel({
       ) : null}
       <p className="text-xs text-muted-foreground" role="status">
         {connected
-          ? "Showing confirmed activity"
-          : error
-            ? "Updates paused"
-            : "Connecting to activity…"}
+          ? "Live activity connected"
+          : reconnecting
+            ? "Reconnecting from confirmed activity…"
+            : error
+              ? "Updates paused"
+              : "Connecting to activity…"}
         {entries.length === DISPLAY_EVENT_LIMIT
           ? ` · Latest ${DISPLAY_EVENT_LIMIT} events shown`
           : ""}

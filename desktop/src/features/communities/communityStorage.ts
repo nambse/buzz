@@ -2,6 +2,7 @@ import type { Community } from "./types";
 import { homeDir } from "@tauri-apps/api/path";
 import { setLocalStorageItemWithRecovery } from "@/shared/lib/localStorageQuota";
 import { getStorageItem, removeStorageItem } from "@/shared/lib/safeStorage";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 
 const COMMUNITIES_KEY = "buzz-communities";
 const ACTIVE_COMMUNITY_KEY = "buzz-active-community-id";
@@ -234,7 +235,9 @@ export function initFirstCommunity(
     return null;
   }
 
-  if (!saveCommunities([community])) {
+  // A fixed-company bootstrap must not erase retained entries from older UI.
+  const retained = privateOrtakMode ? loadCommunities() : [];
+  if (!saveCommunities([...retained, community])) {
     // A failed setItem leaves the existing communities value untouched. Roll
     // back only the active-ID write so inconsistent pre-existing data is never
     // destroyed while recovering from a quota failure.

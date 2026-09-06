@@ -63,11 +63,14 @@ test("private routes and saved preview flags cannot expose unbuilt flows", () =>
   for (const path of ["/", "/agents", "/channels/test", "/settings"])
     assert.equal(privateRouteAllowed(path), true);
   for (const section of [
+    "voice",
+    "mobile",
     "agents",
     "compute",
     "experimental",
     "channel-templates",
     "hosted-communities",
+    "updates",
   ])
     assert.equal(privateSettingsAllowed(section), false);
   for (const section of ["profile", "appearance", "notifications"])

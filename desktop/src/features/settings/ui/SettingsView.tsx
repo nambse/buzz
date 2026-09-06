@@ -1,4 +1,7 @@
-import { privateSettingsAllowed } from "@/features/ortak/privateMode";
+import {
+  privateOrtakMode,
+  privateSettingsAllowed,
+} from "@/features/ortak/privateMode";
 import * as React from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { AlertCircle, ArrowLeft, LoaderCircle, RefreshCw } from "lucide-react";
@@ -67,7 +70,7 @@ const settingsNavGroups: Array<{
     ],
   },
   {
-    label: "Communities",
+    label: privateOrtakMode ? "Company" : "Communities",
     sections: ["hosted-communities", "community-members"],
   },
   {

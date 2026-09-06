@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { appendActivity, needsActivityPoll } from "./activity";
+import { appendActivity } from "./activity";
 import { OrtakApiError, type OrtakClient } from "./client";
 import type { ActivityEntry, RunDetailResponse } from "./types";
 
@@ -12,6 +12,8 @@ export function useRunActivity(
   const [entries, setEntries] = useState<ActivityEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
+  const [accessRevoked, setAccessRevoked] = useState(false);
   useEffect(() => {
     // A manual reload deliberately starts a new cursor generation.
     void refresh;
@@ -23,31 +25,39 @@ export function useRunActivity(
     setEntries([]);
     setDetail(null);
     setError(null);
+    setAccessRevoked(false);
     setConnected(false);
-    async function poll() {
-      const round = new AbortController();
-      const signal = AbortSignal.any([controller.signal, round.signal]);
+    setReconnecting(false);
+    async function connect() {
+      let received = false;
       try {
-        const [nextDetail, page] = await Promise.all([
-          client.detail(runId, signal),
-          client.events(runId, cursor, signal),
-        ]);
+        await client.activityStream(
+          runId,
+          cursor,
+          controller.signal,
+          (frame) => {
+            if (controller.signal.aborted) return;
+            const next = appendActivity(retained, cursor, frame.page);
+            retained = next.entries;
+            cursor = next.cursor;
+            setDetail(frame.detail);
+            setEntries(retained);
+            setConnected(true);
+            setReconnecting(false);
+            setError(null);
+            received = true;
+          },
+        );
         if (controller.signal.aborted) return;
-        const next = appendActivity(retained, cursor, page);
-        retained = next.entries;
-        cursor = next.cursor;
-        setDetail(nextDetail);
-        setEntries(retained);
-        setConnected(true);
-        setError(null);
+        // Only a completed authenticated lifetime resets repeated disconnects.
+        // Receiving the initial replay alone must not create an endless loop.
+        if (!received)
+          throw new Error("Activity closed before confirming its cursor.");
         failures = 0;
-        // Drain a bounded page at a time; terminal detail is not enough to stop
-        // until all already-durable events have been consumed.
-        if (needsActivityPoll(nextDetail, page, cursor)) {
-          timer = setTimeout(() => void poll(), page.has_more ? 250 : 2500);
-        }
+        setConnected(false);
+        setReconnecting(true);
+        timer = setTimeout(() => void connect(), 250);
       } catch (cause) {
-        round.abort();
         if (controller.signal.aborted) return;
         setConnected(false);
         setError(
@@ -56,26 +66,29 @@ export function useRunActivity(
             : "Ortak could not load activity.",
         );
         failures += 1;
-        // Authorization changes discard cached private data immediately.
         const revoked =
           cause instanceof OrtakApiError &&
           [401, 403, 404].includes(cause.status);
+        const resync = cause instanceof OrtakApiError && cause.status === 409;
         if (revoked) {
+          setAccessRevoked(true);
           setEntries([]);
           setDetail(null);
         }
-        if (!revoked && failures < 5)
+        const retry = !revoked && !resync && failures < 5;
+        setReconnecting(retry);
+        if (retry)
           timer = setTimeout(
-            () => void poll(),
+            () => void connect(),
             Math.min(3000 * 2 ** (failures - 1), 30_000),
           );
       }
     }
-    void poll();
+    void connect();
     return () => {
       controller.abort();
       if (timer) clearTimeout(timer);
     };
   }, [client, runId, refresh]);
-  return { detail, entries, error, connected };
+  return { detail, entries, error, connected, reconnecting, accessRevoked };
 }

@@ -81,14 +81,19 @@ export function CreateItemForm({
   project,
   disabled,
   submit,
+  sourceMessage,
 }: {
   project: WorkProject;
   disabled: boolean;
   submit: SubmitWork;
+  sourceMessage?: string;
 }) {
   const [error, setError] = useState<string | null>(null);
   return (
-    <details className="rounded-lg border p-4">
+    <details
+      open={sourceMessage ? true : undefined}
+      className="rounded-lg border p-4"
+    >
       <summary className="cursor-pointer text-sm font-medium">
         New work item
       </summary>
@@ -115,8 +120,8 @@ export function CreateItemForm({
           }
           setError(null);
           submit(
-            `/api/v1/projects/${encodeURIComponent(project.id)}/work-items`,
-            "Work item",
+            `/api/v1/projects/${encodeURIComponent(project.id)}/${sourceMessage ? "promotions" : "work-items"}`,
+            sourceMessage ? "Message promotion" : "Work item",
             {
               title: data.get("title"),
               description: data.get("description"),
@@ -125,6 +130,7 @@ export function CreateItemForm({
               approvals: data.get("approval")
                 ? [{ gate: "review", required: true }]
                 : [],
+              ...(sourceMessage ? { source_message_id: sourceMessage } : {}),
             },
           );
         }}
@@ -157,7 +163,9 @@ export function CreateItemForm({
               {error}
             </p>
           ) : null}
-          <Button type="submit">Create work item</Button>
+          <Button type="submit">
+            {sourceMessage ? "Promote message to Work" : "Create work item"}
+          </Button>
         </fieldset>
       </form>
     </details>

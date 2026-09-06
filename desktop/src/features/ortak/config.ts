@@ -30,3 +30,26 @@ export function resolveOrtakOrigin(
     return null;
   }
 }
+
+/** A private build may select only a relay with an explicit valid API binding. */
+export function isConfiguredOrtakRelay(
+  relayUrl: string,
+  bindings: string | undefined,
+): boolean {
+  try {
+    const relay = new URL(relayUrl);
+    if (
+      !["ws:", "wss:"].includes(relay.protocol) ||
+      relay.username ||
+      relay.password ||
+      relay.pathname !== "/" ||
+      relay.search ||
+      relay.hash
+    )
+      return false;
+    relay.protocol = relay.protocol === "ws:" ? "http:" : "https:";
+    return resolveOrtakOrigin(bindings, relay.origin) !== null;
+  } catch {
+    return false;
+  }
+}

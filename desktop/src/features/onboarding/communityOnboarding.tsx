@@ -4,6 +4,7 @@ import {
 } from "@/features/communities/communityStorage";
 import { setLocalStorageItemWithRecovery } from "@/shared/lib/localStorageQuota";
 import type { Profile } from "@/shared/api/types";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 
 const STORAGE_KEY = "buzz-community-onboarding-transaction.v1";
 
@@ -329,11 +330,12 @@ const CommunityOnboardingContext =
 
 export function CommunityOnboardingProvider({
   children,
-  enabled = true,
+  enabled: requestedEnabled = true,
 }: {
   children: React.ReactNode;
   enabled?: boolean;
 }) {
+  const enabled = requestedEnabled && !privateOrtakMode;
   const [transaction, setTransaction] = React.useState(() =>
     enabled ? loadCommunityOnboardingTransaction() : null,
   );

@@ -41,8 +41,18 @@ export function reconcileChannelWindowMessages(
     return [...merged].sort((left, right) => compareRelayOrder(right, left));
   }
   const authoritativeIds = new Set(windowEvents.map((event) => event.id));
+  // A send receipt already identifies its exact optimistic row. Remove that
+  // row before heuristic reconciliation, so an older identical message cannot
+  // steal the receipt's render key while walking the chronological window.
+  const acknowledgedLocalKeys = new Set(
+    windowEvents
+      .filter((event) => !event.pending && event.localKey)
+      .map((event) => event.localKey),
+  );
   const retained = retainRefetchReconciliationEvents(messages).filter(
-    (event) => !authoritativeIds.has(event.id),
+    (event) =>
+      !authoritativeIds.has(event.id) &&
+      !(event.pending && acknowledgedLocalKeys.has(event.localKey ?? event.id)),
   );
 
   // Reconcile acknowledgements against cache-only rows without changing the

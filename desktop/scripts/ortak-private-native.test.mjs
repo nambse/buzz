@@ -26,6 +26,9 @@ const contaminated = {
   TAURI_DEV_HOST: "0.0.0.0",
   VITE_BUZZ_BESTIE: "1",
   VITE_ORTAK_PRIVATE_MODE: "false",
+  ORTAK_PRIVATE_DESKTOP: "0",
+  VITE_ORTAK_ENCRYPTED_DM_CHANNELS_JSON:
+    '{"http://unwanted.example":["unwanted"]}',
   BUZZ_PROTECTED_BUILD_OUTPUT: "/unwanted/output",
   APPLE_SIGNING_IDENTITY: "old-signer",
   ORTAK_NATIVE_CARGO: "/pinned/cargo",
@@ -54,15 +57,29 @@ test("actual native invocation pins private identity, origin and isolated target
     "--ci",
   ]);
   assert.equal(path.basename(args[8]), "tauri.ortak-private.conf.json");
-  assert.deepEqual(args.slice(9), ["--runner", "/pinned/cargo"]);
+  assert.deepEqual(args.slice(9), [
+    "--features",
+    "system-keyring",
+    "--runner",
+    "/pinned/cargo",
+    "--",
+    "--no-default-features",
+  ]);
   assert.equal(options.env.BUZZ_BUILD_DEMO_SLUG, "ortak-private-20260905");
   assert.equal(options.env.BUZZ_RELAY_URL, "ws://localhost:3038");
   assert.equal(options.env.BUZZ_BUILD_AUTO_CONNECT_DEFAULT_RELAY, "1");
   assert.equal(options.env.VITE_ORTAK_PRIVATE_MODE, "true");
+  assert.equal(options.env.ORTAK_PRIVATE_DESKTOP, "1");
   assert.equal(options.env.VITE_BUZZ_BESTIE, "0");
   assert.deepEqual(JSON.parse(options.env.VITE_ORTAK_API_BINDINGS_JSON), {
     "http://localhost:3038": "http://127.0.0.1:8787",
   });
+  assert.deepEqual(
+    JSON.parse(options.env.VITE_ORTAK_ENCRYPTED_DM_CHANNELS_JSON),
+    {
+      "http://localhost:3038": ["be203245-5ca3-4a47-9d88-2c20fc65622a"],
+    },
+  );
   assert.equal(options.env.CARGO_HOME, "/cargo-cache");
   assert.equal(options.env.RUSTC, "/pinned/rustc");
   assert.ok(options.env.CARGO_TARGET_DIR.startsWith(options.cwd + path.sep));
@@ -112,6 +129,14 @@ test("dry plan launches nothing, discloses no inherited secrets, and agrees with
     "node ./scripts/ortak-private-native.mjs frontend",
   );
   assert.equal(actual.args[1], "dev");
+  assert.deepEqual(actual.args.slice(4), [
+    "--features",
+    "system-keyring",
+    "--runner",
+    "/pinned/cargo",
+    "--",
+    "--no-default-features",
+  ]);
   assert.doesNotMatch(printed, /never-export-this/);
 });
 

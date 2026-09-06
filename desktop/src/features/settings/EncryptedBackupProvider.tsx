@@ -1,3 +1,4 @@
+import { desktopProductName } from "@/features/ortak/privateMode";
 import * as React from "react";
 import { toast } from "sonner";
 
@@ -115,7 +116,7 @@ export function EncryptedBackupProvider({
   React.useEffect(() => {
     if (state.downloadPending) {
       toast.loading("Preparing backup…", {
-        description: "You can close this window while Buzz finishes.",
+        description: `You can close this window while ${desktopProductName} finishes.`,
         duration: Number.POSITIVE_INFINITY,
         id: BACKUP_READY_TOAST_ID,
       });

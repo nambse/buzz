@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import * as React from "react";
 import { toast } from "sonner";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 
 import { useAppNavigation } from "@/app/navigation/useAppNavigation";
 import {
@@ -103,7 +104,8 @@ export function useProfileInteractionActions({
   const canMessage =
     canInteract &&
     (availability?.message ?? (!isBot || viewerIsOwner === true));
-  const canHuddle = canInteract && (availability?.huddle ?? canMessage);
+  const canHuddle =
+    !privateOrtakMode && canInteract && (availability?.huddle ?? canMessage);
   const selfProfileQuery = useProfileQuery(enabled && canWave);
 
   React.useEffect(() => {

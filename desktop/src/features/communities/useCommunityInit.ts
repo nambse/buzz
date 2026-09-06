@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import { isMacPlatform } from "@/shared/lib/platform";
+import { privateCompanyRelayAllowed } from "@/features/ortak/privateCompany";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 
 import { relayClient } from "@/shared/api/relayClient";
 import { resetRateLimitGate } from "@/shared/api/relayRateLimitGate";
@@ -184,15 +186,19 @@ export function useCommunityInit(
           const defaultRelayUrl = await getDefaultRelayUrl();
           const autoConnectDefaultRelay =
             await autoConnectDefaultRelayEnabled();
+          const matchesPrivateCompany =
+            privateOrtakMode && privateCompanyRelayAllowed(defaultRelayUrl);
 
           // Internal builds explicitly opt into treating their reviewed default
           // relay as the first community. Public builds retain community
           // selection even when BUZZ_RELAY_URL is overridden at runtime.
           if (
-            !suppressAutoConnect &&
+            (!suppressAutoConnect || privateOrtakMode) &&
+            (!privateOrtakMode || matchesPrivateCompany) &&
             (isSharedIdentity ||
               (autoConnectDefaultRelay &&
-                shouldAutoConnectDefaultRelay(defaultRelayUrl)))
+                (shouldAutoConnectDefaultRelay(defaultRelayUrl) ||
+                  matchesPrivateCompany)))
           ) {
             const identity = await getIdentity();
             if (cancelled) return;

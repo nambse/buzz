@@ -336,7 +336,11 @@ fn build_menu<R: Runtime>(
     menu.append(&MenuItem::with_id(
         app,
         OPEN_BUZZ_ID,
-        "Open Buzz",
+        if crate::private_native::PRIVATE {
+            "Open Ortak"
+        } else {
+            "Open Buzz"
+        },
         true,
         None::<&str>,
     )?)?;
@@ -344,7 +348,11 @@ fn build_menu<R: Runtime>(
     menu.append(&MenuItem::with_id(
         app,
         QUIT_ID,
-        "Quit Buzz",
+        if crate::private_native::PRIVATE {
+            "Quit Ortak"
+        } else {
+            "Quit Buzz"
+        },
         true,
         None::<&str>,
     )?)?;

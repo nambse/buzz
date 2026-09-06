@@ -186,6 +186,47 @@ test("test_projection_replaces_pending_send_with_authoritative_event", () => {
   assert.equal(projected[1]?.localKey, pending.id);
 });
 
+test("send receipt keeps repeated identical messages on distinct render keys", () => {
+  const old = {
+    ...event("old", 100),
+    content: "Same message",
+    localKey: "old-local",
+  };
+  const pending = {
+    ...event("pending", 100),
+    content: "Same message",
+    pending: true,
+    localKey: "new-local",
+  };
+  const accepted = {
+    ...event("accepted", 100),
+    content: "Same message",
+    localKey: "new-local",
+  };
+  const window = mergeLiveChannelWindowEvent(
+    replaceNewestChannelWindow(emptyChannelWindowStore(), newestPage([old])),
+    accepted,
+  );
+
+  const projected = reconcileChannelWindowMessages(window, [old, pending]);
+  assert.equal(projected.length, 2);
+  assert.equal(
+    projected.find((item) => item.id === old.id)?.localKey,
+    "old-local",
+  );
+  assert.equal(
+    projected.find((item) => item.id === accepted.id)?.localKey,
+    "new-local",
+  );
+  assert.equal(
+    new Set(projected.map((item) => item.localKey ?? item.id)).size,
+    2,
+  );
+  // A following relay update must not reintroduce a pending or duplicate row.
+  const refreshed = reconcileChannelWindowMessages(window, projected);
+  assert.deepEqual(refreshed, projected);
+});
+
 test("test_reconciliation_preserves_dense_second_window_order", () => {
   const first = {
     ...newestPage([event("a", 100), event("b", 100)]),

@@ -153,6 +153,7 @@ async fn boundary_submit_signed_event_with_keys_blocks_ncryptsec() {
 }
 
 /// Boundary 5: huddle STT publisher (`huddle/pipeline.rs`).
+#[cfg(feature = "legacy-voice")]
 #[test]
 fn boundary_huddle_stt_blocks_ncryptsec() {
     let keys = nostr::Keys::generate();

@@ -96,6 +96,7 @@ pub async fn restore_managed_agents_on_launch(
     app: &tauri::AppHandle,
     shutdown_started: &AtomicBool,
 ) -> Result<(), String> {
+    crate::private_native::require_legacy()?;
     if shutdown_started.load(Ordering::SeqCst) {
         return Ok(());
     }

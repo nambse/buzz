@@ -53,6 +53,16 @@ import { isPositiveEmojiParticle } from "@/shared/ui/EmojiBurstProvider";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import { ProtectedMessageAction } from "@protected-feature-components";
+import { MessageRoutingAction } from "@/features/ortak/routing/MessageRoutingAction";
+import { RoutingDecisionDialog } from "@/features/ortak/routing/RoutingDecisionDialog";
+import {
+  MessagePromotionAction,
+  MessagePromotionDialog,
+} from "@/features/ortak/work/MessagePromotion";
+import { ConversationMemoryAction } from "@/features/ortak/conversationMemory/ConversationMemoryAction";
+import { ConversationMemoryDialog } from "@/features/ortak/conversationMemory/ConversationMemoryDialog";
+import { EmployeeMemoryAction } from "@/features/ortak/employeeMemory/EmployeeMemoryAction";
+import { EmployeeMemoryDialog } from "@/features/ortak/employeeMemory/EmployeeMemoryDialog";
 
 const ACTION_BUTTON_CLASS = "h-8 w-8 rounded-full p-0";
 const ACTION_ICON_CLASS = "!h-4 !w-4";
@@ -121,6 +131,19 @@ function MoreActionsMenu({
 }) {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = React.useState(false);
   const [isReportDialogOpen, setIsReportDialogOpen] = React.useState(false);
+  const [routingOrigin, setRoutingOrigin] = React.useState<string | null>(null);
+  const [promotionOrigin, setPromotionOrigin] = React.useState<string | null>(
+    null,
+  );
+  const [promotionOpen, setPromotionOpen] = React.useState(false);
+  const [memoryOrigin, setMemoryOrigin] = React.useState<string | null>(null);
+  const [memoryOpen, setMemoryOpen] = React.useState(false);
+  const [employeeMemorySelection, setEmployeeMemorySelection] = React.useState<{
+    origin: string;
+    actor: string;
+  } | null>(null);
+  const [employeeMemoryOpen, setEmployeeMemoryOpen] = React.useState(false);
+  const moreButtonRef = React.useRef<HTMLButtonElement | null>(null);
   // Transfer focus ownership only after the menu has finished closing.
   // During its exit animation Radix's pointer-leave handler can still focus
   // the menu, stealing keystrokes from an already-open composer. Merely
@@ -150,6 +173,7 @@ function MoreActionsMenu({
             <DropdownMenuTrigger asChild>
               <Button
                 aria-label="More actions"
+                ref={moreButtonRef}
                 className={ACTION_BUTTON_CLASS}
                 data-testid={`more-actions-${message.id}`}
                 size="sm"
@@ -292,6 +316,51 @@ function MoreActionsMenu({
             </DropdownMenuItem>
           ) : null}
 
+          {open ? (
+            <MessageRoutingAction
+              message={message}
+              channel={channelId}
+              onSelect={(origin) => {
+                pendingEditRef.current = () => setRoutingOrigin(origin);
+              }}
+            />
+          ) : null}
+          {open ? (
+            <MessagePromotionAction
+              message={message}
+              channel={channelId}
+              onSelect={(origin) => {
+                pendingEditRef.current = () => {
+                  setPromotionOrigin(origin);
+                  setPromotionOpen(true);
+                };
+              }}
+            />
+          ) : null}
+          {open ? (
+            <ConversationMemoryAction
+              message={message}
+              channel={channelId}
+              onSelect={(origin) => {
+                pendingEditRef.current = () => {
+                  setMemoryOrigin(origin);
+                  setMemoryOpen(true);
+                };
+              }}
+            />
+          ) : null}
+          {open ? (
+            <EmployeeMemoryAction
+              message={message}
+              channel={channelId}
+              onSelect={(selection) => {
+                pendingEditRef.current = () => {
+                  setEmployeeMemorySelection(selection);
+                  setEmployeeMemoryOpen(true);
+                };
+              }}
+            />
+          ) : null}
           {canReport || onDelete ? <DropdownMenuSeparator /> : null}
 
           {canReport ? (
@@ -328,6 +397,49 @@ function MoreActionsMenu({
         </DropdownMenuContent>
       </DropdownMenu>
 
+      {promotionOrigin && channelId ? (
+        <MessagePromotionDialog
+          key={`${promotionOrigin}:${channelId}:${message.id}`}
+          origin={promotionOrigin}
+          channel={channelId}
+          message={message.id}
+          open={promotionOpen}
+          onClose={() => setPromotionOpen(false)}
+          restoreFocus={() => moreButtonRef.current?.focus()}
+        />
+      ) : null}
+
+      {routingOrigin && channelId ? (
+        <RoutingDecisionDialog
+          origin={routingOrigin}
+          channel={channelId}
+          message={message.id}
+          onClose={() => setRoutingOrigin(null)}
+          restoreFocus={() => moreButtonRef.current?.focus()}
+        />
+      ) : null}
+      {memoryOrigin && channelId ? (
+        <ConversationMemoryDialog
+          key={`${memoryOrigin}:${channelId}:${message.id}`}
+          origin={memoryOrigin}
+          channel={channelId}
+          message={message.id}
+          open={memoryOpen}
+          onClose={() => setMemoryOpen(false)}
+          restoreFocus={() => moreButtonRef.current?.focus()}
+        />
+      ) : null}
+      {employeeMemorySelection && channelId ? (
+        <EmployeeMemoryDialog
+          key={`${employeeMemorySelection.origin}:${employeeMemorySelection.actor}:${channelId}:${message.id}`}
+          {...employeeMemorySelection}
+          channel={channelId}
+          message={message.id}
+          open={employeeMemoryOpen}
+          onClose={() => setEmployeeMemoryOpen(false)}
+          restoreFocus={() => moreButtonRef.current?.focus()}
+        />
+      ) : null}
       {onDelete ? (
         <DeleteMessageConfirmDialog
           onConfirm={() => onDelete(message)}

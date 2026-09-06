@@ -128,7 +128,8 @@ export function AppShell() {
     showHuddleInMainApp,
     viewHuddleChannel,
   } = useHuddlePresentation();
-  const hasCommunityRail = communitiesHook.communities.length > 1;
+  const hasCommunityRail =
+    !privateOrtakMode && communitiesHook.communities.length > 1;
   const addCommunityDialog = useAddCommunityDialogState();
   const [isChannelManagementOpen, setIsChannelManagementOpen] =
     React.useState(false);
@@ -935,7 +936,11 @@ export function AppShell() {
                           isHuddleRoomStarting={isHuddleRoomStarting}
                           mainInsetRef={mainInsetRef}
                           terminal={
-                            <TerminalBootstrap {...effectiveTerminalContext} />
+                            privateOrtakMode ? null : (
+                              <TerminalBootstrap
+                                {...effectiveTerminalContext}
+                              />
+                            )
                           }
                         >
                           <Outlet />

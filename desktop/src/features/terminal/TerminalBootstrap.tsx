@@ -1,5 +1,6 @@
 import * as React from "react";
 import { isTauri } from "@tauri-apps/api/core";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 
 import {
   type TerminalDelivery,
@@ -47,7 +48,14 @@ function report(error: unknown) {
   console.error("terminal session failed", error);
 }
 
-export function TerminalBootstrap({
+/** Private Office never mounts terminal effects, including direct/stale callers. */
+export function TerminalBootstrap(
+  props: React.ComponentProps<typeof LegacyTerminalBootstrap>,
+) {
+  return privateOrtakMode ? null : <LegacyTerminalBootstrap {...props} />;
+}
+
+function LegacyTerminalBootstrap({
   channelId,
   channelName,
   threadId,

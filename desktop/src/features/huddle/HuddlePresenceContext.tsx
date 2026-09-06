@@ -1,4 +1,5 @@
 import * as React from "react";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 
 import { useRelaySelfQuery } from "@/features/moderation/hooks";
 import { useChannelsQuery } from "@/features/channels/hooks";
@@ -22,7 +23,15 @@ export function memberChannelIdsKey(
 }
 
 /** Keeps one community-wide lifecycle subscription for name indicators. */
-export function HuddlePresenceProvider({
+export function HuddlePresenceProvider(props: { children: React.ReactNode }) {
+  return privateOrtakMode ? (
+    props.children
+  ) : (
+    <LegacyHuddlePresenceProvider {...props} />
+  );
+}
+
+function LegacyHuddlePresenceProvider({
   children,
 }: {
   children: React.ReactNode;

@@ -58,6 +58,7 @@ import {
   requestAddCommunityPrefill,
 } from "@/features/communities/addCommunityPrefill";
 import { WelcomeSetup } from "@/features/communities/ui/WelcomeSetup";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 import { CommunityApplyErrorScreen } from "@/features/communities/ui/CommunityApplyErrorScreen";
 import { CommunityChangeOverlay } from "@/features/communities/ui/CommunityChangeOverlay";
 import { setAvatarProfileSyncQueryClient } from "@/features/profile/avatarProfileSync";
@@ -587,7 +588,13 @@ function CommunityApp({
   if (!transaction) {
     if (community.needsSetup) {
       // Show welcome setup for first-run users with no communities
-      appContent = (
+      appContent = privateOrtakMode ? (
+        <CommunityApplyErrorScreen
+          error="The company connection could not be opened. Retry to reconnect."
+          onChangeCommunity={() => {}}
+          onRetry={reconnectCommunity}
+        />
+      ) : (
         <WelcomeSetup
           initialPage={resumeFirstCommunityPage ?? undefined}
           onBack={
@@ -604,7 +611,7 @@ function CommunityApp({
             onChangeCommunity={() => setIsCommunityChangeOpen(true)}
             onRetry={reconnectCommunity}
           />
-          {isCommunityChangeOpen ? (
+          {isCommunityChangeOpen && !privateOrtakMode ? (
             <CommunityChangeOverlay
               onClose={() => setIsCommunityChangeOpen(false)}
             />
@@ -744,7 +751,8 @@ function MachineBootstrap({ sharedIdentity }: { sharedIdentity: boolean }) {
   // Community links are app-global work. A Huddle companion loads the same
   // React tree, but must never race the main window for the native pending-link
   // queue or replace its dedicated transcript surface with onboarding.
-  const acceptsCommunityDeepLinks = huddleWindowChannelId() === null;
+  const acceptsCommunityDeepLinks =
+    !privateOrtakMode && huddleWindowChannelId() === null;
   useEffect(() => {
     if (!acceptsCommunityDeepLinks) return;
 

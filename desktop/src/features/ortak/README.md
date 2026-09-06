@@ -4,6 +4,11 @@ The `/agents` route becomes Employees only for an explicitly configured Office
 origin. Ordinary builds retain the existing screen for unbound communities.
 For the bounded private shell, also set `VITE_ORTAK_PRIVATE_MODE=true`: unbound
 communities show a configuration error and never fall back to legacy Agents.
+Package the native application through `scripts/ortak-private-native.mjs`, which
+also fixes `ORTAK_PRIVATE_DESKTOP=1` and the private build identity. The Rust
+build refuses a frontend-only private configuration. Its command admission and
+startup isolation are documented in
+[`NATIVE_PRIVATE_ISOLATION_2026-09-05.md`](../../../../docs/ortak/NATIVE_PRIVATE_ISOLATION_2026-09-05.md).
 The app uses the existing native `sign_event` identity; no private key is entered
 or stored by this feature.
 
@@ -26,22 +31,30 @@ Employees displays saved identity/status and explicitly distinguishes runtime
 health. Activity uses real ordered persisted events. Cancellation is a request;
 the screen shows pending until the worker records acknowledgement or failure.
 Run completion and Office publication are separate: pending, failed, and delivered
-replies stay explicit, and a pending reply keeps the activity view polling.
+replies stay explicit on the same live Activity stream.
 Memory shows the admitted pre-start notes and the durable post-delivery write
 state. It distinguishes unprepared context from an empty prepared snapshot, and
-continues polling a pending memory write after Office delivery until a receipt
-or terminal failure is recorded. Source and redaction indicators remain visible;
+receives a pushed memory receipt or terminal failure after Office delivery. Source and redaction indicators remain visible;
 notes are explicitly limited to the current run. The native package and API need
-migration0052 for this surface.
+migration0060 for live Activity (0052 introduced memory).
 Only the server-provided `can_request_cancel` capability enables the action.
 No provisioning, retry-run, or approval actions are exposed.
 
-Lists page at 25 records, events at 100, and the display retains the latest 500
-events. Polling retains the last dense sequence through transient errors and
-drains the detail's last-event marker before stopping at a terminal run. Five
-consecutive errors stop automatic retries; Refresh/Reload remains available.
-Company remounts and abort signals fence old results. Authorization failures
-clear previously displayed private content.
+Lists page at 25 records. Run Activity uses a native-signed fetch SSE connection,
+with 25 persisted events per frame and the latest 500 retained in the display.
+PostgreSQL notifications trigger fresh authorized reads. Every connection first
+subscribes and then backfills from its confirmed dense sequence, so writes during
+reconnect cannot fall between history and live delivery. A reconnect retains its
+cursor and re-reads current detail, including late Office/memory changes after
+completion. Reload/remount deliberately replays durable history from the start;
+private content is never saved to browser storage.
+
+Each stream renews its signature after 45 seconds. Transient failures retry with
+backoff for at most five attempts, including repeated disconnects immediately
+after initial replay. Disconnection and reconnecting stay visible; Reload remains
+available. Company/run switches abort old results. Authorization failures clear
+previously displayed private content. Employees and Work lists still use bounded
+polling; the run timeline itself uses push.
 
 Focused validation:
 
@@ -58,8 +71,10 @@ HTTP fixtures live only in tests; this smoke proves rendering and request
 construction, not live PostgreSQL authorization or browser-to-server CORS.
 Those require the API PostgreSQL route test plus a configured live transport
 smoke. The browser workflow exercises keyboard and pointer cancellation, ordered
-activity, automatic polling after run completion while the Office reply remains
-pending, visible delivery failure, and manual reload recovery. It captures
+activity, pushed updates after run completion while the Office reply remains
+pending, visible delivery failure, and manual reload recovery. Its test-only
+ReadableStream transport exercises the actual signed client, SSE parser and hook;
+PostgreSQL route tests separately prove real transactional notification delivery. It captures
 distinct cancellation, pending, failed, and delivered screenshots under
 `desktop/test-results/` after waiting for animations.
 
@@ -189,3 +204,23 @@ The remaining live integration check must exercise a fresh human's Office messag
 through central routing, the pinned runtime, persisted Activity and a real Office
 reply while this native UI is connected, including cancellation and reconnect.
 The fixture browser smoke does not prove that complete loop or native CORS.
+
+
+Private Office employee mentions use fresh native channel metadata and membership
+reads at both prepare and publish. They require the exact configured relay, an
+existing stream channel, and current sender/recipient membership. Unknown members,
+DM destinations, retired channels and failed reads refuse publication. The central
+Ortak router alone decides whether a message should wake an employee; this path
+never provisions a persona, attaches a legacy agent, enrolls it in a huddle or
+starts its runtime. Generic Buzz builds retain their existing agent policy flow.
+The actual hook regressions are `agentMentionRevalidation.ortak.test.mjs` and
+`useMentionSendFlow.ortak.test.mjs` under `features/messages`.
+
+## Message routing
+
+Delivered channel text in a configured private Office exposes **More actions →
+View routing decision**. The signed, scoped read includes recorded silence even
+without a run. It refreshes authorized snapshots every five seconds while open;
+it is not a decision stream and cannot trigger scoring or dispatch. Missing
+records remain distinct from zero-wake decisions. See
+[`ROUTING_DECISION_READ_D3.md`](../../../../docs/ortak/ROUTING_DECISION_READ_D3.md).

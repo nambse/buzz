@@ -62,6 +62,167 @@ const clientStub = () => ({
   project: async (id) => ({ project: project(id) }),
   workItems: async () => ({ work_items: [item], next_cursor: null }),
   workItem: async () => ({ work_item: item }),
+  workExecutions: async () => ({ executions: [] }),
+});
+
+test("Work editor saves title, description and criterion amendments as one exact retryable operation", async () => {
+  const { createElement } = await import("react");
+  const { render, act, fireEvent, within } = await import(
+    "@testing-library/react"
+  );
+  const { WorkScreen } = await import("./WorkScreen.tsx");
+  const writes = [];
+  const editable = { ...item, state: "proposed", version: 7 };
+  const client = {
+    ...clientStub(),
+    workItem: async () => ({ work_item: editable }),
+    workMutation: async (path, body) => {
+      writes.push({ path, body });
+      throw new OrtakApiError(503, "unavailable");
+    },
+  };
+  const view = render(createElement(WorkScreen, { client, employees: [] }));
+  await act(async () => {});
+  await act(async () =>
+    fireEvent.click(view.getByRole("button", { name: /Project p1/ })),
+  );
+  await act(async () =>
+    fireEvent.click(view.getByRole("button", { name: /Ship the review/ })),
+  );
+  fireEvent.click(view.getByRole("button", { name: "Edit work definition" }));
+  const editor = within(
+    view.getByRole("form", { name: "Edit work definition" }),
+  );
+  fireEvent.change(editor.getByLabelText("Work title"), {
+    target: { value: "Updated title" },
+  });
+  fireEvent.change(editor.getByLabelText("Work description"), {
+    target: { value: "Updated description" },
+  });
+  fireEvent.change(view.getByLabelText("Acceptance criterion 1"), {
+    target: { value: "Updated criterion" },
+  });
+  fireEvent.click(
+    view.getByRole("button", { name: "Add acceptance criterion" }),
+  );
+  fireEvent.change(view.getByLabelText("New acceptance criterion 1"), {
+    target: { value: "A second criterion" },
+  });
+  await act(async () =>
+    fireEvent.submit(view.getByRole("form", { name: "Edit work definition" })),
+  );
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].path, "/api/v1/work-items/w1/definition");
+  const saved = JSON.parse(writes[0].body);
+  assert.equal(saved.expected_version, 7);
+  assert.ok(saved.operation_id);
+  assert.deepEqual(saved.definition, {
+    title: "Updated title",
+    description: "Updated description",
+    criteria: [{ id: "c1", text: "Updated criterion" }],
+    additional_criteria: ["A second criterion"],
+  });
+  assert.equal(
+    view.getByRole("button", { name: "Save definition" }).matches(":disabled"),
+    true,
+  );
+  await act(async () =>
+    fireEvent.click(view.getByRole("button", { name: /Retry same operation/ })),
+  );
+  assert.equal(writes.length, 2);
+  assert.equal(writes[1].body, writes[0].body);
+});
+
+test("Work definition editor explains frozen review evidence and refuses empty or excessive UTF-8 text", async () => {
+  const { createElement } = await import("react");
+  const { render, fireEvent } = await import("@testing-library/react");
+  const { DefinitionEditor } = await import("./DefinitionEditor.tsx");
+  const writes = [];
+  const props = {
+    item,
+    project: project(),
+    disabled: false,
+    submit: (...args) => writes.push(args),
+  };
+  const view = render(createElement(DefinitionEditor, props));
+  assert.ok(view.getByText(/before review/));
+  assert.equal(
+    view.queryByRole("button", { name: "Edit work definition" }),
+    null,
+  );
+  for (const frozen of [
+    { ...item, state: "completed" },
+    {
+      ...item,
+      state: "proposed",
+      criteria: [{ ...item.criteria[0], status: "satisfied" }],
+    },
+    {
+      ...item,
+      state: "proposed",
+      approvals: [{ id: "a1", status: "approved" }],
+    },
+  ]) {
+    view.rerender(createElement(DefinitionEditor, { ...props, item: frozen }));
+    assert.ok(view.getByText(/Saved review evidence is retained/));
+    assert.equal(
+      view.queryByRole("button", { name: "Edit work definition" }),
+      null,
+    );
+  }
+  view.rerender(
+    createElement(DefinitionEditor, {
+      ...props,
+      item: { ...item, state: "ready" },
+    }),
+  );
+  fireEvent.click(view.getByRole("button", { name: "Edit work definition" }));
+  fireEvent.change(view.getByLabelText("Work title"), {
+    target: { value: "é".repeat(101) },
+  });
+  fireEvent.submit(view.getByRole("form", { name: "Edit work definition" }));
+  assert.equal(writes.length, 0);
+  assert.match(view.getByRole("alert").textContent, /200 bytes/);
+  view.rerender(
+    createElement(DefinitionEditor, {
+      ...props,
+      project: { ...project(), can_contribute: false },
+    }),
+  );
+  assert.ok(view.getByText(/current project role cannot edit/));
+});
+
+test("title-only edits preserve unchanged safe projections instead of resubmitting redactions", async () => {
+  const { createElement } = await import("react");
+  const { render, fireEvent } = await import("@testing-library/react");
+  const { DefinitionEditor } = await import("./DefinitionEditor.tsx");
+  const writes = [];
+  const projected = {
+    ...item,
+    state: "proposed",
+    description: "  Example: password=[redacted]  ",
+    criteria: [{ ...item.criteria[0], text: "Document api_key=[redacted]" }],
+  };
+  const view = render(
+    createElement(DefinitionEditor, {
+      item: projected,
+      project: project(),
+      disabled: false,
+      submit: (...args) => writes.push(args),
+    }),
+  );
+  fireEvent.click(view.getByRole("button", { name: "Edit work definition" }));
+  fireEvent.change(view.getByLabelText("Work title"), {
+    target: { value: "New title" },
+  });
+  fireEvent.submit(view.getByRole("form", { name: "Edit work definition" }));
+  assert.equal(writes.length, 1);
+  assert.deepEqual(writes[0][2].definition, {
+    title: "New title",
+    description: null,
+    criteria: [{ id: "c1", text: null }],
+    additional_criteria: [],
+  });
 });
 
 test("uncertain production write retries identical bytes and operation ID with fresh authentication", async () => {
@@ -227,9 +388,7 @@ test("real Work screen submits named channel and reviewer action with current ve
   await act(async () =>
     fireEvent.click(view.getByRole("button", { name: /Ship the review/ })),
   );
-  assert.ok(
-    view.getByText(/This does not start or confirm employee execution/),
-  );
+  assert.ok(view.getByText(/Execution state is shown separately below/));
   await act(async () =>
     fireEvent.click(
       view.getByRole("button", {
@@ -301,4 +460,114 @@ test("recovered mutation lifetime aborts on unmount and late results cannot refr
   );
   await act(async () => finish({}));
   assert.equal(refreshed, 0);
+});
+
+test("Work execution uses the current assignment and freezes one uncertain start operation", async () => {
+  const { createElement } = await import("react");
+  const { render, act, fireEvent } = await import("@testing-library/react");
+  const { WorkScreen } = await import("./WorkScreen.tsx");
+  const writes = [];
+  const ready = {
+    ...item,
+    state: "ready",
+    version: 9,
+    assignments: [
+      { employee_id: "cem", role: "owner", status: "active" },
+      { employee_id: "reviewer", role: "reviewer", status: "active" },
+    ],
+  };
+  const client = {
+    ...clientStub(),
+    workItem: async () => ({ work_item: ready }),
+    workMutation: async (path, body) => {
+      writes.push({ path, body });
+      throw new OrtakApiError(503, "unavailable");
+    },
+  };
+  const view = render(
+    createElement(WorkScreen, {
+      client,
+      employees: [
+        { employee_id: "cem", name: "Cem", status: "active" },
+        { employee_id: "reviewer", name: "Reviewer", status: "active" },
+      ],
+    }),
+  );
+  await act(async () => {});
+  await act(async () =>
+    fireEvent.click(view.getByRole("button", { name: /Project p1/ })),
+  );
+  await act(async () =>
+    fireEvent.click(view.getByRole("button", { name: /Ship the review/ })),
+  );
+  assert.equal(
+    view.getByLabelText("Assigned employee to execute").options.length,
+    1,
+  );
+  await act(async () =>
+    fireEvent.submit(
+      view.getByRole("form", { name: "Start employee execution" }),
+    ),
+  );
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].path, "/api/v1/work-items/w1/executions");
+  assert.equal(JSON.parse(writes[0].body).expected_version, 9);
+  assert.equal(JSON.parse(writes[0].body).employee_id, "cem");
+  assert.equal(
+    view.getByRole("button", { name: "Start execution" }).matches(":disabled"),
+    true,
+  );
+  await act(async () =>
+    fireEvent.click(view.getByRole("button", { name: "Retry same operation" })),
+  );
+  assert.deepEqual(writes[1], writes[0]);
+});
+
+test("Work artifact remains plain text and stream revocation clears the entire project surface", async () => {
+  const { createElement } = await import("react");
+  const { render, act, fireEvent } = await import("@testing-library/react");
+  const { WorkScreen } = await import("./WorkScreen.tsx");
+  let denyStream;
+  const client = {
+    ...clientStub(),
+    workExecutions: async () => ({
+      executions: [
+        {
+          run_id: "run1",
+          employee_id: "cem",
+          execution_version: 4,
+          status: "completed",
+          artifact_id: "artifact1",
+          output_code: "result_ready",
+          reconciled: true,
+        },
+      ],
+    }),
+    textArtifact: async () => "<script>private deliverable</script>",
+    activityStream: async (_run, _cursor, signal) =>
+      new Promise((resolve, reject) => {
+        denyStream = reject;
+        signal.addEventListener("abort", resolve, { once: true });
+      }),
+  };
+  const view = render(createElement(WorkScreen, { client, employees: [] }));
+  await act(async () => {});
+  await act(async () =>
+    fireEvent.click(view.getByRole("button", { name: /Project p1/ })),
+  );
+  await act(async () =>
+    fireEvent.click(view.getByRole("button", { name: /Ship the review/ })),
+  );
+  await act(async () =>
+    fireEvent.click(
+      view.getByRole("button", { name: "Open text deliverable" }),
+    ),
+  );
+  assert.ok(view.getByText("<script>private deliverable</script>"));
+  assert.equal(view.container.querySelector("script"), null);
+  assert.equal(view.queryByRole("button", { name: "Start execution" }), null);
+  await act(async () => denyStream(new OrtakApiError(403, "revoked")));
+  assert.equal(view.queryByText("<script>private deliverable</script>"), null);
+  assert.equal(view.queryByRole("region", { name: "Project detail" }), null);
+  assert.ok(view.getByRole("button", { name: "Refresh work" }));
 });

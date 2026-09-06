@@ -1,4 +1,5 @@
 import * as React from "react";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 import { AppHuddleBar } from "@/app/AppHuddleBar";
 import * as BuzzTheme from "@/app/BuzzThemeSurfaces";
 import { HuddleProvider, useHuddle } from "@/features/huddle";
@@ -28,7 +29,7 @@ function HuddleShortcutHandler({ children }: HuddleShortcutHandlerProps) {
   const { activeEphemeralChannelId, leaveHuddle } = useHuddle();
 
   React.useEffect(() => {
-    if (!activeEphemeralChannelId) return;
+    if (privateOrtakMode || !activeEphemeralChannelId) return;
 
     function handleHuddleShortcut() {
       void leaveHuddle();
@@ -91,7 +92,7 @@ export function AppHuddleShell({
               <BuzzTheme.GradientLayer />
               {children}
             </div>
-            {isRoom || !isCompanionOpen ? (
+            {!privateOrtakMode && (isRoom || !isCompanionOpen) ? (
               <div className="buzz-huddle-drawer-slot absolute inset-x-0 bottom-0 z-[2] h-(--buzz-huddle-drawer-height)">
                 <AppHuddleBar
                   mode={isRoom ? "room" : "main"}

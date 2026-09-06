@@ -58,6 +58,70 @@ test("Employees renders ordered Activity, cancellation, and separate Office deli
       },
     },
   ];
+  const snapshot = (cursor) => ({
+    detail: {
+      detail: { run, error_message: null, cancel_reason: null },
+      cancellation,
+      office_delivery: officeDelivery,
+      memory,
+      can_request_cancel: cancellation === null,
+    },
+    page: {
+      entries: cursor === null ? entries : [],
+      next_after_sequence: 1,
+      has_more: false,
+      gap: null,
+    },
+  });
+  // Route.fulfill cannot keep a body open. Substitute only this test transport
+  // with a real ReadableStream; the production signer, parser and hook execute.
+  await page.exposeFunction(
+    "__ORTAK_TEST_STREAM_SNAPSHOT__",
+    (url, authorization) => {
+      const signed = JSON.parse(
+        Buffer.from(authorization.slice(6), "base64").toString(),
+      );
+      expect(Object.fromEntries(signed.tags).u).toBe(url);
+      expect(Object.fromEntries(signed.tags).method).toBe("GET");
+      return snapshot(new URL(url).searchParams.get("after_sequence"));
+    },
+  );
+  await page.addInitScript(() => {
+    const original = window.fetch;
+    window.fetch = async (url, init) => {
+      if (
+        typeof url !== "string" ||
+        !url.startsWith("http://127.0.0.1:3010/api/v1/runs/test-run/stream")
+      )
+        return original(url, init);
+      const first = await window.__ORTAK_TEST_STREAM_SNAPSHOT__(
+        url,
+        init.headers.Authorization,
+      );
+      const encode = (frame) =>
+        new TextEncoder().encode(
+          `event: activity\nid: 1\ndata: ${JSON.stringify(frame)}\n\n`,
+        );
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(encode(first));
+            window.__ORTAK_TEST_STREAM_PUSH__ = (frame) =>
+              controller.enqueue(encode(frame));
+            init.signal.addEventListener("abort", () => controller.close(), {
+              once: true,
+            });
+          },
+        }),
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    };
+  });
+  const push = () =>
+    page.evaluate(
+      (frame) => window.__ORTAK_TEST_STREAM_PUSH__(frame),
+      snapshot("1"),
+    );
   await page.route("http://127.0.0.1:3010/api/v1/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -192,12 +256,13 @@ test("Employees renders ordered Activity, cancellation, and separate Office deli
   await waitForAnimations(page);
   await screen.screenshot({ path: "test-results/ortak-employees.png" });
 
-  // A completed run is not a delivered Office reply. This must keep polling
-  // even after cancellation is acknowledged and every activity event is read.
+  // The existing stream receives changes after terminal run completion.
+  // No reload, timer advancement or new HTTP request causes these updates.
   run.status = "completed";
   run.outcome = { kind: "completed", delivery_intent: "reply" };
   cancellation.status = "acknowledged";
   officeDelivery = { status: "pending", error_code: null, delivered_at: null };
+  await push();
   await expect(
     screen.getByText("Office reply pending", { exact: true }),
   ).toBeVisible();
@@ -213,6 +278,7 @@ test("Employees renders ordered Activity, cancellation, and separate Office deli
     error_code: "office_rejected",
     delivered_at: null,
   };
+  await push();
   await expect(
     screen.getByText("Office reply failed", { exact: true }),
   ).toBeVisible();
@@ -222,7 +288,7 @@ test("Employees renders ordered Activity, cancellation, and separate Office deli
   await waitForAnimations(page);
   await screen.screenshot({ path: "test-results/ortak-office-failed.png" });
 
-  // Terminal delivery failure stops automatic polling; manual recovery remains.
+  // Manual replay remains available even while the stream stays connected.
   officeDelivery = {
     status: "delivered",
     error_code: null,
@@ -267,6 +333,7 @@ test("Employees renders ordered Activity, cancellation, and separate Office deli
   memory.write.status = "acknowledged";
   memory.write.receipt = { reference: "fixture-receipt", written: 1 };
   memory.write.acknowledged_at = "2026-09-05T12:00:05Z";
+  await push();
   await expect(
     memoryPanel.getByText("Reply saved to memory", { exact: true }),
   ).toBeVisible();

@@ -7,6 +7,11 @@ import {
   useState,
 } from "react";
 import type { ReactNode } from "react";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
+import {
+  privateCompanySelected,
+  requireCommunityManagement,
+} from "@/features/ortak/privateCompany";
 
 import type { Community } from "./types";
 import {
@@ -184,11 +189,26 @@ function useCommunitiesInternal(): UseCommunitiesReturn {
   communitiesRef.current = communities;
 
   const activeCommunity = useMemo(
-    () => communities.find((w) => w.id === activeId) ?? communities[0] ?? null,
+    () =>
+      privateOrtakMode
+        ? privateCompanySelected(communities, activeId)
+        : (communities.find((w) => w.id === activeId) ??
+          communities[0] ??
+          null),
     [communities, activeId],
+  );
+  const visibleCommunities = useMemo(
+    () =>
+      privateOrtakMode
+        ? activeCommunity
+          ? [activeCommunity]
+          : []
+        : communities,
+    [activeCommunity, communities],
   );
 
   const addCommunity = useCallback((community: Community): string => {
+    requireCommunityManagement();
     const existing = communitiesRef.current.find(
       (w) => w.relayUrl === community.relayUrl,
     );
@@ -217,6 +237,7 @@ function useCommunitiesInternal(): UseCommunitiesReturn {
   }, []);
 
   const clearCommunities = useCallback(() => {
+    requireCommunityManagement();
     clearCommunityStorage();
     clearCommunityDestinations();
     setCommunitiesState([]);
@@ -225,6 +246,7 @@ function useCommunitiesInternal(): UseCommunitiesReturn {
 
   const removeCommunity = useCallback(
     (id: string) => {
+      requireCommunityManagement();
       const removed = communitiesRef.current.find(
         (community) => community.id === id,
       );
@@ -272,6 +294,11 @@ function useCommunitiesInternal(): UseCommunitiesReturn {
 
   const switchCommunity = useCallback(
     (id: string) => {
+      if (privateOrtakMode) {
+        if (id === privateCompanySelected(communitiesRef.current, activeId)?.id)
+          return;
+        requireCommunityManagement();
+      }
       if (id === activeId) return;
       saveActiveCommunityId(id);
       setActiveId(id);
@@ -290,6 +317,23 @@ function useCommunitiesInternal(): UseCommunitiesReturn {
         Pick<Community, "name" | "relayUrl" | "token" | "pubkey" | "reposDir">
       >,
     ): UpdateCommunityResult => {
+      if (privateOrtakMode) {
+        const selected = privateCompanySelected(
+          communitiesRef.current,
+          activeId,
+        );
+        if (
+          !selected ||
+          id !== selected.id ||
+          (updates.relayUrl !== undefined &&
+            updates.relayUrl !== selected.relayUrl) ||
+          (updates.token !== undefined && updates.token !== selected.token) ||
+          (updates.reposDir !== undefined &&
+            updates.reposDir !== selected.reposDir)
+        ) {
+          requireCommunityManagement();
+        }
+      }
       const result = resolveCommunityUpdateResult(
         communitiesRef.current,
         activeId,
@@ -317,6 +361,7 @@ function useCommunitiesInternal(): UseCommunitiesReturn {
   );
 
   const reorderCommunities = useCallback((orderedIds: string[]) => {
+    requireCommunityManagement();
     setCommunitiesState((prev) => {
       const next = applyCommunitiesOrder(prev, orderedIds);
       saveCommunities(next);
@@ -325,7 +370,7 @@ function useCommunitiesInternal(): UseCommunitiesReturn {
   }, []);
 
   return {
-    communities,
+    communities: visibleCommunities,
     activeCommunity,
     reinitKey,
     addCommunity,

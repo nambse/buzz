@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, AlertDescription } from "@/shared/ui/alert";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
@@ -6,23 +6,32 @@ import { Skeleton } from "@/shared/ui/skeleton";
 import type { OrtakClient } from "../client";
 import type { Employee } from "../types";
 import { CreateItemForm, CreateProjectForm } from "./CreateForms";
+import { ReviewedMemoryPanel } from "./ReviewedMemoryPanel";
+import { ConversationMemoryPanel } from "../conversationMemory/ConversationMemoryPanel";
 import { ItemDetail } from "./ItemDetail";
 import { stateLabel } from "./operations";
 import { useWorkData } from "./useWorkData";
 import { useWorkMutation } from "./useWorkMutation";
+import type { WorkSelection } from "./selection";
 
 export function WorkScreen({
   client,
   employees,
   accessRevoked = false,
+  initialSelection,
 }: {
   client: OrtakClient;
   employees: Employee[];
   accessRevoked?: boolean;
+  initialSelection?: WorkSelection;
 }) {
   const projectHeading = useRef<HTMLHeadingElement>(null);
-  const [projectId, setProjectId] = useState<string | null>(null);
-  const [itemId, setItemId] = useState<string | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(
+    initialSelection?.project ?? null,
+  );
+  const [itemId, setItemId] = useState<string | null>(
+    initialSelection?.item ?? null,
+  );
   const [projectCursor, setProjectCursor] = useState<string | undefined>();
   const [itemCursor, setItemCursor] = useState<string | undefined>();
   const [refresh, setRefresh] = useState(0);
@@ -37,9 +46,18 @@ export function WorkScreen({
     refresh,
     revoked || accessRevoked,
   );
-  const mutation = useWorkMutation(client, reload, () => setRevoked(true));
+  const revoke = useCallback(() => setRevoked(true), []);
+  const mutation = useWorkMutation(client, reload, revoke);
   const data = state.data;
-  const disabled = mutation.busy || mutation.pending !== null;
+  const disabled =
+    mutation.busy ||
+    mutation.pending !== null ||
+    !state.fresh ||
+    state.revoked ||
+    accessRevoked;
+  const submit: typeof mutation.submit = (...args) => {
+    if (!disabled) mutation.submit(...args);
+  };
   useEffect(() => {
     if (data?.project?.id && !itemId) projectHeading.current?.focus();
   }, [data?.project?.id, itemId]);
@@ -48,15 +66,15 @@ export function WorkScreen({
   }, [state.revoked, accessRevoked, mutation.pause]);
   return (
     <section
-      aria-label="Projects and manual work"
+      aria-label="Projects and work"
       className="flex flex-col gap-4 pt-4"
     >
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">Projects &amp; Work</h2>
           <p className="text-sm text-muted-foreground">
-            Plan, assign, and review manual work. These actions do not start
-            employee execution.
+            Plan and assign work, explicitly start an employee, and review the
+            saved deliverable.
           </p>
         </div>
         <Button
@@ -84,8 +102,11 @@ export function WorkScreen({
                 className="self-start"
                 size="sm"
                 variant="outline"
-                disabled={mutation.busy || !data}
-                onClick={mutation.retry}
+                disabled={mutation.busy || !data || !state.fresh}
+                onClick={() => {
+                  if (state.fresh && !accessRevoked && !state.revoked)
+                    mutation.retry();
+                }}
               >
                 Retry same operation
               </Button>
@@ -95,7 +116,7 @@ export function WorkScreen({
       ) : null}
       {mutation.busy ? (
         <p role="status" className="text-sm text-muted-foreground">
-          Saving manual work…
+          Saving work…
         </p>
       ) : null}
       {state.error || state.revoked || accessRevoked ? (
@@ -104,6 +125,12 @@ export function WorkScreen({
             {state.error ?? "Work access must be refreshed before continuing."}
           </AlertDescription>
         </Alert>
+      ) : null}
+      {data && !state.fresh ? (
+        <p className="text-sm text-muted-foreground">
+          Showing the last successful read. Saving is paused until Work access
+          is refreshed; your unsaved entries are kept.
+        </p>
       ) : null}
       {!data && !state.error && !state.revoked && !accessRevoked ? (
         <Skeleton className="h-32 w-full" />
@@ -115,7 +142,7 @@ export function WorkScreen({
               <CreateProjectForm
                 page={data.projects}
                 disabled={disabled}
-                submit={mutation.submit}
+                submit={submit}
               />
             ) : null}
             {!data.projects.projects.length ? (
@@ -187,9 +214,27 @@ export function WorkScreen({
                   key={data.project.id}
                   project={data.project}
                   disabled={disabled}
-                  submit={mutation.submit}
+                  submit={submit}
                 />
               ) : null}
+              <ReviewedMemoryPanel
+                key={`memory:${data.project.id}`}
+                client={client}
+                project={data.project}
+                employees={employees}
+                item={data.item}
+                executions={data.executions}
+                disabled={disabled}
+                refresh={refresh}
+                submit={submit}
+                revoke={revoke}
+              />
+              <ConversationMemoryPanel
+                key={`conversation-memory:${data.project.id}`}
+                client={client}
+                project={data.project}
+                disabled={disabled}
+              />
               <div className="grid items-start gap-4 xl:grid-cols-[minmax(10rem,1fr)_minmax(0,2fr)]">
                 <section
                   aria-label="Work items"
@@ -239,12 +284,17 @@ export function WorkScreen({
                 </section>
                 {data.item ? (
                   <ItemDetail
+                    selectItem={setItemId}
+                    targets={data.items?.work_items ?? []}
+                    client={client}
+                    executions={data.executions}
+                    revoke={revoke}
                     key={data.item.id}
                     item={data.item}
                     project={data.project}
                     employees={employees}
                     disabled={disabled || data.project.status !== "active"}
-                    submit={mutation.submit}
+                    submit={submit}
                   />
                 ) : (
                   <p className="text-sm text-muted-foreground">
