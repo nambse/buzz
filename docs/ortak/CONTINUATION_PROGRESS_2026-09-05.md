@@ -17,7 +17,56 @@ new task is the sole implementation owner and continues under an active goal,
 without a deadline or token budget. The old account/login notes below are
 historical; the new shared Hermes OAuth enrollment is already ready.
 
-## Current checkpoint — 2026-09-07, native Work revision80 accepted
+## Current checkpoint — 2026-09-07, reviewed memory80 native acceptance
+
+Recovery80 is signed and pushed at `c5e1a78`; its exact current launcher is frozen
+outside the checkout. The added failed-restore comparison regression proves the
+new offline database is stopped even when verification rejects it. All23 focused
+lifecycle/recovery tests pass. The successful backup/restore below remains the
+actual selected receipt; no active cloned-runtime activation is claimed.
+
+Ada now has explicit project and conversation memory selection for the fresh
+Fikir Panosu project. The native operator reviewed an edited annotation against
+the version8 deliverable, separately approved publication, and observed Honcho
+acknowledgement before starting a new manual Work. The answer marker was absent
+from its title/description and returned exactly from the one selected project
+fact. Work entered REVIEW with human gates pending, then the operator inspected
+the saved artifact, accepted its criterion/review and completed version8.
+Native Stop using produced acknowledged remote content removal; the reloaded run
+withholds the fact text while retaining its use receipt. The frozen snapshot
+remains byte-identical. Honcho retains one header and tombstone and zero content
+rows for this fact. Evidence: `native-reviewed-memory80-{completed,withdrawn}.json`.
+
+Exact fresh IDs: Work `4045ce6a-8b46-46e1-a773-e6e73856c830`, run
+`f08fb9f7-b685-42a7-ac5b-bf2c7396eb24`, artifact
+`5f9c74bd-c333-4191-9d24-ca62491d3d75`, fact
+`26b7b1ef-9468-4f25-8d07-cca8797421bf`. Eleven real Office/Work runs now exist.
+This proves project-fact runtime use and withdrawal; fresh conversation/employee
+memory, semantic, Files and encrypted-DM selection remain separate gates.
+
+The native app is open from the same b49 artifact; the refresh fix is still
+source-only. Lifecycle drain now accounts for reviewed export jobs, retained workspace
+readers and encrypted execution. Two actual disposable-PostgreSQL tests bind the
+production SELECT, including due/uncertain versus future unattempted withdrawals.
+All23 local lifecycle/recovery tests still pass. The fresh Deniz private DM is
+0728ab67-44d9-417f-83cb-2be7da369d75; capture/reconciliation added it alongside the
+existing Office channel with16/0 and0/0 scanned/inserted rows. Capture
+f9850858-3a61-4759-8892-e3e333c5d880 is enabled. No plaintext message was sent.
+
+The new explicit encrypted-pair operator command composes the existing typed
+registration transaction; it does not read keys or change worker selection. Its
+parse test and feature-specific Clippy pass. That Clippy gate exposed two older
+feature-only style findings: the identity helper now returns its Result directly,
+and the protected wire groups run/revision/employee fields in a private struct.
+Both exact UTF-8/shape wire tests pass; no cryptographic format changes. Fifteen
+installed protected-runtime tests also pass on the current worker image with
+synthetic provider I/O, no credentials or network. Protected live activation and
+new native bundle are still pending.
+
+Next: finish selected lifecycle drain checks and the fresh encrypted DM / native
+artifact configuration, then semantic and Files selections and final CI/PR.
+
+## Previous checkpoint — 2026-09-07, native Work revision80 accepted
 
 Signed and pushed `b49c04a` is deployed: schema80, eight immutable native service
 artifacts, rebuilt private desktop, and the verified Work80 Hermes images below.

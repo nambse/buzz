@@ -48,17 +48,26 @@ struct Inner<'a> {
     spec: Spec<'a>,
 }
 
+pub(super) struct RunFields<'a> {
+    pub(super) run: Uuid,
+    pub(super) revision: Uuid,
+    pub(super) employee: &'a str,
+}
+
 pub(super) fn snapshot(
     identity: &ValidatedIdentity,
     binding: &RuntimeBinding,
-    run: Uuid,
-    revision: Uuid,
-    employee: &str,
+    fields: RunFields<'_>,
     start_key: &str,
     channel: &str,
     reply: Option<&str>,
     input: &str,
 ) -> Result<Zeroizing<Vec<u8>>> {
+    let RunFields {
+        run,
+        revision,
+        employee,
+    } = fields;
     if input.is_empty() || input.len() > 8192 || input.contains('\0') {
         return Err(Error::Payload);
     }

@@ -77,7 +77,7 @@ test("actual native invocation pins private identity, origin and isolated target
   assert.deepEqual(
     JSON.parse(options.env.VITE_ORTAK_ENCRYPTED_DM_CHANNELS_JSON),
     {
-      "http://localhost:3038": ["be203245-5ca3-4a47-9d88-2c20fc65622a"],
+      "http://localhost:3038": ["0728ab67-44d9-417f-83cb-2be7da369d75"],
     },
   );
   assert.equal(options.env.CARGO_HOME, "/cargo-cache");

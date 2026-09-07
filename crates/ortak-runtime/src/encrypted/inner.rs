@@ -12,7 +12,7 @@ fn identity<'a>(node: &'a Node, expected: &ValidatedIdentity) -> Result<&'a Node
     if &observed != expected {
         return Err(Error::Protocol);
     }
-    Ok(node.field("identity")?)
+    node.field("identity")
 }
 pub(super) fn snapshot(
     bytes: &[u8],

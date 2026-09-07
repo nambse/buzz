@@ -26,9 +26,11 @@ fn confidential_inner_uses_canonical_reduced_context_and_exact_utf8() {
     let encoded = wire::snapshot(
         &identity(),
         &binding(),
-        run,
-        run,
-        "fixture",
+        wire::RunFields {
+            run,
+            revision: run,
+            employee: "fixture",
+        },
         "confidential_run:fixture",
         "pair",
         None,
@@ -39,6 +41,9 @@ fn confidential_inner_uses_canonical_reduced_context_and_exact_utf8() {
     assert_eq!(encoded.as_slice(), serde_json::to_vec(&wire).unwrap());
     assert_eq!(wire["format"], "ortak-confidential-run/1");
     assert_eq!(wire["spec"]["input"], text);
+    assert_eq!(wire["spec"]["run_id"], run.to_string());
+    assert_eq!(wire["spec"]["revision_id"], run.to_string());
+    assert_eq!(wire["spec"]["employee_id"], "fixture");
     assert_eq!(
         wire["spec"]["context"],
         json!({"conversation_ref":"pair","reply_to_message_id":null})
@@ -57,9 +62,11 @@ fn confidential_inner_rejects_content_bound_and_nul_without_truncating() {
         assert!(wire::snapshot(
             &identity(),
             &binding(),
-            run,
-            run,
-            "fixture",
+            wire::RunFields {
+                run,
+                revision: run,
+                employee: "fixture"
+            },
             "key",
             "pair",
             None,
@@ -71,9 +78,11 @@ fn confidential_inner_rejects_content_bound_and_nul_without_truncating() {
     let encoded = wire::snapshot(
         &identity(),
         &binding(),
-        run,
-        run,
-        "fixture",
+        wire::RunFields {
+            run,
+            revision: run,
+            employee: "fixture",
+        },
         "key",
         "pair",
         None,

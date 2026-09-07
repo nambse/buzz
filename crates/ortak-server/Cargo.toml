@@ -44,3 +44,8 @@ uuid.workspace = true
 buzz-db.workspace = true
 
 serde_yaml.workspace = true
+
+[[bin]]
+name = "ortak-encrypted-pair"
+path = "src/bin/ortak-encrypted-pair.rs"
+required-features = ["encrypted-dm"]

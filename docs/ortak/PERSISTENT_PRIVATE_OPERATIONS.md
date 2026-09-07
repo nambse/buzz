@@ -91,3 +91,8 @@ native-restart-acceptance.json}` dosyalarındadır. Süreç ağacı, günlük s�
 sahiplik ve bekleyen iş testleri12/12 geçti. Arşiv, kapsam ve WAL denetimleriyle
 genişletilen toplam22 test geçti. Bu sonuçlar tam Mac reboot veya farklı makine
 kurtarması değildir; bu sınırlar ayrıca doğrulanmalıdır.
+
+Kapatma ayrıca onaylı bellek yayın/geri çekme işlerini, çalışma alanı okuyucularını
+ve şifreli mesaj işlemlerini denetler. Henüz denenmemiş gelecekteki süre sonu
+geri çekmeleri saklanır; vadesi gelmiş veya belirsiz işler tamamlanmadan depolar
+kapatılmaz. Bu ayrım gerçek PostgreSQL üzerinde iki üretim sorgusu testiyle doğrulandı.

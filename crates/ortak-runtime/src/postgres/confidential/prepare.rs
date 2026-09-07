@@ -75,9 +75,11 @@ impl PgConfidentialRuns {
         let plaintext = wire::snapshot(
             &identity,
             &binding,
-            run,
-            claim.identity().employee_revision_id,
-            claim.identity().employee_id.as_str(),
+            wire::RunFields {
+                run,
+                revision: claim.identity().employee_revision_id,
+                employee: claim.identity().employee_id.as_str(),
+            },
             &start_key,
             &claim.identity().channel_id.to_string(),
             reply.as_deref(),

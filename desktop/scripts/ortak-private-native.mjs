@@ -16,7 +16,7 @@ export const privateNativeIdentity = Object.freeze({
   relayHttp: "http://localhost:3038",
   apiOrigin: "http://127.0.0.1:8787",
   devOrigin: "http://localhost:1427",
-  encryptedDmChannels: Object.freeze(["be203245-5ca3-4a47-9d88-2c20fc65622a"]),
+  encryptedDmChannels: Object.freeze(["0728ab67-44d9-417f-83cb-2be7da369d75"]),
 });
 
 // Carry build tools and OS paths, never ambient application identities, provider

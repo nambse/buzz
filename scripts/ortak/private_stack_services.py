@@ -109,6 +109,29 @@ def pending(installation):
       'outputs',(SELECT count(*) FROM runtime_work_outputs WHERE state='pending'),
       'memory',(SELECT count(*) FROM runtime_memory_writes WHERE state='pending'),
       'provisioning',(SELECT count(*) FROM provisioning_operations WHERE NOT dry_run AND status IN('pending','running','compensating')),
+      'reviewed_exports',(SELECT count(*) FROM reviewed_memory_export_jobs j WHERE
+        j.state='failed' OR (j.state='pending' AND (j.action='publish' OR j.lease_token IS NOT NULL
+        OR j.total_attempts>0 OR j.last_error_code IS NOT NULL OR j.next_attempt_at<=clock_timestamp()))),
+      'employee_exports',(SELECT count(*) FROM employee_reviewed_memory_export_jobs j WHERE
+        j.state='failed' OR (j.state='pending' AND (j.action='publish' OR j.lease_token IS NOT NULL
+        OR j.total_attempts>0 OR j.last_error_code IS NOT NULL OR j.next_attempt_at<=clock_timestamp()))),
+      'runtime_probes',(SELECT count(*) FROM provisioning_runtime_probes WHERE
+        state NOT IN ('succeeded','failed') OR contained_at IS NULL),
+      'workspace_actions',(SELECT count(*) FROM workspace_tool_actions WHERE
+        state NOT IN ('delivered','interrupted') OR lease_token IS NOT NULL OR lease_expires_at IS NOT NULL),
+      'workspace_readers',(SELECT count(*) FROM workspace_reader_executions WHERE
+        state<>'stopped' OR stopped_at IS NULL OR stop_proof IS NULL),
+      'encrypted_decrypt',(SELECT count(*) FROM encrypted_dm_decrypt_jobs j WHERE
+        j.state IN ('pending','claimed') OR (j.state='verified' AND NOT EXISTS(
+          SELECT 1 FROM confidential_dm_receipts a WHERE a.company_id=j.company_id AND a.source_id=j.source_id))),
+      'encrypted_execution',(SELECT count(*) FROM confidential_runs c
+        LEFT JOIN confidential_run_dispatches d USING(company_id,run_id)
+        LEFT JOIN confidential_execution_leases e USING(company_id,run_id)
+        WHERE NOT coalesce(d.state IN ('delivered','failed','cancelled') AND d.lease_token IS NULL
+          AND d.lease_expires_at IS NULL AND e.state IN ('complete','stopped') AND e.lease_token IS NULL
+          AND e.lease_expires_at IS NULL AND (d.state='delivered' OR e.state='stopped'),false)),
+      'encrypted_replies',(SELECT count(*) FROM confidential_reply_outbox WHERE
+        state='pending' OR lease_token IS NOT NULL OR lease_expires_at IS NOT NULL),
       'schema',(SELECT max(version) FROM _sqlx_migrations WHERE success));
     COMMIT;"""
     identifier = installation.manifest["containers"]["postgres-1"]["id"]
