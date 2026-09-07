@@ -159,15 +159,13 @@ fn confidential_fresh_seals_are_bounded_and_do_not_accept_caller_nonces() {
                 .as_bytes(),
             full
         );
-        assert!(
-            seal(
-                &master,
-                &identity,
-                purpose,
-                ordinal,
-                &vec![0; full.len() + 1]
-            )
-            .is_err()
-        );
+        assert!(seal(
+            &master,
+            &identity,
+            purpose,
+            ordinal,
+            &vec![0; full.len() + 1]
+        )
+        .is_err());
     }
 }

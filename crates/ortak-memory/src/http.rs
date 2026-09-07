@@ -58,7 +58,8 @@ impl Http {
         path: &str,
         body: Option<Value>,
     ) -> Result<(StatusCode, Value), MemoryError> {
-        self.request_limited(method, path, body, MAX_REQUEST, MAX_BODY).await
+        self.request_limited(method, path, body, MAX_REQUEST, MAX_BODY)
+            .await
     }
 
     /// A stricter family can lower both limits without changing legacy callers.
@@ -70,7 +71,11 @@ impl Http {
         request_limit: usize,
         response_limit: usize,
     ) -> Result<(StatusCode, Value), MemoryError> {
-        if request_limit == 0 || request_limit > MAX_REQUEST || response_limit == 0 || response_limit > MAX_BODY {
+        if request_limit == 0
+            || request_limit > MAX_REQUEST
+            || response_limit == 0
+            || response_limit > MAX_BODY
+        {
             return Err(invalid("invalid memory wire ceiling"));
         }
         let url = self

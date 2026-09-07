@@ -118,12 +118,10 @@ async fn employee_memory_signed_hidden_source_capability_loss_and_inactive_stop_
     let epochs_after:Vec<(Uuid,i64)>=sqlx::query_as("SELECT channel_id,epoch FROM employee_memory_channel_authorities WHERE company_id=$1 ORDER BY channel_id")
         .bind(f.company).fetch_all(&f.pool).await.unwrap();
     assert_eq!(epochs_before.len(), 2);
-    assert!(
-        epochs_after
-            .iter()
-            .zip(&epochs_before)
-            .all(|(a, b)| a.0 == b.0 && a.1 > b.1)
-    );
+    assert!(epochs_after
+        .iter()
+        .zip(&epochs_before)
+        .all(|(a, b)| a.0 == b.0 && a.1 > b.1));
     let narrow = app(
         f,
         &f.operator,

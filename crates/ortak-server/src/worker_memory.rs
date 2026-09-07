@@ -16,18 +16,18 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use ortak_control::{
-    CompanyScope,
     memory::{
         MemoryAdapter, MemoryCapabilities, MemoryCapability, MemoryError, MemoryHealthReport,
         MemoryRecall, MemoryRecallRequest, MemoryResourceOutcome, MemoryResourceRequest,
         MemoryWriteReceipt, MemoryWriteRequest,
     },
+    CompanyScope,
 };
 use ortak_domain::{CredentialRef, EmployeeId, MemoryBinding, ProvisioningMode};
 use ortak_memory::{
-    HONCHO_VERSION, HonchoCreatedResourcesReceipt, HonchoDeploymentSelection,
-    HonchoEmployeeBinding, HonchoMemoryAdapter, HonchoMemoryConfig, MemoryRoundtripRequest,
-    PROTOCOL, ResolvedHonchoToken,
+    HonchoCreatedResourcesReceipt, HonchoDeploymentSelection, HonchoEmployeeBinding,
+    HonchoMemoryAdapter, HonchoMemoryConfig, MemoryRoundtripRequest, ResolvedHonchoToken,
+    HONCHO_VERSION, PROTOCOL,
 };
 use serde::Deserialize;
 use uuid::Uuid;

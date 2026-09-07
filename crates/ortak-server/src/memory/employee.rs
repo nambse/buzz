@@ -2,7 +2,7 @@
 use super::*;
 use ortak_control::memory::employee::{EmployeeMemoryKind, EmployeeMemoryProvenanceV1};
 use ortak_runtime::memory_context::{EmployeeContextRecord, ReviewedEmployeeContext};
-use sqlx::{PgConnection, postgres::PgRow};
+use sqlx::{postgres::PgRow, PgConnection};
 
 mod pins;
 

@@ -19,15 +19,15 @@ use uuid::Uuid;
 
 #[path = "activity_stream.rs"]
 mod activity_stream;
+#[cfg(feature = "encrypted-dm")]
+#[path = "encrypted_dm.rs"]
+mod encrypted_dm;
 #[path = "provisioning_read.rs"]
 mod provisioning_read;
 #[path = "routing_read.rs"]
 mod routing_read;
 #[path = "routing_stream.rs"]
 mod routing_stream;
-#[cfg(feature = "encrypted-dm")]
-#[path = "encrypted_dm.rs"]
-mod encrypted_dm;
 
 use crate::{
     auth::{authenticate, Principal, RequestAuthority},

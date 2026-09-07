@@ -15,10 +15,10 @@ mod routes;
 pub(crate) use routes::router;
 
 use crate::{
-    Role,
     auth::Principal,
     error::{ApiError, Result},
     routes::ApiState,
+    Role,
 };
 use ortak_work::{ApiWorkPrincipal, AuthorizedWork};
 

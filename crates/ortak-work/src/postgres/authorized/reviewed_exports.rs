@@ -2,7 +2,7 @@
 use super::*;
 use crate::reviewed_exports::{self as exports, ReviewedExportAction, ReviewedExportView};
 use chrono::{DateTime, Utc};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 #[derive(Clone, Copy)]
 enum ExportAudience {

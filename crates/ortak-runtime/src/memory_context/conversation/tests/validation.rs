@@ -142,10 +142,12 @@ fn conversation_v4_decode_rechecks_combined_bytes_rendering_and_dispatch_pins() 
     assert!(FrozenRunSnapshot::decode(&bytes, &f.authority, Uuid::from_u128(999)).is_err());
     let mut tampered: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     tampered["spec"]["context"]["memory_context"][1] = "raw unframed content".into();
-    assert!(
-        FrozenRunSnapshot::decode(&serde_json::to_vec(&tampered).unwrap(), &f.authority, f.run)
-            .is_err()
-    );
+    assert!(FrozenRunSnapshot::decode(
+        &serde_json::to_vec(&tampered).unwrap(),
+        &f.authority,
+        f.run
+    )
+    .is_err());
     // Bypass the truncating constructor deliberately to exercise decode's own
     // count fence; the attacker also regenerates otherwise-consistent rendering.
     let mut forged = snapshot.wire.clone();

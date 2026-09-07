@@ -34,7 +34,15 @@ async fn confidential_pending_dispatch_blocks_canonical_deletion_and_preserves_c
     // atomic admission create the pending dispatch. No bridge is constructed.
     let run = admitted(&x).await;
     let before = retained(&x).await;
-    for key in ["selections", "jobs", "runs", "protected", "payloads", "receipts", "dispatches"] {
+    for key in [
+        "selections",
+        "jobs",
+        "runs",
+        "protected",
+        "payloads",
+        "receipts",
+        "dispatches",
+    ] {
         assert_eq!(before[key].as_array().unwrap().len(), 1, "{key}");
     }
     assert_eq!(before["dispatches"][0]["state"], "pending");
@@ -65,7 +73,11 @@ async fn confidential_pending_dispatch_blocks_canonical_deletion_and_preserves_c
         .await
         .unwrap();
     let request = store
-        .submit(&host, "fixture", Some("Protected admission retention regression"))
+        .submit(
+            &host,
+            "fixture",
+            Some("Protected admission retention regression"),
+        )
         .await
         .unwrap();
     let community = request.community_id;
@@ -84,7 +96,10 @@ async fn confidential_pending_dispatch_blocks_canonical_deletion_and_preserves_c
                 .collect(),
         },
     };
-    store.freeze_inventory(request.id, &inventory).await.unwrap();
+    store
+        .freeze_inventory(request.id, &inventory)
+        .await
+        .unwrap();
     store.approve(request.id, "fixture", None).await.unwrap();
     let claim = store
         .claim_specific(request.id, "fixture", Duration::from_secs(120))

@@ -61,15 +61,13 @@ impl EmployeeFixture {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{exported}");
-        assert!(
-            employee_exports::schedule_one(
-                &c.x.f.control,
-                &c.x.scope,
-                &employee_exports::HonchoEmployeeExportAdapter::new(&remote.service)
-            )
-            .await
-            .unwrap()
-        );
+        assert!(employee_exports::schedule_one(
+            &c.x.f.control,
+            &c.x.scope,
+            &employee_exports::HonchoEmployeeExportAdapter::new(&remote.service)
+        )
+        .await
+        .unwrap());
         assert_eq!(remote.diagnostic_count(), 3);
         Self {
             c,

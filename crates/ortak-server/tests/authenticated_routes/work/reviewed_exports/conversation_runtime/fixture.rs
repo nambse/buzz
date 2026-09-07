@@ -67,11 +67,9 @@ impl ConversationFixture {
         )
         .await;
         assert_eq!(result.0, StatusCode::OK, "{result:?}");
-        assert!(
-            schedule_one(&self.x.f.control, &self.x.scope, &self.remote)
-                .await
-                .unwrap()
-        );
+        assert!(schedule_one(&self.x.f.control, &self.x.scope, &self.remote)
+            .await
+            .unwrap());
         self.memory
             .contents
             .lock()

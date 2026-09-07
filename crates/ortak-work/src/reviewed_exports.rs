@@ -10,7 +10,7 @@ pub use types::*;
 use crate::{Result, WorkError};
 use chrono::{DateTime, Utc};
 use ortak_control::{CompanyScope, PgControlPlane};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use sqlx::{PgConnection, Row};
 use std::time::Duration;

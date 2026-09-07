@@ -42,13 +42,11 @@ async fn http_contract_recovery_separates_adopted_acquisition_from_explicit_io()
     let before = server.state.lock().unwrap().calls.len();
     let outcome = service.recover_created_resources(&receipt).await.unwrap();
     assert!(outcome.outcomes().iter().all(|r| r.ownership.is_adopted()));
-    assert!(
-        receipt
-            .resources
-            .outcomes()
-            .iter()
-            .all(|r| !r.ownership.is_adopted())
-    );
+    assert!(receipt
+        .resources
+        .outcomes()
+        .iter()
+        .all(|r| !r.ownership.is_adopted()));
     assert!(!service.witnessed(allowed).unwrap());
     assert!(!service.health(&allowed.binding).await.unwrap().is_healthy());
     let capabilities = service.probe_capabilities(&allowed.binding).await.unwrap();
@@ -72,26 +70,18 @@ async fn http_contract_recovery_separates_adopted_acquisition_from_explicit_io()
         .unwrap();
     assert!(service.health(&allowed.binding).await.unwrap().is_healthy());
     let capabilities = service.probe_capabilities(&allowed.binding).await.unwrap();
-    assert!(
-        capabilities
-            .capabilities
-            .contains(&MemoryCapability::Recall)
-    );
-    assert!(
-        capabilities
-            .capabilities
-            .contains(&MemoryCapability::Remember)
-    );
-    assert!(
-        !capabilities
-            .capabilities
-            .contains(&MemoryCapability::ResourceCreate)
-    );
-    assert!(
-        !capabilities
-            .capabilities
-            .contains(&MemoryCapability::ResourceDelete)
-    );
+    assert!(capabilities
+        .capabilities
+        .contains(&MemoryCapability::Recall));
+    assert!(capabilities
+        .capabilities
+        .contains(&MemoryCapability::Remember));
+    assert!(!capabilities
+        .capabilities
+        .contains(&MemoryCapability::ResourceCreate));
+    assert!(!capabilities
+        .capabilities
+        .contains(&MemoryCapability::ResourceDelete));
     assert_eq!(service.ensure_resources(&adopt).await.unwrap(), outcome);
     let recall = MemoryRecallRequest {
         employee_id: allowed.employee_id.clone(),
@@ -110,18 +100,14 @@ async fn http_contract_recovery_separates_adopted_acquisition_from_explicit_io()
             capability: MemoryCapability::ResourceDelete
         })
     ));
-    assert!(
-        service
-            .ensure_resources(&create_request(&config))
-            .await
-            .is_err()
-    );
-    assert!(
-        service
-            .created_resources_receipt(&create_request(&config))
-            .await
-            .is_err()
-    );
+    assert!(service
+        .ensure_resources(&create_request(&config))
+        .await
+        .is_err());
+    assert!(service
+        .created_resources_receipt(&create_request(&config))
+        .await
+        .is_err());
     assert_eq!(server.state.lock().unwrap().calls.len(), before);
 }
 
@@ -137,12 +123,10 @@ async fn http_contract_recovery_restart_requires_frozen_ids_and_fresh_witness() 
         .await
         .unwrap();
     let restarted = adapter(receipt.company_id, config.clone());
-    assert!(
-        restarted
-            .validate_memory_roundtrip(&gate(&config))
-            .await
-            .is_err()
-    );
+    assert!(restarted
+        .validate_memory_roundtrip(&gate(&config))
+        .await
+        .is_err());
     restarted.recover_created_resources(&receipt).await.unwrap();
     assert!(!restarted.witnessed(&config.employees[0]).unwrap());
     let repeated = restarted
@@ -171,12 +155,10 @@ async fn http_contract_recovery_restart_requires_frozen_ids_and_fresh_witness() 
         replaced.recover_created_resources(&receipt).await,
         Err(MemoryError::Rejected { .. })
     ));
-    assert!(
-        replaced
-            .validate_memory_roundtrip(&gate(&config))
-            .await
-            .is_err()
-    );
+    assert!(replaced
+        .validate_memory_roundtrip(&gate(&config))
+        .await
+        .is_err());
     assert!(!replaced.witnessed(&config.employees[0]).unwrap());
     assert!(read_only(&server.state.lock().unwrap().calls[before..]));
 }
@@ -214,12 +196,10 @@ async fn http_contract_recovery_refuses_tampered_selection_before_http() {
             service.recover_created_resources(&altered).await.is_err(),
             "{field}"
         );
-        assert!(
-            service
-                .validate_memory_roundtrip(&gate(&config))
-                .await
-                .is_err()
-        );
+        assert!(service
+            .validate_memory_roundtrip(&gate(&config))
+            .await
+            .is_err());
         assert_eq!(server.state.lock().unwrap().calls.len(), before, "{field}");
     }
 }
@@ -252,12 +232,10 @@ async fn http_contract_recovery_self_asserted_receipt_never_replaces_server_evid
             ),
             "{fault}"
         );
-        assert!(
-            service
-                .validate_memory_roundtrip(&gate(&config))
-                .await
-                .is_err()
-        );
+        assert!(service
+            .validate_memory_roundtrip(&gate(&config))
+            .await
+            .is_err());
         let state = server.state.lock().unwrap();
         assert!(state.calls.len() > before);
         assert!(read_only(&state.calls[before..]));

@@ -33,11 +33,9 @@ async fn employee_exports_signed_registration_publish_stop_and_original_cleanup(
     let fact = approved(&x, "relationship").await;
     let command = enqueue(&x, fact).await;
     let worker = exports::HonchoEmployeeExportAdapter::new(&remote.service);
-    assert!(
-        exports::schedule_one(&x.f.control, &remote.scope, &worker)
-            .await
-            .unwrap()
-    );
+    assert!(exports::schedule_one(&x.f.control, &remote.scope, &worker)
+        .await
+        .unwrap());
     let counts: (i64, i64) = sqlx::query_as(
         "SELECT (SELECT count(*) FROM employee_reviewed_memory_exports WHERE company_id=$1),
         (SELECT count(*) FROM employee_reviewed_memory_export_receipts WHERE company_id=$1)",
@@ -50,19 +48,17 @@ async fn employee_exports_signed_registration_publish_stop_and_original_cleanup(
     let (status, replay) = post(&x.app, &x.f.operator, &path(fact), &command).await;
     assert_eq!(status, StatusCode::OK, "{replay}");
     assert_eq!(replay["created"], false);
-    assert!(
-        exports::refresh_target(
-            &x.f.control,
-            &remote.scope,
-            &remote.service,
-            &remote.namespace,
-            target,
-            true,
-            until
-        )
-        .await
-        .unwrap()
-    );
+    assert!(exports::refresh_target(
+        &x.f.control,
+        &remote.scope,
+        &remote.service,
+        &remote.namespace,
+        target,
+        true,
+        until
+    )
+    .await
+    .unwrap());
     assert!(
         !exports::refresh_target(
             &x.f.control,
@@ -103,20 +99,16 @@ async fn employee_exports_signed_registration_publish_stop_and_original_cleanup(
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{value}");
-    assert!(
-        exports::schedule_one(&x.f.control, &remote.scope, &worker)
-            .await
-            .unwrap()
-    );
+    assert!(exports::schedule_one(&x.f.control, &remote.scope, &worker)
+        .await
+        .unwrap());
     let (status, value) = get(&recovery, &x.f.operator, &path(fact)).await;
     assert_eq!(status, StatusCode::OK, "{value}");
-    assert!(
-        value["export"]["jobs"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|j| j["acknowledged"] == true)
-    );
+    assert!(value["export"]["jobs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|j| j["acknowledged"] == true));
     assert!(!value.to_string().contains("The human edited"));
     let last = remote.state.lock().unwrap().calls.last().unwrap().clone();
     assert!(last.0.ends_with("/withdraw"));
@@ -212,11 +204,9 @@ async fn employee_exports_signed_failed_receipt_retry_and_live_lease_cas() {
         StatusCode::CONFLICT
     );
     remote.state.lock().unwrap().forge_ack = false;
-    assert!(
-        exports::schedule_one(&x.f.control, &remote.scope, &adapter)
-            .await
-            .unwrap()
-    );
+    assert!(exports::schedule_one(&x.f.control, &remote.scope, &adapter)
+        .await
+        .unwrap());
     let state: (String, i32, i32) = sqlx::query_as(
         "SELECT state,retry_version,total_attempts FROM employee_reviewed_memory_export_jobs
         WHERE company_id=$1 AND fact_id=$2 AND action='publish'",

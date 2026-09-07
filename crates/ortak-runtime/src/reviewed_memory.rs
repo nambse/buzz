@@ -15,7 +15,7 @@ use crate::memory_context::{
 };
 use crate::{DispatchAuthority, DispatchRefusal};
 use ortak_control::memory::MemoryAdapter;
-use ortak_control::run_event::{RedactionPolicy, strip_control_characters};
+use ortak_control::run_event::{strip_control_characters, RedactionPolicy};
 use ortak_control::{CompanyScope, PgControlPlane};
 use std::time::Duration;
 use uuid::Uuid;

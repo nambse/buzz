@@ -6,7 +6,7 @@
 
 use super::*;
 use ortak_control::{
-    PgControlPlane, fakes::InMemoryProvisioningRepository, ports::CompanyDirectory,
+    fakes::InMemoryProvisioningRepository, ports::CompanyDirectory, PgControlPlane,
 };
 use serde_json::json;
 

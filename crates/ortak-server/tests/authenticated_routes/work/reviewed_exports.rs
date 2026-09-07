@@ -9,6 +9,12 @@ use std::time::Duration;
 
 #[path = "reviewed_exports/authority.rs"]
 mod authority;
+#[path = "reviewed_exports/conversation_publication.rs"]
+mod conversation_publication;
+#[path = "reviewed_exports/conversation_runtime.rs"]
+mod conversation_runtime;
+#[path = "reviewed_exports/conversation_targets.rs"]
+mod conversation_targets;
 #[path = "reviewed_exports/fixture.rs"]
 mod fixture;
 #[path = "reviewed_exports/jobs.rs"]
@@ -17,12 +23,6 @@ mod jobs;
 mod retention;
 #[path = "reviewed_exports/runtime.rs"]
 mod runtime;
-#[path = "reviewed_exports/conversation_targets.rs"]
-mod conversation_targets;
-#[path = "reviewed_exports/conversation_publication.rs"]
-mod conversation_publication;
-#[path = "reviewed_exports/conversation_runtime.rs"]
-mod conversation_runtime;
 use fixture::*;
 
 #[tokio::test]

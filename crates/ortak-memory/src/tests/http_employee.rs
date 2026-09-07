@@ -2,7 +2,7 @@
 //! witness or SQL ACK is minted. These socket tests are executed by root only.
 use super::*;
 use chrono::SecondsFormat;
-use ortak_control::{MessageId, memory::employee::*, office_identity::OfficePublicKey};
+use ortak_control::{memory::employee::*, office_identity::OfficePublicKey, MessageId};
 use sha2::{Digest, Sha256};
 
 fn identity(body: &Value) -> Value {
@@ -155,11 +155,9 @@ async fn employee_namespace_diagnostic_requires_exact_readback_cleanup_and_adapt
     service.employee_witness_current(&witness).unwrap();
     assert!(witness.diagnostic().erased);
     assert!(witness.remaining() <= Duration::from_secs(55));
-    assert!(
-        adapter(Uuid::from_u128(1), config)
-            .employee_witness_current(&witness)
-            .is_err()
-    );
+    assert!(adapter(Uuid::from_u128(1), config)
+        .employee_witness_current(&witness)
+        .is_err());
     let text = serde_json::to_string(witness.diagnostic()).unwrap();
     assert!(!text.contains(&d.challenge));
     let calls = server
@@ -181,12 +179,10 @@ async fn employee_namespace_diagnostic_requires_exact_readback_cleanup_and_adapt
     );
     server.state.lock().unwrap().fault = Some("employee_read");
     let bad = diagnostic();
-    assert!(
-        service
-            .validate_reviewed_employee_namespace(&namespace, &bad)
-            .await
-            .is_err()
-    );
+    assert!(service
+        .validate_reviewed_employee_namespace(&namespace, &bad)
+        .await
+        .is_err());
     assert_eq!(
         server.state.lock().unwrap().employee_diagnostics[&bad.operation_id.to_string()]["erased"],
         true
@@ -200,12 +196,10 @@ async fn employee_namespace_uncertain_cleanup_recovers_same_key_without_new_writ
     let (service, _, _, namespace) = selected(&server).await;
     let d = diagnostic();
     server.state.lock().unwrap().fault = Some("employee_cleanup");
-    assert!(
-        service
-            .validate_reviewed_employee_namespace(&namespace, &d)
-            .await
-            .is_err()
-    );
+    assert!(service
+        .validate_reviewed_employee_namespace(&namespace, &d)
+        .await
+        .is_err());
     let before = server.state.lock().unwrap().calls.len();
     server.state.lock().unwrap().fault = None;
     assert!(
@@ -215,24 +209,18 @@ async fn employee_namespace_uncertain_cleanup_recovers_same_key_without_new_writ
             .unwrap()
             .erased
     );
-    assert!(
-        server.state.lock().unwrap().calls[before..]
-            .iter()
-            .all(|(_, p, _)| !p.ends_with("/write") && !p.ends_with("/read"))
-    );
+    assert!(server.state.lock().unwrap().calls[before..]
+        .iter()
+        .all(|(_, p, _)| !p.ends_with("/write") && !p.ends_with("/read")));
     server.state.lock().unwrap().fault = Some("employee_namespace");
     let before = server.state.lock().unwrap().calls.len();
-    assert!(
-        service
-            .validate_reviewed_employee_namespace(&namespace, &diagnostic())
-            .await
-            .is_err()
-    );
-    assert!(
-        server.state.lock().unwrap().calls[before..]
-            .iter()
-            .all(|(_, p, _)| !p.contains("/diagnostics/"))
-    );
+    assert!(service
+        .validate_reviewed_employee_namespace(&namespace, &diagnostic())
+        .await
+        .is_err());
+    assert!(server.state.lock().unwrap().calls[before..]
+        .iter()
+        .all(|(_, p, _)| !p.contains("/diagnostics/")));
 }
 
 fn publication(namespace: &ReviewedEmployeeNamespace) -> (ReviewedEmployeePublication, Value) {
@@ -302,27 +290,23 @@ async fn employee_publication_recall_and_cleanup_bind_exact_pins_without_recurri
     let (value, record) = publication(&namespace);
     let mut ack = record.clone();
     ack["content"] = Value::Null;
-    ack["request_hash"] = json!(
-        employee_reviewed_request_hash(
-            namespace.namespace_hash(),
-            namespace.binding_hash(),
-            namespace.original().company_id,
-            &namespace.original().employee_id,
-            &value.commitment,
-            false
-        )
-        .unwrap()
-    );
+    ack["request_hash"] = json!(employee_reviewed_request_hash(
+        namespace.namespace_hash(),
+        namespace.binding_hash(),
+        namespace.original().company_id,
+        &namespace.original().employee_id,
+        &value.commitment,
+        false
+    )
+    .unwrap());
     server.state.lock().unwrap().employee_reply = Some(ack.clone());
-    assert!(
-        service
-            .publish_reviewed_employee(&namespace, &value)
-            .await
-            .unwrap()
-            .record
-            .content
-            .is_none()
-    );
+    assert!(service
+        .publish_reviewed_employee(&namespace, &value)
+        .await
+        .unwrap()
+        .record
+        .content
+        .is_none());
     for (key, wrong) in [
         ("sharing_hash", json!("ee".repeat(32))),
         ("target_id", json!(Uuid::from_u128(55))),
@@ -357,44 +341,38 @@ async fn employee_publication_recall_and_cleanup_bind_exact_pins_without_recurri
             .as_deref(),
         Some(value.content.as_str())
     );
-    assert!(
-        service
-            .recall_selected_reviewed_employee(
-                &namespace,
-                value.commitment.destination_channel_id,
-                Some(&"cc".repeat(32)),
-                selected
-            )
-            .await
-            .is_err()
-    );
+    assert!(service
+        .recall_selected_reviewed_employee(
+            &namespace,
+            value.commitment.destination_channel_id,
+            Some(&"cc".repeat(32)),
+            selected
+        )
+        .await
+        .is_err());
     server.state.lock().unwrap().fault = Some("employee_large");
-    assert!(
-        service
-            .recall_selected_reviewed_employee(
-                &namespace,
-                value.commitment.destination_channel_id,
-                Some(&"bb".repeat(32)),
-                selected
-            )
-            .await
-            .is_err()
-    );
+    assert!(service
+        .recall_selected_reviewed_employee(
+            &namespace,
+            value.commitment.destination_channel_id,
+            Some(&"bb".repeat(32)),
+            selected
+        )
+        .await
+        .is_err());
     server.state.lock().unwrap().fault = None;
     ack["status"] = json!("withdrawn");
     ack["erased_from_reviewed_store"] = json!(true);
     ack["tombstone_at"] = json!(Utc::now().to_rfc3339_opts(SecondsFormat::Micros, true));
-    ack["request_hash"] = json!(
-        employee_reviewed_request_hash(
-            namespace.namespace_hash(),
-            namespace.binding_hash(),
-            namespace.original().company_id,
-            &namespace.original().employee_id,
-            &value.commitment,
-            true
-        )
-        .unwrap()
-    );
+    ack["request_hash"] = json!(employee_reviewed_request_hash(
+        namespace.namespace_hash(),
+        namespace.binding_hash(),
+        namespace.original().company_id,
+        &namespace.original().employee_id,
+        &value.commitment,
+        true
+    )
+    .unwrap());
     server.state.lock().unwrap().employee_reply = Some(ack);
     assert!(
         service

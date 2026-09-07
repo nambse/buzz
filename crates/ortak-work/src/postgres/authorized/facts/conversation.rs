@@ -2,7 +2,7 @@
 use super::*;
 use ortak_control::memory::conversation::ConversationProvenanceV1;
 use ortak_control::postgres::conversation_memory::{
-    ConversationObservation, ConversationReadRequest, resolve_conversation_on,
+    resolve_conversation_on, ConversationObservation, ConversationReadRequest,
 };
 
 mod approval;

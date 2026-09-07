@@ -64,11 +64,14 @@ async fn conversation_target_refresh_and_opt_out_keep_independent_monotonic_epoc
 
     let mut foreign = selections[0].clone();
     foreign.channel_id = x.f.hidden;
-    assert!(
-        exports::advertise_targets_with_conversations(&x.f.control, &x.scope, &targets, &[foreign])
-            .await
-            .is_err()
-    );
+    assert!(exports::advertise_targets_with_conversations(
+        &x.f.control,
+        &x.scope,
+        &targets,
+        &[foreign]
+    )
+    .await
+    .is_err());
     assert_eq!(
         state(&x).await,
         (true, true, 0, true, 1, Some(x.f.channel)),

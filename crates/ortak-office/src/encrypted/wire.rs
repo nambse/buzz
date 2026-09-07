@@ -1,6 +1,6 @@
 use chrono::{DateTime, Datelike, TimeZone, Utc};
 use nostr::{Event, EventId, JsonUtil, Kind, PublicKey, Tag, Timestamp};
-use serde::{Deserialize, Deserializer, de};
+use serde::{de, Deserialize, Deserializer};
 use zeroize::Zeroizing;
 
 use super::*;

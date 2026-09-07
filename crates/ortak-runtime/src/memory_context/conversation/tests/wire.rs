@@ -138,10 +138,12 @@ fn conversation_v4_does_not_change_legacy_1_2_3_fields_or_bytes() {
                 bytes
             );
             wire["conversation"] = serde_json::Value::Null;
-            assert!(
-                FrozenRunSnapshot::decode(&serde_json::to_vec(&wire).unwrap(), &f.authority, f.run)
-                    .is_err()
-            );
+            assert!(FrozenRunSnapshot::decode(
+                &serde_json::to_vec(&wire).unwrap(),
+                &f.authority,
+                f.run
+            )
+            .is_err());
         }
     }
 }

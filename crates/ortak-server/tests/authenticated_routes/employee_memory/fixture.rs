@@ -37,11 +37,9 @@ impl MemoryFixture {
             "kind":kind,"human_public_key":if kind=="relationship" {Some(actor.public_key().to_hex())} else {None}});
         let (status, value) = post(&self.app, actor, &format!("{PATH}/preview"), &body).await;
         assert_eq!(status, StatusCode::OK, "{value}");
-        assert!(
-            !value
-                .to_string()
-                .contains("Original source private fixture")
-        );
+        assert!(!value
+            .to_string()
+            .contains("Original source private fixture"));
         value["preview"].clone()
     }
     pub fn command(&self, preview: &Value) -> Value {

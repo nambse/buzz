@@ -14,12 +14,12 @@ use ortak_runtime::{
 use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+#[path = "execution/deletion.rs"]
+mod deletion;
 #[path = "execution/late_ack.rs"]
 mod late_ack;
 #[path = "execution/unbound.rs"]
 mod unbound;
-#[path = "execution/deletion.rs"]
-mod deletion;
 
 fn provider(x: &EncryptedFixture) -> EnvDmKeyProvider {
     EnvDmKeyProvider::new(vec![DmOfficeKeyBinding {

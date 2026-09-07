@@ -215,15 +215,13 @@ async fn employee_runtime_v5_office_stop_fences_frozen_output_before_remote_eras
     );
     assert_eq!(c.bytes(run).await, frozen);
     assert_eq!(x.uses(run).await, vec![(0, x.fact)]);
-    assert!(
-        employee_exports::schedule_one(
-            &c.x.f.control,
-            &c.x.scope,
-            &employee_exports::HonchoEmployeeExportAdapter::new(&x.remote.service)
-        )
-        .await
-        .unwrap()
-    );
+    assert!(employee_exports::schedule_one(
+        &c.x.f.control,
+        &c.x.scope,
+        &employee_exports::HonchoEmployeeExportAdapter::new(&x.remote.service)
+    )
+    .await
+    .unwrap());
     assert!(!c.current(run).await);
     x.prove_target_unchanged().await;
 }

@@ -5,8 +5,8 @@ const PROJECT_FACT: &str = "Reviewed deployment fact";
 
 #[tokio::test]
 #[ignore = "requires explicit disposable port55432 PostgreSQL with conversation76"]
-async fn conversation_runtime_current_promoted_work_materializes_mixed_memory_and_retains_completed_history()
- {
+async fn conversation_runtime_current_promoted_work_materializes_mixed_memory_and_retains_completed_history(
+) {
     let mut c = ConversationFixture::new().await;
     c.memory.project_enabled = true;
     c.x.target.runtime_consumption_enabled = true;
@@ -15,11 +15,9 @@ async fn conversation_runtime_current_promoted_work_materializes_mixed_memory_an
     // API. Publication and acknowledgement still pass through the real outbox.
     c.x.publish().await;
     let remote = ObservedAdapter::default();
-    assert!(
-        schedule_one(&c.x.f.control, &c.x.scope, &remote)
-            .await
-            .unwrap()
-    );
+    assert!(schedule_one(&c.x.f.control, &c.x.scope, &remote)
+        .await
+        .unwrap());
     assert_eq!(remote.calls.lock().unwrap().len(), 1);
     c.memory
         .contents

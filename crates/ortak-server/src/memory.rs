@@ -5,12 +5,12 @@ use std::collections::BTreeSet;
 
 use ortak_control::{
     memory::{MemoryRecall, MemoryScope, MemoryWriteReceipt},
-    run_event::{RedactionPolicy, strip_control_characters},
+    run_event::{strip_control_characters, RedactionPolicy},
 };
 use ortak_domain::EmployeeId;
 use ortak_runtime::memory_context::{MAX_CONTEXT_BYTES, MAX_CONTEXT_RECORDS, MAX_SNAPSHOT_BYTES};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
 use uuid::Uuid;

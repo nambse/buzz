@@ -19,12 +19,12 @@ use uuid::Uuid;
 use crate::error::{DbError, Result};
 use crate::Db;
 
+#[path = "deletion/extensions77.rs"]
+mod extensions77;
 #[path = "deletion/reviewed_exports.rs"]
 mod reviewed_exports;
 #[path = "deletion/workspaces.rs"]
 mod workspaces;
-#[path = "deletion/extensions77.rs"]
-mod extensions77;
 
 /// Default PostgreSQL lease duration for one claimed deletion request.
 pub const DEFAULT_LEASE_DURATION: Duration = Duration::from_secs(60);

@@ -8,9 +8,9 @@
 mod auth;
 mod cancel;
 mod config;
-mod employees;
 mod employee_memory;
 pub mod employee_memory_exports;
+mod employees;
 mod error;
 pub mod management;
 mod memory;
@@ -29,5 +29,5 @@ pub use config::{ApiConfig, HumanGrant, Role};
 pub use routes::product_router;
 pub use worker_database::{connect_private_database, connect_worker_database};
 
-pub mod workspace_reader;
 pub mod worker_workspace_tools;
+pub mod workspace_reader;

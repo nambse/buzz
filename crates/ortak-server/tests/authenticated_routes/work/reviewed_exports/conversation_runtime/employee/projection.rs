@@ -107,16 +107,14 @@ async fn employee_runtime_v5_projection_stop_withholds_scratch_and_acknowledged_
         &publisher,
         DeliveryConfig::default(),
     );
-    assert!(
-        ortak_runtime::office_delivery::deliver_one_office_output(
-            &c.x.f.control,
-            &c.x.scope,
-            "v5-projection",
-            &delivery
-        )
-        .await
-        .unwrap()
-    );
+    assert!(ortak_runtime::office_delivery::deliver_one_office_output(
+        &c.x.f.control,
+        &c.x.scope,
+        "v5-projection",
+        &delivery
+    )
+    .await
+    .unwrap());
     assert_eq!(
         ortak_runtime::memory_output::schedule_memory_output(&c.x.f.control, &c.memory, &c.x.scope)
             .await

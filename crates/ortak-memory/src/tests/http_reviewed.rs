@@ -73,12 +73,10 @@ async fn http_contract_reviewed_uses_exact_wire_and_rejects_forged_receipts() {
     let (service, config) = provision(&server).await;
     let scope = audience(&config);
     let value = publication();
-    assert!(
-        service
-            .publish_reviewed_project(&scope, &value)
-            .await
-            .is_err()
-    );
+    assert!(service
+        .publish_reviewed_project(&scope, &value)
+        .await
+        .is_err());
     service
         .validate_memory_roundtrip(&gate(&config))
         .await
@@ -125,12 +123,10 @@ async fn http_contract_reviewed_uses_exact_wire_and_rejects_forged_receipts() {
     let mut wrong = scope.clone();
     wrong.project_id = Uuid::from_u128(99);
     let before = server.state.lock().unwrap().calls.len();
-    assert!(
-        service
-            .publish_reviewed_project(&wrong, &value)
-            .await
-            .is_err()
-    );
+    assert!(service
+        .publish_reviewed_project(&wrong, &value)
+        .await
+        .is_err());
     assert_eq!(server.state.lock().unwrap().calls.len(), before);
     server.state.lock().unwrap().reviewed_reply =
         Some(json!({"records":[baseline.clone()],"next_after":null}));
@@ -156,12 +152,10 @@ async fn http_contract_reviewed_uses_exact_wire_and_rejects_forged_receipts() {
     );
     server.state.lock().unwrap().reviewed_reply =
         Some(json!({"records":[baseline.clone(),baseline.clone()],"truncated":false}));
-    assert!(
-        service
-            .recall_reviewed_project(&scope, "deployment")
-            .await
-            .is_err()
-    );
+    assert!(service
+        .recall_reviewed_project(&scope, "deployment")
+        .await
+        .is_err());
     let removal_body = json!({"company_id":Uuid::from_u128(1),"employee_id":scope.employee_id,"idempotency_key":"stop-one"});
     let mut stopped = baseline;
     stopped["status"] = json!("withdrawn");
@@ -195,17 +189,15 @@ async fn http_contract_reviewed_uses_exact_wire_and_rejects_forged_receipts() {
         &removal_body,
         "withdraw",
     ));
-    assert!(
-        service
-            .remove_reviewed_project(
-                &scope,
-                value.record_id,
-                "stop-one",
-                ReviewedProjectRemoval::Withdraw
-            )
-            .await
-            .is_err()
-    );
+    assert!(service
+        .remove_reviewed_project(
+            &scope,
+            value.record_id,
+            "stop-one",
+            ReviewedProjectRemoval::Withdraw
+        )
+        .await
+        .is_err());
 }
 
 #[tokio::test]
@@ -261,11 +253,9 @@ async fn http_contract_reviewed_rechecks_io_generation_after_current_ownership_r
         };
         assert!(refused);
     }
-    assert!(
-        server.state.lock().unwrap().calls[before..]
-            .iter()
-            .all(|(_, path, _)| !path.contains("/reviewed-projects/"))
-    );
+    assert!(server.state.lock().unwrap().calls[before..]
+        .iter()
+        .all(|(_, path, _)| !path.contains("/reviewed-projects/")));
 }
 
 #[tokio::test]
@@ -299,24 +289,20 @@ async fn http_contract_reviewed_selected_pins_exact_ids_and_rejects_foreign_resu
     foreign["record_id"] = json!(Uuid::from_u128(999));
     server.state.lock().unwrap().reviewed_reply =
         Some(json!({"records":[foreign],"truncated":false}));
-    assert!(
-        service
-            .recall_selected_reviewed_project(&scope, "deployment", &ids)
-            .await
-            .is_err()
-    );
+    assert!(service
+        .recall_selected_reviewed_project(&scope, "deployment", &ids)
+        .await
+        .is_err());
     let before = server.state.lock().unwrap().calls.len();
     for invalid in [
         BTreeSet::new(),
         BTreeSet::from([Uuid::nil()]),
         (1..=33).map(Uuid::from_u128).collect(),
     ] {
-        assert!(
-            service
-                .recall_selected_reviewed_project(&scope, "deployment", &invalid)
-                .await
-                .is_err()
-        );
+        assert!(service
+            .recall_selected_reviewed_project(&scope, "deployment", &invalid)
+            .await
+            .is_err());
     }
     assert_eq!(server.state.lock().unwrap().calls.len(), before);
 }

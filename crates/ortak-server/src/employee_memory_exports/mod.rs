@@ -10,13 +10,13 @@ mod worker;
 pub use jobs::{acknowledge, claim, fail, prepare};
 pub use targets::{refresh_target, register_target};
 pub use types::*;
-pub use worker::{EmployeeExportAdapter, HonchoEmployeeExportAdapter, schedule_one};
+pub use worker::{schedule_one, EmployeeExportAdapter, HonchoEmployeeExportAdapter};
 
 use chrono::{DateTime, Utc};
 use ortak_control::{CompanyScope, PgControlPlane};
 use ortak_memory::*;
 use ortak_work::{Result, WorkError};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use sqlx::{PgConnection, Row};
 use std::time::Duration;
 use uuid::Uuid;

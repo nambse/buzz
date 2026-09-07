@@ -71,7 +71,10 @@ impl PreparedMemoryConfig {
             || receipt.binding.adapter != "honcho"
             || receipt.creation_key.is_empty()
             || receipt.creation_key.len() > 200
-            || !receipt.creation_key.bytes().all(|byte| byte.is_ascii_graphic())
+            || !receipt
+                .creation_key
+                .bytes()
+                .all(|byte| byte.is_ascii_graphic())
         {
             return Err("prepared memory does not match the selected employee or diagnostic");
         }

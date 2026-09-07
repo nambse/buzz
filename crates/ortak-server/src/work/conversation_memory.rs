@@ -2,16 +2,16 @@
 
 use super::*;
 use axum::{
-    Extension, Json,
     extract::{
-        Path, Query, State,
         rejection::{JsonRejection, QueryRejection},
+        Path, Query, State,
     },
+    Extension, Json,
 };
 use ortak_domain::EmployeeId;
 use ortak_work::{ReviewedConversationFactDraft, ReviewedConversationPreviewRequest};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 #[derive(Deserialize)]

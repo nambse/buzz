@@ -7,17 +7,17 @@
 //! retain the transaction used by `load_current_on` through its local use check,
 //! and obtain fresh authority again before any subsequent external effect.
 
+mod authority;
 mod prepare;
 mod repository;
 mod wire;
-mod authority;
 pub use authority::EncryptedDmAuthority;
-mod execution;
 mod dispatch;
 mod events;
+mod execution;
 mod reply;
-pub use execution::PgConfidentialExecution;
 pub(crate) use execution::ConfidentialLease;
+pub use execution::PgConfidentialExecution;
 
 use chrono::{DateTime, Utc};
 use ortak_control::confidential::{ConfidentialEnvelope, ValidatedIdentity};
@@ -41,10 +41,14 @@ pub enum ConfidentialAdmissionError {
     Unavailable,
 }
 impl From<sqlx::Error> for ConfidentialAdmissionError {
-    fn from(_: sqlx::Error) -> Self { Self::Unavailable }
+    fn from(_: sqlx::Error) -> Self {
+        Self::Unavailable
+    }
 }
 impl From<ortak_control::ControlError> for ConfidentialAdmissionError {
-    fn from(_: ortak_control::ControlError) -> Self { Self::Unavailable }
+    fn from(_: ortak_control::ControlError) -> Self {
+        Self::Unavailable
+    }
 }
 impl From<ortak_office::encrypted::jobs::DmJobError> for ConfidentialAdmissionError {
     fn from(value: ortak_office::encrypted::jobs::DmJobError) -> Self {
@@ -69,11 +73,17 @@ pub struct PreparedConfidentialRun {
 }
 impl PreparedConfidentialRun {
     /// Server-derived expected identity for explicit wrap-purpose selection.
-    pub fn identity(&self) -> &ValidatedIdentity { &self.identity }
+    pub fn identity(&self) -> &ValidatedIdentity {
+        &self.identity
+    }
     /// Exact selected Office reference; it is not a runtime credential.
-    pub fn signer_ref(&self) -> &CredentialRef { &self.signer_ref }
+    pub fn signer_ref(&self) -> &CredentialRef {
+        &self.signer_ref
+    }
     /// Bound local protection deadline, never extended by a retry.
-    pub fn expires_at(&self) -> DateTime<Utc> { self.deadline }
+    pub fn expires_at(&self) -> DateTime<Utc> {
+        self.deadline
+    }
 }
 
 /// Only protected bytes survive preparation. No public field allows substitution.
@@ -103,23 +113,37 @@ pub struct CurrentConfidentialPayload {
 }
 impl CurrentConfidentialPayload {
     /// Independently derived expected claims, not just the envelope's header.
-    pub fn identity(&self) -> &ValidatedIdentity { &self.identity }
+    pub fn identity(&self) -> &ValidatedIdentity {
+        &self.identity
+    }
     /// Exact ciphertext selected under the current authority fence.
-    pub fn snapshot(&self) -> &ConfidentialEnvelope { &self.snapshot }
+    pub fn snapshot(&self) -> &ConfidentialEnvelope {
+        &self.snapshot
+    }
     /// Exact self-wrapped per-run master for the explicit unwrap provider.
-    pub fn wrapped_master(&self) -> &WrappedMasterKey { &self.wrapped }
+    pub fn wrapped_master(&self) -> &WrappedMasterKey {
+        &self.wrapped
+    }
     /// Exact owned Office key reference; never an ambient lookup selector.
-    pub fn signer_ref(&self) -> &CredentialRef { &self.signer_ref }
+    pub fn signer_ref(&self) -> &CredentialRef {
+        &self.signer_ref
+    }
     /// Current-read deadline, including execution and current binding/TTL bounds.
-    pub fn valid_before(&self) -> DateTime<Utc> { self.valid_before }
+    pub fn valid_before(&self) -> DateTime<Utc> {
+        self.valid_before
+    }
 }
 
 /// Explicit application pool, no worker, subscription or environment resolution.
-pub struct PgConfidentialRuns { pool: PgPool }
+pub struct PgConfidentialRuns {
+    pool: PgPool,
+}
 impl PgConfidentialRuns {
     /// Constructs an inactive repository. The unnumbered SQL must be installed
     /// by the integrating release before calling it.
-    pub fn new(pool: PgPool) -> Self { Self { pool } }
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
 }
 
 #[cfg(test)]

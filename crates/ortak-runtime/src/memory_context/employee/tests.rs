@@ -4,7 +4,7 @@ use ortak_control::memory::employee::{
     EmployeeMemoryAudienceV1, EmployeeMemoryDigest, EmployeeMemoryProvenanceV1,
     EmployeeMemorySourceV1, EmployeeSharingApprovalV1,
 };
-use ortak_control::{MessageId, office_identity::OfficePublicKey};
+use ortak_control::{office_identity::OfficePublicKey, MessageId};
 
 struct Fixture {
     authority: DispatchAuthority,
@@ -175,10 +175,12 @@ fn employee_v5_preserves_legacy_bytes_and_exact_project_rendering() {
     for version in 1..=4 {
         let mut forged: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         forged["version"] = version.into();
-        assert!(
-            FrozenRunSnapshot::decode(&serde_json::to_vec(&forged).unwrap(), &f.authority, f.run)
-                .is_err()
-        );
+        assert!(FrozenRunSnapshot::decode(
+            &serde_json::to_vec(&forged).unwrap(),
+            &f.authority,
+            f.run
+        )
+        .is_err());
     }
 }
 
@@ -220,32 +222,28 @@ fn employee_v5_enforces_priority_content_and_rendered_budgets() {
     let f = Fixture::new(false);
     let relationship = f.record(101, true, "relationship");
     let experience = f.record(100, false, "experience");
-    assert!(
-        f.base()
-            .with_employee(
-                &f.authority,
-                f.context(vec![relationship.clone(), experience.clone()])
-            )
-            .is_ok()
-    );
-    assert!(
-        f.base()
-            .with_employee(&f.authority, f.context(vec![experience, relationship]))
-            .is_err()
-    );
-    assert!(
-        f.base()
-            .with_employee(&f.authority, f.context(vec![]))
-            .is_err()
-    );
-    assert!(
-        f.base()
-            .with_employee(
-                &f.authority,
-                f.context(vec![f.record(1, false, &"\"".repeat(4096))])
-            )
-            .is_err()
-    );
+    assert!(f
+        .base()
+        .with_employee(
+            &f.authority,
+            f.context(vec![relationship.clone(), experience.clone()])
+        )
+        .is_ok());
+    assert!(f
+        .base()
+        .with_employee(&f.authority, f.context(vec![experience, relationship]))
+        .is_err());
+    assert!(f
+        .base()
+        .with_employee(&f.authority, f.context(vec![]))
+        .is_err());
+    assert!(f
+        .base()
+        .with_employee(
+            &f.authority,
+            f.context(vec![f.record(1, false, &"\"".repeat(4096))])
+        )
+        .is_err());
     let eight = (1..=8).map(|id| f.record(id, false, "small")).collect();
     let full = f
         .base()
@@ -254,37 +252,33 @@ fn employee_v5_enforces_priority_content_and_rendered_budgets() {
     assert_eq!(full.spec().context.memory_context.len(), 8);
     assert!(full.wire.recall.records.is_empty());
     assert!(full.wire.recall.truncated);
-    assert!(
-        f.base()
-            .with_employee(
-                &f.authority,
-                f.context((1..=9).map(|id| f.record(id, false, "small")).collect())
-            )
-            .is_err()
-    );
-    assert!(
-        f.base()
-            .with_employee(
-                &f.authority,
-                f.context(vec![
-                    f.record(1, false, &"x".repeat(4096)),
-                    f.record(2, false, &"y".repeat(4096)),
-                    f.record(3, false, "z")
-                ])
-            )
-            .is_err()
-    );
+    assert!(f
+        .base()
+        .with_employee(
+            &f.authority,
+            f.context((1..=9).map(|id| f.record(id, false, "small")).collect())
+        )
+        .is_err());
+    assert!(f
+        .base()
+        .with_employee(
+            &f.authority,
+            f.context(vec![
+                f.record(1, false, &"x".repeat(4096)),
+                f.record(2, false, &"y".repeat(4096)),
+                f.record(3, false, "z")
+            ])
+        )
+        .is_err());
 }
 
 #[test]
 fn employee_run_origin_requires_canonical_partition_and_never_mints_sharing_approval() {
     let f = Fixture::new(false);
     let bytes = f.origin.canonical_bytes();
-    assert!(
-        !String::from_utf8(bytes.to_vec())
-            .unwrap()
-            .contains("approval")
-    );
+    assert!(!String::from_utf8(bytes.to_vec())
+        .unwrap()
+        .contains("approval"));
     let mut duplicate = String::from_utf8(bytes.to_vec()).unwrap();
     duplicate.insert_str(1, "\"format\":\"ortak-reviewed-employee-run-origin/1\",");
     assert!(EmployeeMemoryOrigin::from_observation(duplicate.as_bytes()).is_err());

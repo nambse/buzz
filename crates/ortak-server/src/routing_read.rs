@@ -26,7 +26,9 @@ pub(super) async fn detail(
     let message = EventId::from_hex(&message).map_err(|_| ApiError::invalid())?;
     let mut held = authority.0.lock().await;
     let connection = held.as_mut().ok_or_else(ApiError::unavailable)?;
-    Ok(Json(current_on(&state, &principal, channel, message, connection).await?))
+    Ok(Json(
+        current_on(&state, &principal, channel, message, connection).await?,
+    ))
 }
 
 /// Current canonical audience, borrowed from a caller-held Office authority fence.

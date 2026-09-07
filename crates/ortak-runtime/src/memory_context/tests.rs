@@ -1,6 +1,6 @@
 use super::*;
 use crate::authority::{
-    RunInput, StoredMemoryBinding, StoredRuntimeBinding, validate_pinned_revision,
+    validate_pinned_revision, RunInput, StoredMemoryBinding, StoredRuntimeBinding,
 };
 use ortak_control::memory::{MemoryProvenance, MemoryRecord};
 use ortak_domain::{EmployeeManifest, EmployeeStatus};
@@ -117,14 +117,12 @@ fn snapshot_reuses_exact_bytes_after_lease_renewal_but_rejects_changed_source_or
         FrozenRunSnapshot::decode(&bytes, &authority(company, Uuid::new_v4(), "changed"), run)
             .is_err()
     );
-    assert!(
-        FrozenRunSnapshot::decode(
-            &bytes,
-            &authority(Uuid::new_v4(), Uuid::new_v4(), "question"),
-            run
-        )
-        .is_err()
-    );
+    assert!(FrozenRunSnapshot::decode(
+        &bytes,
+        &authority(Uuid::new_v4(), Uuid::new_v4(), "question"),
+        run
+    )
+    .is_err());
     let mut injected: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
     injected["spec"]["input"] = serde_json::json!("injected input");
     assert!(
@@ -216,12 +214,10 @@ fn reviewed_snapshot_preserves_legacy_bytes_and_fences_typed_scope_hash_and_tota
     let snapshot = legacy.clone().with_reviewed(&a, context.clone()).unwrap();
     assert_eq!(snapshot.spec().context.memory_context.len(), 2);
     let encoded = snapshot.encode().unwrap();
-    assert!(
-        serde_json::from_slice::<serde_json::Value>(&encoded)
-            .unwrap()
-            .get("conversation")
-            .is_none()
-    );
+    assert!(serde_json::from_slice::<serde_json::Value>(&encoded)
+        .unwrap()
+        .get("conversation")
+        .is_none());
     assert_eq!(
         FrozenRunSnapshot::decode(&encoded, &renewed, run)
             .unwrap()

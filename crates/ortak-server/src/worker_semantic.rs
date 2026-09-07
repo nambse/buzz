@@ -1,10 +1,10 @@
 //! Optional semantic evidence; absence performs no credential lookup or HTTP.
 
 use ortak_control::{
-    CompanyScope, SemanticScoringInput,
     ports::{ScoringOutcome, SemanticScorer},
     routing::ScorerMetadata,
     scorer::DisabledSemanticScorer,
+    CompanyScope, SemanticScoringInput,
 };
 use ortak_router::SemanticScoringFailure;
 use ortak_routing_semantic::{

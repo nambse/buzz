@@ -1,10 +1,10 @@
 //! Explicit employee-owned recall; no model/request parameter selects a namespace.
 use super::*;
-use crate::Result as RuntimeResult;
 use crate::memory_context::{
     EmployeeContextRecord, EmployeeMemoryOrigin, ReviewedEmployeeContext, ReviewedEmployeePin,
     ReviewedEmployeeRecord,
 };
+use crate::Result as RuntimeResult;
 
 mod budget;
 mod selection;

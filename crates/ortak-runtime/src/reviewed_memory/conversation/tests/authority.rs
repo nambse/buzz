@@ -1,6 +1,6 @@
 use super::*;
 use crate::authority::{
-    RunInput, StoredMemoryBinding, StoredRuntimeBinding, validate_pinned_revision,
+    validate_pinned_revision, RunInput, StoredMemoryBinding, StoredRuntimeBinding,
 };
 use ortak_domain::{EmployeeManifest, EmployeeStatus};
 

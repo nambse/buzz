@@ -1,6 +1,6 @@
 //! Only two derived-purpose keys enter a protected runtime start. This pure
 //! encoding port does not establish a current lease, source or employee right.
-use base64::{Engine, engine::general_purpose::STANDARD};
+use base64::{engine::general_purpose::STANDARD, Engine};
 use ortak_control::confidential::{
     ConfidentialEnvelope, ConfidentialWireError, PayloadPurpose, ValidatedIdentity,
 };
@@ -8,7 +8,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-use super::{ConfidentialCryptoError, ConfidentialMasterKey, derive};
+use super::{derive, ConfidentialCryptoError, ConfidentialMasterKey};
 
 /// Volatile exact start body. No Debug, Clone, Serde or raw derived-key getter.
 /// Its owner must recheck current admission immediately before sending it.

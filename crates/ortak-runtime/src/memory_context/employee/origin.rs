@@ -1,8 +1,8 @@
 use super::*;
 use chrono::{DateTime, Datelike, SecondsFormat, Utc};
-use ortak_control::MessageId;
 use ortak_control::memory::employee::{EmployeeMemoryDigest, EmployeeMemorySourceV1};
 use ortak_control::office_identity::OfficePublicKey;
+use ortak_control::MessageId;
 use ortak_domain::EmployeeId;
 
 /// Canonical historical run requester/source observed by the SQL resolver.

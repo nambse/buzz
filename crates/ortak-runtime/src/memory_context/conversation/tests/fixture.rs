@@ -1,8 +1,8 @@
 use super::*;
 use crate::memory_context::tests::{authority_for, recall};
 use chrono::{DateTime, Utc};
-use ortak_control::MessageId;
 use ortak_control::memory::conversation::{ConversationEventIdentity, ConversationMemoryDigest};
+use ortak_control::MessageId;
 use sha2::{Digest, Sha256};
 
 pub(super) struct Fixture {

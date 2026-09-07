@@ -21,10 +21,13 @@ use serde_json::{json, Value};
 use url::Url;
 use uuid::Uuid;
 
+mod confidential;
 mod probe;
 mod workspace;
-mod confidential;
-pub use confidential::{ConfidentialEvent, ConfidentialEventBatch, ConfidentialFailure, ConfidentialRunReceipt, ConfidentialRunStatus};
+pub use confidential::{
+    ConfidentialEvent, ConfidentialEventBatch, ConfidentialFailure, ConfidentialRunReceipt,
+    ConfidentialRunStatus,
+};
 pub use probe::ProfileProbeStatus;
 
 /// A bridge connection fixed to one company and one configured origin.

@@ -52,11 +52,9 @@ impl Server {
                 let mut parts = line.split_whitespace();
                 let method = parts.next().unwrap().to_owned();
                 let path = parts.next().unwrap().to_owned();
-                assert!(
-                    headers
-                        .to_ascii_lowercase()
-                        .contains("authorization: bearer fresh-test-token")
-                );
+                assert!(headers
+                    .to_ascii_lowercase()
+                    .contains("authorization: bearer fresh-test-token"));
                 let length = headers
                     .lines()
                     .find_map(|line| {
@@ -264,15 +262,13 @@ async fn http_contract_roundtrip_gates_binding_and_propagates_scoped_receipts() 
     let before = service.probe_capabilities(binding).await.unwrap();
     assert!(!before.capabilities.contains(&MemoryCapability::Remember));
     assert!(!service.health(binding).await.unwrap().is_healthy());
-    assert!(
-        !server
-            .state
-            .lock()
-            .unwrap()
-            .calls
-            .iter()
-            .any(|(_, p, _)| p.ends_with("/remember"))
-    );
+    assert!(!server
+        .state
+        .lock()
+        .unwrap()
+        .calls
+        .iter()
+        .any(|(_, p, _)| p.ends_with("/remember")));
     let result = service
         .validate_memory_roundtrip(&gate(&config))
         .await
@@ -295,14 +291,12 @@ async fn http_contract_roundtrip_gates_binding_and_propagates_scoped_receipts() 
     assert_eq!(writes.len(), 2);
     assert_eq!(writes[0], writes[1]);
     assert!(service.health(binding).await.unwrap().is_healthy());
-    assert!(
-        service
-            .probe_capabilities(binding)
-            .await
-            .unwrap()
-            .capabilities
-            .contains(&MemoryCapability::Recall)
-    );
+    assert!(service
+        .probe_capabilities(binding)
+        .await
+        .unwrap()
+        .capabilities
+        .contains(&MemoryCapability::Recall));
     let query = MemoryRecallRequest {
         employee_id: config.employees[0].employee_id.clone(),
         binding: binding.clone(),
@@ -353,21 +347,17 @@ async fn http_contract_adoption_is_list_only_and_never_get_or_create() {
         .await
         .unwrap();
     assert!(result.outcomes().iter().all(|r| r.ownership.is_adopted()));
-    assert!(
-        service
-            .validate_memory_roundtrip(&gate(&config))
-            .await
-            .is_err()
-    );
-    assert!(
-        server
-            .state
-            .lock()
-            .unwrap()
-            .calls
-            .iter()
-            .all(|(_, p, _)| p == "/v3/ortak/protocol" || p.contains("/list?"))
-    );
+    assert!(service
+        .validate_memory_roundtrip(&gate(&config))
+        .await
+        .is_err());
+    assert!(server
+        .state
+        .lock()
+        .unwrap()
+        .calls
+        .iter()
+        .all(|(_, p, _)| p == "/v3/ortak/protocol" || p.contains("/list?")));
 }
 
 #[tokio::test]

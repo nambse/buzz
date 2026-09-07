@@ -7,8 +7,8 @@
 //! same bytes; never seal again as an idempotency/retry implementation.
 
 use aes_gcm::{
-    Aes256Gcm, Nonce, Tag,
     aead::{AeadInPlace, KeyInit},
+    Aes256Gcm, Nonce, Tag,
 };
 use hkdf::Hkdf;
 use ortak_control::confidential::{
@@ -18,7 +18,7 @@ use sha2::Sha256;
 use zeroize::Zeroizing;
 
 mod transport;
-pub use transport::{ConfidentialStartBody, prepare_start_body};
+pub use transport::{prepare_start_body, ConfidentialStartBody};
 
 /// Closed failures deliberately discard library/parser error details.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]

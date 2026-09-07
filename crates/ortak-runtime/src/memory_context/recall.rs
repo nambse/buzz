@@ -6,7 +6,7 @@ use ortak_control::adapter::truncate_at_char_boundary;
 use ortak_control::memory::{
     MemoryAdapter, MemoryBudget, MemoryRecall, MemoryRecallRequest, MemoryScope,
 };
-use ortak_control::run_event::{RedactionPolicy, strip_control_characters};
+use ortak_control::run_event::{strip_control_characters, RedactionPolicy};
 use uuid::Uuid;
 
 use super::{FrozenRunSnapshot, MAX_CONTEXT_BYTES, MAX_CONTEXT_RECORDS};

@@ -48,8 +48,10 @@ pub struct DmOuterSource {
 impl DmOuterSource {
     /// Requires the original integral Nostr event partition, not the receipt time.
     pub fn new(id: EventId, created_at: DateTime<Utc>) -> Result<Self, DmJobError> {
-        if created_at.timestamp_subsec_nanos()!=0 || created_at.timestamp()<0
-            || created_at.timestamp()>253_402_300_799 {
+        if created_at.timestamp_subsec_nanos() != 0
+            || created_at.timestamp() < 0
+            || created_at.timestamp() > 253_402_300_799
+        {
             return Err(DmJobError::Invalid);
         }
         Ok(Self { id, created_at })
@@ -73,10 +75,14 @@ pub enum DmJobError {
     Unavailable,
 }
 impl From<sqlx::Error> for DmJobError {
-    fn from(_: sqlx::Error) -> Self { Self::Unavailable }
+    fn from(_: sqlx::Error) -> Self {
+        Self::Unavailable
+    }
 }
 impl From<ortak_control::ControlError> for DmJobError {
-    fn from(_: ortak_control::ControlError) -> Self { Self::Unavailable }
+    fn from(_: ortak_control::ControlError) -> Self {
+        Self::Unavailable
+    }
 }
 
 /// Metadata-only closed outcomes for bounded failure persistence.
@@ -98,9 +104,12 @@ pub enum DecryptFailure {
 impl DecryptFailure {
     fn code(self) -> &'static str {
         match self {
-            Self::MaterialUnavailable=>"material_unavailable", Self::CryptoInvalid=>"crypto_invalid",
-            Self::AuthorityChanged=>"authority_changed", Self::SourceUnavailable=>"source_unavailable",
-            Self::DeadlineExceeded=>"deadline_exceeded", Self::Cancelled=>"cancelled",
+            Self::MaterialUnavailable => "material_unavailable",
+            Self::CryptoInvalid => "crypto_invalid",
+            Self::AuthorityChanged => "authority_changed",
+            Self::SourceUnavailable => "source_unavailable",
+            Self::DeadlineExceeded => "deadline_exceeded",
+            Self::Cancelled => "cancelled",
         }
     }
 }
@@ -140,7 +149,7 @@ pub struct DmDecryptClaim {
     identity: DmClaimIdentity,
     expected: ExpectedEnvelope,
     outer: Vec<u8>,
-    outer_hash: [u8;32],
+    outer_hash: [u8; 32],
     generation: i64,
     token: Uuid,
     worker: Uuid,
@@ -149,17 +158,27 @@ pub struct DmDecryptClaim {
 }
 impl DmDecryptClaim {
     /// Current-read facts to bind the subsequent confidential transaction.
-    pub fn identity(&self) -> &DmClaimIdentity { &self.identity }
+    pub fn identity(&self) -> &DmClaimIdentity {
+        &self.identity
+    }
     /// Exact outer/pair expectations for the isolated cryptographic decoder.
-    pub fn expected(&self) -> &ExpectedEnvelope { &self.expected }
+    pub fn expected(&self) -> &ExpectedEnvelope {
+        &self.expected
+    }
     /// Bounded reconstructed signed ciphertext event; never decrypted text.
-    pub fn outer_bytes(&self) -> &[u8] { &self.outer }
+    pub fn outer_bytes(&self) -> &[u8] {
+        &self.outer
+    }
     /// Five-second local crypto budget, possibly shortened by authority expiry.
-    pub fn crypto_deadline(&self) -> DateTime<Utc> { self.crypto_deadline }
+    pub fn crypto_deadline(&self) -> DateTime<Utc> {
+        self.crypto_deadline
+    }
     /// Thirty-second final-commit lease; no renewal API exists.
-    pub fn expires_at(&self) -> DateTime<Utc> { self.expires_at }
+    pub fn expires_at(&self) -> DateTime<Utc> {
+        self.expires_at
+    }
 }
 
-fn key(bytes: &[u8]) -> Result<PublicKey,DmJobError> {
+fn key(bytes: &[u8]) -> Result<PublicKey, DmJobError> {
     PublicKey::from_slice(bytes).map_err(|_| DmJobError::Unavailable)
 }

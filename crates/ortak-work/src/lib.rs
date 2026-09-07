@@ -54,8 +54,8 @@ pub mod service;
 
 pub use error::{Result, WorkError};
 pub use model::{
-    DEFAULT_WORK_PAGE_SIZE, MAX_WORK_HISTORY_ROWS, MAX_WORK_PAGE_SIZE, ProjectRecord,
-    WorkHistoryRecord, WorkItemAggregate, WorkListCursor, WorkListPage, WorkListQuery, WorkSummary,
+    ProjectRecord, WorkHistoryRecord, WorkItemAggregate, WorkListCursor, WorkListPage,
+    WorkListQuery, WorkSummary, DEFAULT_WORK_PAGE_SIZE, MAX_WORK_HISTORY_ROWS, MAX_WORK_PAGE_SIZE,
 };
 pub use repository::{
     AddDependency, ArchiveProject, AssignEmployee, AttachRecord, CreateProject, CreateWorkItem,
@@ -69,11 +69,11 @@ pub use postgres::{
     WorkExecutionReceipt, WorkMutation,
 };
 
+pub use postgres::{schedule_work_outputs, WorkOutputReport};
 pub use postgres::{DependencyAction, WorkDependencyPage, WorkDependencyView};
 pub use postgres::{EmployeeWorkQueueEntry, EmployeeWorkQueuePage};
 pub use postgres::{WorkChildCreation, WorkDecomposition};
 pub use postgres::{WorkExecutionView, WorkTextArtifact};
-pub use postgres::{WorkOutputReport, schedule_work_outputs};
 
 // Explicitly reviewed project context and retained stop-use receipts.
 pub use postgres::{

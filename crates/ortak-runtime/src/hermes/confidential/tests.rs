@@ -1,6 +1,6 @@
 use super::*;
-use crate::confidential::{ConfidentialMasterKey, prepare_start_body, seal};
-use base64::{Engine, engine::general_purpose::STANDARD};
+use crate::confidential::{prepare_start_body, seal, ConfidentialMasterKey};
+use base64::{engine::general_purpose::STANDARD, Engine};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use zeroize::Zeroizing;
 
@@ -52,14 +52,12 @@ fn protected_start_body_contains_only_two_exact_derived_keys_and_bound_snapshot(
     let changed = String::from_utf8(changed)
         .unwrap()
         .replace("\"authority_epoch\":\"3\"", "\"authority_epoch\":\"4\"");
-    assert!(
-        prepare_start_body(
-            &master,
-            &ValidatedIdentity::parse(changed.as_bytes()).unwrap(),
-            &snapshot
-        )
-        .is_err()
-    );
+    assert!(prepare_start_body(
+        &master,
+        &ValidatedIdentity::parse(changed.as_bytes()).unwrap(),
+        &snapshot
+    )
+    .is_err());
 }
 
 #[test]
@@ -131,11 +129,9 @@ async fn protected_http_uses_distinct_routes_and_keyless_recovery() {
                     }
                 };
                 let headers = String::from_utf8(bytes[..boundary].to_vec()).unwrap();
-                assert!(
-                    headers
-                        .to_lowercase()
-                        .contains("authorization: bearer synthetic-transport-token")
-                );
+                assert!(headers
+                    .to_lowercase()
+                    .contains("authorization: bearer synthetic-transport-token"));
                 let length = headers
                     .lines()
                     .find_map(|l| {

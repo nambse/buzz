@@ -7,10 +7,10 @@ use crate::{
     routes::ApiState,
 };
 use axum::{
-    Extension, Json, Router,
-    extract::{Path, State, rejection::JsonRejection},
+    extract::{rejection::JsonRejection, Path, State},
     http::StatusCode,
     routing::{get, post},
+    Extension, Json, Router,
 };
 use ortak_domain::EmployeeId;
 use serde::Deserialize;

@@ -1,8 +1,8 @@
 //! Local-socket transport only. Real adapter owns creation, diagnostics and
 //! response validation; production PG/signature code owns every durable effect.
 use super::*;
-use ortak_control::CompanyScope;
 use ortak_control::memory::{MemoryAdapter, MemoryResourceRequest};
+use ortak_control::CompanyScope;
 use ortak_domain::{CredentialRef, MemoryBinding, ProvisioningMode};
 use ortak_memory::*;
 use std::collections::{BTreeMap, BTreeSet};
@@ -70,11 +70,9 @@ impl Remote {
                     assert!(data.len() < 16384);
                 };
                 let headers = String::from_utf8(data[..end].to_vec()).unwrap();
-                assert!(
-                    headers
-                        .to_ascii_lowercase()
-                        .contains("authorization: bearer fixture-owned-token")
-                );
+                assert!(headers
+                    .to_ascii_lowercase()
+                    .contains("authorization: bearer fixture-owned-token"));
                 let path = headers
                     .lines()
                     .next()
@@ -168,7 +166,10 @@ impl Remote {
             task,
         }
     }
-    pub(in crate::employee_memory) async fn register(&self, x: &MemoryFixture) -> (Uuid, DateTime<Utc>) {
+    pub(in crate::employee_memory) async fn register(
+        &self,
+        x: &MemoryFixture,
+    ) -> (Uuid, DateTime<Utc>) {
         self.register_on(&x.f, x.f.hidden).await
     }
     pub async fn register_on(&self, f: &Fixture, destination: Uuid) -> (Uuid, DateTime<Utc>) {

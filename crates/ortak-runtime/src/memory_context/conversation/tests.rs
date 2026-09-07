@@ -32,24 +32,18 @@ fn conversation_v4_preserves_order_and_exact_legacy_project_rendering() {
         project.pin.fact_id
     );
     assert!(snapshot.reviewed().is_none());
-    assert!(
-        snapshot
-            .clone()
-            .with_reviewed(&f.authority, legacy)
-            .is_err()
-    );
-    assert!(
-        snapshot
-            .with_conversation(&f.authority, context.clone())
-            .is_err()
-    );
+    assert!(snapshot
+        .clone()
+        .with_reviewed(&f.authority, legacy)
+        .is_err());
+    assert!(snapshot
+        .with_conversation(&f.authority, context.clone())
+        .is_err());
     let office = Fixture::new(false);
-    assert!(
-        office
-            .base()
-            .with_conversation(&office.authority, context.clone())
-            .is_err()
-    );
+    assert!(office
+        .base()
+        .with_conversation(&office.authority, context.clone())
+        .is_err());
     context.records.pop();
     assert!(
         f.base().with_conversation(&f.authority, context).is_err(),
@@ -121,11 +115,10 @@ fn conversation_v4_prioritizes_reviewed_records_within_combined_budget() {
         record.pin.fact_id = Uuid::from_u128(300);
     }
     context.records.push(ninth);
-    assert!(
-        f.empty_base()
-            .with_conversation(&f.authority, context)
-            .is_err()
-    );
+    assert!(f
+        .empty_base()
+        .with_conversation(&f.authority, context)
+        .is_err());
 }
 
 #[test]
@@ -133,11 +126,10 @@ fn conversation_v4_bounds_rendered_utf8_including_escaped_metadata() {
     let f = Fixture::new(false);
     let mut context = f.context.clone();
     content(conversation_record(&mut context), &"\"".repeat(4096));
-    assert!(
-        f.empty_base()
-            .with_conversation(&f.authority, context.clone())
-            .is_err()
-    );
+    assert!(f
+        .empty_base()
+        .with_conversation(&f.authority, context.clone())
+        .is_err());
     // This computes the boundary using the actual provider-facing wrapper,
     // while the independently asserted 8192-byte ceiling remains literal.
     let mut record = conversation_record(&mut context).clone();
@@ -165,9 +157,8 @@ fn conversation_v4_bounds_rendered_utf8_including_escaped_metadata() {
     content(&mut record, &format!("{exact}x"));
     assert_eq!(wrapper(&record).len(), 8193);
     context.records[0] = ReviewedContextRecord::Conversation { record };
-    assert!(
-        f.empty_base()
-            .with_conversation(&f.authority, context)
-            .is_err()
-    );
+    assert!(f
+        .empty_base()
+        .with_conversation(&f.authority, context)
+        .is_err());
 }
