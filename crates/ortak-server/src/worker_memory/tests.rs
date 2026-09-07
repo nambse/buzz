@@ -5,9 +5,7 @@
 //! single selected ORTAK_HONCHO_PRIVATE_TOKEN without logging credential values.
 
 use super::*;
-use ortak_control::{
-    fakes::InMemoryProvisioningRepository, ports::CompanyDirectory, PgControlPlane,
-};
+use ortak_control::fakes::InMemoryProvisioningRepository;
 use serde_json::json;
 
 fn example_config() -> serde_json::Value {
@@ -397,6 +395,7 @@ async fn assert_mutation_unsupported(memory: &WorkerMemory, entry: &EmployeeConf
 ))]
 mod private_live {
     use super::*;
+    use ortak_control::{ports::CompanyDirectory, PgControlPlane};
     use std::{
         fs::{self, OpenOptions},
         io::Read,

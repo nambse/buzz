@@ -45,7 +45,12 @@ actionlint, registry boundary checks and negative mutations, image eligibility,
 Rust cache and required-context isolation checks also passed. Evidence:
 `evidence/ci-followup-final-local.log` and the focused `ci-followup-*` receipts.
 
-Next: signed push and real Windows/Docker/relay GitHub checks.
+Signed8f99d40 is pushed. Its Windows run reached an additional test-only unused
+import error: the private Unix memory fixture's `CompanyDirectory` and
+`PgControlPlane` imports were outside its platform gate. They now live inside
+that fixture; focused all-target encrypted-feature Clippy and format check pass
+again. Both gateway Docker architectures passed before this follow-up; the full
+latest-source Windows/Docker/relay GitHub checks still need completion.
 Mac reboot acceptance remains deliberately deferred, not completed. The previous
 checkpoint below records the tested installed build and populated backup.
 
