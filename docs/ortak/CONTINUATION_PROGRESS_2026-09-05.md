@@ -35,7 +35,27 @@ project fence. A bounded retry of only SQLSTATE55P03 fixes that fixture and the
 isolated test passes, including the post-revocation stream closure. The new
 verified/retired/unverified identity API test also passes on the final source.
 Repository-wide Rust formatting still has inherited differences; final CI is
-pending. These source changes are not yet deployed to the native app/API.
+pending. DCO checkpoint `d2b137c` is pushed.
+
+API and native artifacts from that clean commit are now installed. Native
+evidence: `employee-native79-c8e5910cb3b24fe2965270ea9362cccc`; backend evidence:
+`context79-backend-219315068e884d97abd1728b8597f6a2`, both under the evidence
+parent. Native build used the production private recipe with `--no-bundle`,
+preserving the running bundle, then a separately signed/verified staged bundle.
+The compiled policy probe passed. The old bundle remains in that native evidence
+directory as `previous-Ortak Private.app`. Only the API process was replaced;
+relay/worker/management/controller, schema79 and OAuth remained as deployed.
+
+The live signed production client/directory resolves all three verified Employee
+identities; receipt and current host owners are in
+`/private/tmp/ortak-private-20260905/rollouts/employee79-d2b137c`. The first API
+launcher attempts failed closed on missing frozen helper copies and then its
+old artifact receipt hash; both were corrected to the selected new artifacts
+before launch. Native acceptance is pending: the user reported computer-wide
+typing trouble, matching unresponsive UI actions. The desktop was subsequently
+closed; do not relaunch or send UI input until that investigation is finished.
+No new identity was created. Existing identity and Ada/Bora history were visible
+after launching with the recorded private recipe.
 
 ## Current deployment — 2026-09-07, context79 and native Ada→Bora passed
 

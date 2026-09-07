@@ -13,7 +13,7 @@ devreye girer. Bu komut image oluşturmaz veya verileri sıfırlamaz.
 
 ```sh
 /Users/nambse/.pyenv/versions/3.12.8/bin/python3 \
-  /private/tmp/ortak-v0-evidence/native78-final-97a97244333048f4b586e9270878c62e/launch-native78.py
+  /private/tmp/ortak-v0-evidence/employee-native79-c8e5910cb3b24fe2965270ea9362cccc/launch-native79.py
 ```
 
 Bu, masaüstünü açan komuttur; Docker Desktop ve kapatılmış arka plan hizmetlerini
@@ -23,8 +23,12 @@ Mac yeniden başladıktan sonra otomatik açılan bir servis yöneticisi henüz 
 
 7 Eylül sohbet güncellemesiyle Ada’nın önceki yanıtı, aynı konuşmada Bora’ya
 metni tekrar yapıştırmadan çevirtildi. Backend şema79 ile çalışıyor. Güncel
-süreç kayıtları `/private/tmp/ortak-private-20260905/rollouts/context79-993dc9d/current-owners79.json`
-dosyasındadır; yukarıdaki masaüstü açma komutu aynı kalan native paketi açar.
+süreç kayıtları `/private/tmp/ortak-private-20260905/rollouts/employee79-d2b137c/current-owners79.json`
+dosyasındadır. Employee kimliği güncellemesi `d2b137c` ile API ve native pakete
+kuruldu. İmzalı canlı API kontrolü üç çalışanı doğru çözdü. Bilgisayarda genel
+girdi sorunu gözlendiği için yeni etiketlerin native kabulü henüz tamamlanmadı;
+son masaüstü süreci kapandı ve girdi sorunu giderilirken yeniden açılmadı.
+Native durum kaydı aynı rollout dizinindeki `native-current-state.json` içindedir.
 
 ## Günlük kullanım
 
