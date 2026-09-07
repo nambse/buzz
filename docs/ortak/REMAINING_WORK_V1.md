@@ -8,8 +8,9 @@ scope, ownership and evidence. The historical A–G inventory below remains
 useful for dependency order; it is not the current deployment inventory.
 
 Inherited work is preserved in three pushed DCO checkpoints (ebc11ca, e4d02b2,
-ecd9c1b). Context79 source and disposable schema parity are verified; live
-services remain78.
+ecd9c1b). Context79 is pushed in993dc9d, deployed with verified installed artifacts, and
+actual native Ada→Bora translation passed without a re-paste. Disposable schema
+parity passed; live services now use79.
 
 Current remaining gates: bounded authorized
 conversation/team/thread/Work context and Ada→Bora acceptance; conversational

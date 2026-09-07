@@ -21,6 +21,11 @@ kurmaz. Tam hizmet yeniden başlatması, güncel sahiplik kaydı ve dondurulmuş
 operatör tarifleriyle yapılır. Eski kayıtlardaki PID'lerle işlem sonlandırmayın.
 Mac yeniden başladıktan sonra otomatik açılan bir servis yöneticisi henüz kurulmadı.
 
+7 Eylül sohbet güncellemesiyle Ada’nın önceki yanıtı, aynı konuşmada Bora’ya
+metni tekrar yapıştırmadan çevirtildi. Backend şema79 ile çalışıyor. Güncel
+süreç kayıtları `/private/tmp/ortak-private-20260905/rollouts/context79-993dc9d/current-owners79.json`
+dosyasındadır; yukarıdaki masaüstü açma komutu aynı kalan native paketi açar.
+
 ## Günlük kullanım
 
 - **Office:** `ortak-private` kanalından konuşmaya başlayın. Belirli bir çalışana

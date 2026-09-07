@@ -17,7 +17,57 @@ new task is the sole implementation owner and continues under an active goal,
 without a deadline or token budget. The old account/login notes below are
 historical; the new shared Hermes OAuth enrollment is already ready.
 
-## Current checkpoint — 2026-09-07, bounded conversation context79
+## Current checkpoint — 2026-09-07, context79 deployed and native Ada→Bora passed
+
+DCO commit `993dc9d` is pushed. Immutable backend79, worker
+`sha256:ce23f9f95b9573cacc4eaf855e9826161bc725ac9ee8ccdf44f69df823b1e9f3`,
+and controller `sha256:2fca87f25abd15b573cec7c2c3e40803cb0e270b4ac5a273e27a81ede744f1e9`
+were built from that clean source. Installed actual Hermes loop, workspace-tool
+SDK loop, confidential codec/runtime tests, and real DockerExecutor containment
+passed without provider calls. The fixture network was removed after proving it
+empty; its journal remains. Source-overlay tests were superseded by these
+installed-artifact checks. Upstream Hermes remains29112bef; Honcho and scorer
+were not replaced.
+
+The four exact owned host writers and old controller were stopped with no active
+runs or pending dispatch/delivery. A private schema78 database dump was captured
+and hashed (not yet restore-verified); it contains the new OAuth era's database
+state, not an OAuth backup. The real buzz-admin migrator applied79 to live55433.
+A new controller reused the same profiles, OAuth directory and journal volume;
+all mounts and resource/security settings were checked against the prior owner.
+The old controller remains stopped, with its image and binaries retained. No
+Cem/Zeynep, other stack or native process was stopped. Controller readiness needed
+one follow-up after its initial socket had not finished starting.
+
+Current deployment directory:
+`/private/tmp/ortak-private-20260905/rollouts/context79-993dc9d`.
+`current-owners79.json` pins host executable/hash/inode/cwd/launcher/session:
+relay15923/session40614, API15951/session48606, management15962/session2313,
+worker15976/session62287. Native72325 remains unchanged. Controller ID is
+`1b9ffdf48ce17e61e8e9fae4088d7fe855ce5f9b97b47fe3b28d059f726a608a`.
+Live/ready `/_liveness` and `/_readiness` return200; unsigned
+`/api/v1/employees` returns401. Private build evidence is under
+`context79-images-8b5f1b468bfd44a489062b65c1ef433f` and
+`context79-backend-4e3e02db9081409f874f811ffad90e26` in the evidence parent.
+
+**Actual native/provider acceptance passed:** in the existing Office, the human
+asked Ada how this real team would help with an idea-board product. Ada described
+her own planning role, Deniz's Turkish copy role and Bora's translation role.
+In the same thread the human then sent only “Bora, bunu İngilizceye çevirir misin?”
+with a real Bora mention. Bora translated Ada's three items without asking for
+or receiving a re-paste. Ada run `8af0cee2-fc91-40b0-8a6a-9973714476c1` and Bora run
+`79207a0b-12c7-4347-b427-491584891788` completed and delivered. Bora's frozen context
+has exactly the root and Ada's answer, attributed to Ada. The two human turns
+have distinct durable delivery roots. The native UI and source/run/outbox proof
+are recorded in `ada-bora-native-acceptance.json` in the deployment directory.
+
+Next: (1) fix legacy owner/offline presentation using authenticated Employee
+identity and permitted recorded activity; (2) finish conversation→Work/artifact
+revision and persistence/lifecycle acceptance. Model/restart follow-up, schema79
+restore/upgrade checks, full CI, final review URL and operating notes remain open.
+A successful two-turn conversation does not complete v0.
+
+## Historical checkpoint — 2026-09-07, bounded conversation context79
 
 The inherited984 paths are preserved in three pushed DCO checkpoints:
 `ebc11ca` (runtime/authority), `e4d02b2` (desktop), and `ecd9c1b`
