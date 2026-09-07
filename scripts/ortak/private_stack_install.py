@@ -15,7 +15,8 @@ from private_stack_state import CONTAINERS, PROJECT, SERVICES, container_contrac
 MODULES = ("private_stack.py", "private_stack_state.py", "private_stack_services.py",
            "private_stack_install.py", "private_stack_launch.py", "private_native_services.py", "init_private_stack.py",
            "private_stack_backup.py", "private_stack_restore.py", "private_stack_archive.py", "private_stack_database.py",
-           "private_stack_journal.py", "backup_private_database.py", "recovery_archive_io.py", "recovery_image_export.py")
+           "private_stack_journal.py", "backup_private_database.py", "recovery_archive_io.py", "recovery_image_export.py",
+           "private_stack_desktop.py")
 
 
 def plist_path(action):

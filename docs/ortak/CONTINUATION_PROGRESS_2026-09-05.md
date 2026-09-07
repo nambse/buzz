@@ -17,7 +17,51 @@ new task is the sole implementation owner and continues under an active goal,
 without a deadline or token budget. The old account/login notes below are
 historical; the new shared Hermes OAuth enrollment is already ready.
 
-## Current checkpoint — 2026-09-07, reviewed memory80 native acceptance
+## Current checkpoint — 2026-09-07, encrypted80 and persistent native opening
+
+The688997b native package now includes the Work refresh fix and fresh Deniz DM.
+It is installed outside the checkout under the private root's content-addressed
+`desktop/02362e325da0cc6c3e85d80029db1a8c96285d6d72ac6b657a2770275f73de67/Ortak Private.app`.
+The installed `bin/ortak open` starts the selected services and launches it with
+the existing private operator environment. Repeating open returned the same PID;
+the native UI recovered the existing Office thread and encrypted conversation.
+All27 local lifecycle tests pass; two additional PostgreSQL drain cases are
+deliberately skipped without their explicit disposable selection. The launcher
+records the birth time and executable path, refuses unknown same-bundle processes
+and modified files, and retains previous bundles. It does not depend on Git cwd.
+
+The same Hermes controller/worker images now advertise the installed protected
+and workspace capabilities through config-v4. Selected controller is
+f51cf4b2752577d25fefd766f7b035ed2b90119688cef4bf9bdcc7ea09b41ba2;
+the work80 predecessor is retained stopped. Pair41b57768-9b73-4228-9548-0409216398a6
+was registered at generation1 with the typed operator command. Worker and API
+are immutable688997b artifacts built with `encrypted-dm`; the previous worker
+correctly refused the enabled config because its binary lacked that feature.
+The operator's API audience now explicitly contains their own fresh Deniz DM.
+
+First real protected run826f3e2e-6fc1-e1f7-a88e-54ea07b6036f completed, but both
+reply copies failed after3 bounded attempts. Its publisher selected127.0.0.1,
+which returns404 for this host-scoped community; the canonical localhost origin
+returns200. The worker config now selects ws://localhost:3038/. The failed
+receipts remain unchanged; no completed request was silently rerun.
+New native test run6a2f82ed-777e-a12f-d4a5-899b01134a5e completed with one dispatch,
+zero execution failures and both encrypted reply copies ACKed on attempt1.
+The exact requested synthetic answer appeared in the protected native view.
+
+Read-only scans found no test plaintext in all156 public PostgreSQL tables
+(including bytea hex), all Hermes journal tables,24 native-app/service-log files.
+The controller has20 runs:7 profile probes,11 ordinary Office/Work and2 protected
+runs; its72 ordinary events contain no protected text, while8 confidential
+events remain encrypted. Native reopen showed the same protected history.
+Evidence: `native-encrypted80-{result,local-privacy,journal-privacy}.json` and
+`encrypted-pair80-preparation/` under the private root. These bounded scans and
+the installed protected tests do not assert physical erasure or provider secrecy.
+
+Next: fresh semantic and Files selections, remaining memory scope acceptance,
+then final CI/integration, current backup/runbook and draft PR. Full Mac reboot
+and active cloned-runtime recovery are still distinct unproven boundaries.
+
+## Previous checkpoint — 2026-09-07, reviewed memory80 native acceptance
 
 Recovery80 is signed and pushed at `c5e1a78`; its exact current launcher is frozen
 outside the checkout. The added failed-restore comparison regression proves the

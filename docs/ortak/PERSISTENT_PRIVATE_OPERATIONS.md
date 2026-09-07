@@ -5,11 +5,19 @@ Kalıcı dizin: `~/.local/share/ortak/private-v0`. Komutlar yeni çalışan, kim
 OAuth bağlantısı, container, image veya volume oluşturmaz.
 
 ```sh
+~/.local/share/ortak/private-v0/bin/ortak open
 ~/.local/share/ortak/private-v0/bin/ortak status
 ~/.local/share/ortak/private-v0/bin/ortak start
 ~/.local/share/ortak/private-v0/bin/ortak stop
 ~/.local/share/ortak/private-v0/bin/ortak restart
 ```
+
+`open` servisleri açıp doğrulanmış özel uygulamayı mevcut operatör kimliğiyle
+başlatır. Repo veya geçici dizine ihtiyaç duymaz. Uygulama zaten bu araçla
+açılmışsa ikinci süreç oluşturmaz; PID, başlangıç zamanı ve paket yolu eşleşir.
+Başka konumdan açık eski özel paketi önce **Quit** ile kapatın. Güncel paket
+kalıcı `desktop/02362e325da0cc6c3e85d80029db1a8c96285d6d72ac6b657a2770275f73de67/Ortak Private.app`
+altındadır. Kimlik ve OAuth değerleri komut satırına veya açılış günlüğüne yazılmaz.
 
 Docker Desktop açık olmalıdır. `start` mevcut altı container'ı ve dört kullanıcı
 servisini açar. `stop` önce yeni istek girişini kapatır, en fazla45 saniye bekleyen
@@ -30,9 +38,8 @@ yüklemez ve gerçek model çağrısı yapmaz.
 Native uygulama servislerden ayrı kalır. Kısa kesintide son başarılı Work
 görünümünü koruyup yazmayı durdurur. Bağlantı geldikten sonra Employees **Refresh**,
 Work **Refresh work**, Activity **Reload timeline** ile yeniden bağlanılabilir.
-Mevcut `b49c04a` pakette Work bağlantı/bağımlılık hataları için ayrıca **Retry work
-links** / **Retry dependencies** kullanılır. Son kaynak düzeltmesi **Refresh
-work** eylemini bu iki panele de bağlar; henüz yeni native pakete alınmadı.
+Güncel `688997b` paketi **Refresh work** eylemini Work bağlantıları ve bağımlılık
+panellerine de bağlar. Aynı paket Deniz'in yeni şifreli görüşmesini içerir.
 
 Kurulu launcher kendi Python dosyalarını kalıcı `lifecycle/code-…` dizininden
 okur; çalışması repo dosyalarının yerinde olmasına bağlı değildir. Servis başına
@@ -53,6 +60,18 @@ gerektirir; FileVault kilidini açmaz veya Mac'i kendiliğinden başlatmaz.
 sahipliğini doğrular, yalnız işletim kodunu dondurur ve önceki seçimi saklar.
 Veritabanı şemasını, native binary veya Hermes image seçimini değiştirmez.
 Bu komut genel ürün yükseltmesi veya yedekten geri yükleme aracı değildir.
+
+Yetkili yeni bir özel uygulama derlemesini seçmek için önce açık paketten çıkın:
+
+```sh
+~/.local/share/ortak/private-v0/bin/ortak install-app --native-bundle '/tam/yol/Ortak Private.app'
+~/.local/share/ortak/private-v0/bin/ortak open
+```
+
+`install-app` yalnız özel bundle kimliğini kabul eder; bütün dosyaları hash ile
+doğrulanmış kalıcı kopyaya alır. Önceki paket ve uygulama verileri korunur.
+Yarım kopya `.staging` olarak kalır ve kendiliğinden seçilmez; operatör incelemesi
+gerektirir. Sonraki `open`, değişmiş paket veya bilinmeyen açık süreci reddeder.
 
 Tutarlı yedek almak için önce Ortak Private uygulamasından **Quit** ile çıkın.
 Ardından kurulu araç mevcut kaynakları kapatır, yedeği alır ve servisleri yeniden
@@ -96,3 +115,9 @@ Kapatma ayrıca onaylı bellek yayın/geri çekme işlerini, çalışma alanı o
 ve şifreli mesaj işlemlerini denetler. Henüz denenmemiş gelecekteki süre sonu
 geri çekmeleri saklanır; vadesi gelmiş veya belirsiz işler tamamlanmadan depolar
 kapatılmaz. Bu ayrım gerçek PostgreSQL üzerinde iki üretim sorgusu testiyle doğrulandı.
+
+Yeni gerçek kabulde `open` kalıcı paketi başlattı; ikinci çağrı aynı PID'yi döndürdü.
+Native arayüz aynı operatör, önceki Office konuşmaları ve Deniz'in şifreli yanıtını
+yeniden gösterdi.27 yerel işletim testi geçti; iki ayrı PostgreSQL drain testi
+disposable ortam seçilmediğinde bilinçli atlanır. Bu uygulama açılışı tam Mac
+reboot kanıtının yerine geçmez.

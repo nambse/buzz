@@ -14,12 +14,12 @@ from private_stack_state import Installation
 def main():
     """One locked operator action; failure keeps its durable checkpoint for recovery."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("install", "upgrade-launcher", "status", "start", "stop", "restart", "backup", "verify-backup"))
+    parser.add_argument("action", choices=("install", "upgrade-launcher", "install-app", "open", "status", "start", "stop", "restart", "backup", "verify-backup"))
     parser.add_argument("--native-bundle", type=Path)
     parser.add_argument("--backup", type=Path)
     args = parser.parse_args()
-    if args.action == "backup" and args.native_bundle is None:
-        parser.error("backup requires --native-bundle; close the private application first")
+    if args.action in ("backup", "install-app") and args.native_bundle is None:
+        parser.error("this action requires --native-bundle; close the private application first")
     if args.action == "verify-backup" and args.backup is None:
         parser.error("verify-backup requires --backup")
     os.umask(0o077)
@@ -29,7 +29,10 @@ def main():
             result = register(installation, upgrade=args.action == "upgrade-launcher")
         else:
             installation.load()
-            if args.action == "restart":
+            if args.action in ("install-app", "open"):
+                from private_stack_desktop import install_app, open_app
+                result = install_app(installation, args.native_bundle) if args.action == "install-app" else open_app(installation)
+            elif args.action == "restart":
                 stop(installation)
                 result = start(installation)
             elif args.action == "backup":
