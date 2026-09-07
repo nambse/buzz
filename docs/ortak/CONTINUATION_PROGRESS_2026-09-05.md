@@ -17,7 +17,39 @@ new task is the sole implementation owner and continues under an active goal,
 without a deadline or token budget. The old account/login notes below are
 historical; the new shared Hermes OAuth enrollment is already ready.
 
-## Current checkpoint — 2026-09-07, final package and populated recovery
+## Current checkpoint — 2026-09-07, GitHub CI follow-up; reboot deferred
+
+The user explicitly deferred the Mac reboot and requested completion of the
+other work. PR #1's9e39fac GitHub results exposed three remaining CI issues after
+the previously passing local gates: Windows compiled unguarded Unix descriptor
+operations in the local workspace reader/operator; Docker builds failed while
+exporting cache to the inherited upstream registry; the cold relay artifact
+producer timed out at30 minutes during compilation, before tests ran.
+
+The follow-up keeps wire/API types portable and confines Unix owner, descriptor
+and process checks to their actual platform. Unsupported local readers refuse
+before filesystem access; no weaker Windows path or false containment receipt
+is substituted. The Windows lane now executes that refusal regression. Existing
+six actual Unix reader/process/watchdog tests and all-target encrypted-feature
+Clippy pass. The installed private artifacts are unchanged during this CI repair.
+
+PR image builds no longer log in or export registry caches, including same-repo
+PRs. Relay and gateway image defaults follow the current repository; explicit
+registry overrides and non-PR publication gates remain. A workflow contract
+checks all three build paths. The cold relay/archive producer has a bounded
+60-minute budget; test job deadlines and required contexts remain unchanged.
+
+The follow-up's full local `just ci` passed (exit0), including desktop6655,
+mobile2072, workspace/Tauri lint/check/tests and desktop/web builds. Workflow
+actionlint, registry boundary checks and negative mutations, image eligibility,
+Rust cache and required-context isolation checks also passed. Evidence:
+`evidence/ci-followup-final-local.log` and the focused `ci-followup-*` receipts.
+
+Next: signed push and real Windows/Docker/relay GitHub checks.
+Mac reboot acceptance remains deliberately deferred, not completed. The previous
+checkpoint below records the tested installed build and populated backup.
+
+## Previous checkpoint — final package and populated recovery
 
 Native330991b built and is installed under permanent desktop tree
 b6373d98b1b99168f97317ee2fa7af1ccd4fc6176c109bda456b9585df10e7f8.

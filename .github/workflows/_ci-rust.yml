@@ -145,6 +145,8 @@ jobs:
         run: cargo clippy --workspace --all-targets --target $env:TARGET -- -D warnings
       - name: Check (workspace)
         run: cargo check --workspace --all-targets --target $env:TARGET
+      - name: Test unsupported local workspace reader boundary
+        run: cargo test -p ortak-server --test workspace_platform --target $env:TARGET
       - name: Test (buzz-dev-mcp)
         # The Windows-only bash resolver lives in buzz-dev-mcp; its unit tests
         # only gate if this crate is tested ON Windows.

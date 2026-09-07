@@ -9,7 +9,7 @@ pub async fn recover_reader(control: &PgControlPlane, scope: &CompanyScope) -> R
         return Ok(false);
     };
     let identity = reader.identity.as_ref().ok_or_else(unavailable)?;
-    if identity.uid != rustix::process::getuid().as_raw() {
+    if identity.uid != current_uid()? {
         return Err(unavailable().into());
     }
     verify_executable(

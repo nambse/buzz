@@ -1,3 +1,4 @@
+#![cfg(unix)]
 //! Actual descriptor reader and spawned-process seam; only fresh synthetic files.
 use chrono::Utc;
 use ortak_control::workspace::*;

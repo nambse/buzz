@@ -357,6 +357,7 @@ async fn workspace_exhaustion_and_required_stop_are_one_atomic_persist() {
     assert_eq!(x.inputs.reads.load(Ordering::SeqCst), 0);
 }
 
+#[cfg(unix)]
 #[tokio::test]
 #[ignore = "requires explicit disposable port55432 PostgreSQL with proposal74 and matched reader binary; bounded8s watchdog"]
 async fn workspace_restart_recovery_requires_exact_owned_process_absence_after_lease_expiry() {

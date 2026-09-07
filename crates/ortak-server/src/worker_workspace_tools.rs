@@ -14,8 +14,10 @@ use ortak_control::{CompanyScope, PgControlPlane};
 use ortak_runtime::workspace_tools::{ConfiguredRunWorkspace, RunWorkspace, WorkspaceStep};
 use ortak_runtime::{DispatchAuthority, Result};
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
-use std::{io::Read, path::PathBuf, time::Duration};
+use std::{path::PathBuf, time::Duration};
+
+mod platform;
+use platform::{current_uid, verify_executable};
 
 mod recovery;
 pub use recovery::recover_reader;
@@ -66,53 +68,11 @@ fn unavailable() -> RuntimeError {
     }
 }
 
-fn verify_executable(
-    binary: &std::path::Path,
-    expected_hash: &str,
-    uid: u32,
-) -> std::result::Result<(), RuntimeError> {
-    let fd = rustix::fs::open(
-        binary,
-        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC,
-        rustix::fs::Mode::empty(),
-    )
-    .map_err(|_| invalid())?;
-    let stat = rustix::fs::fstat(&fd).map_err(|_| invalid())?;
-    if rustix::fs::FileType::from_raw_mode(stat.st_mode) != rustix::fs::FileType::RegularFile
-        || stat.st_nlink != 1
-        || stat.st_uid != uid
-        || stat.st_mode & 0o022 != 0
-        || stat.st_mode & 0o100 == 0
-        || stat.st_size < 1
-        || stat.st_size > 268435456
-    {
-        return Err(invalid());
-    }
-    let mut file = std::fs::File::from(fd);
-    let mut digest = Sha256::new();
-    let mut bytes = [0u8; 65536];
-    let mut count = 0usize;
-    loop {
-        let read = file.read(&mut bytes).map_err(|_| invalid())?;
-        if read == 0 {
-            break;
-        }
-        count += read;
-        if count > 268435456 {
-            return Err(invalid());
-        }
-        digest.update(&bytes[..read]);
-    }
-    if count as i64 != stat.st_size || hex::encode(digest.finalize()) != expected_hash {
-        return Err(invalid());
-    }
-    Ok(())
-}
-
 impl ProcessWorkspaceAdapter {
     /// Verifies only an explicit pinned executable and root syntax. Input file
     /// ownership/hash verification is performed by the bounded child itself.
     pub fn new(config: &WorkspaceConfig) -> std::result::Result<Self, RuntimeError> {
+        let uid = current_uid()?;
         if !config.reader_binary.is_absolute()
             || !config.input_root.is_absolute()
             || !config.run_root.is_absolute()
@@ -132,11 +92,7 @@ impl ProcessWorkspaceAdapter {
         {
             return Err(invalid());
         }
-        verify_executable(
-            &config.reader_binary,
-            &config.reader_sha256,
-            rustix::process::getuid().as_raw(),
-        )?;
+        verify_executable(&config.reader_binary, &config.reader_sha256, uid)?;
         Ok(Self {
             binary: config.reader_binary.clone(),
             sha256: config.reader_sha256.clone(),
@@ -253,7 +209,7 @@ impl WorkspaceAdapter for ProcessWorkspaceAdapter {
         Some(WorkspaceReaderIdentity {
             executable: self.binary.to_string_lossy().into(),
             sha256: self.sha256.clone(),
-            uid: rustix::process::getuid().as_raw(),
+            uid: current_uid().ok()?,
         })
     }
     async fn prepare_observed<O: WorkspaceExecutionObserver>(
