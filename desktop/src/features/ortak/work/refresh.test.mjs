@@ -30,6 +30,8 @@ async function setup() {
     reads: 0,
     version: 1,
     writes: [],
+    linksError: null,
+    linksReads: 0,
   };
   const project = (id) => ({
     id,
@@ -98,17 +100,25 @@ async function setup() {
     }),
     workItem: async (id) => ({ work_item: item(id) }),
     workExecutions: async () => ({ executions: [] }),
-    workDependencies: async (id) => ({
-      work_item_id: id,
-      work_version: state.version,
-      dependencies: [],
-    }),
-    workDecomposition: async (id) => ({
-      work_item_id: id,
-      work_version: state.version,
-      parent: null,
-      children: [],
-    }),
+    workDependencies: async (id) => {
+      state.linksReads++;
+      if (state.linksError) throw state.linksError;
+      return {
+        work_item_id: id,
+        work_version: state.version,
+        dependencies: [],
+      };
+    },
+    workDecomposition: async (id) => {
+      state.linksReads++;
+      if (state.linksError) throw state.linksError;
+      return {
+        work_item_id: id,
+        work_version: state.version,
+        parent: null,
+        children: [],
+      };
+    },
     reviewedMemory: async () => {
       if (state.memoryError) throw state.memoryError;
       if (state.memoryHold)
@@ -244,6 +254,29 @@ test("idle polling preserves drafts through bounded 503 failure and manual recov
     v.getByRole("button", { name: "Save approval" }).matches(":disabled"),
     false,
   );
+});
+
+test("Refresh work restarts exhausted links and dependencies without changing item version or losing drafts", async (context) => {
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  const v = await setup();
+  v.state.linksError = new OrtakApiError(503, "Service restarting");
+  for (const delay of [5000, 3000, 6000, 12000, 24000])
+    await v.act(async () => context.mock.timers.tick(delay));
+  assert.ok(v.getByRole("button", { name: "Retry work links" }));
+  assert.ok(v.getByRole("button", { name: "Retry dependencies" }));
+  const stopped = v.state.linksReads;
+  await v.act(async () => context.mock.timers.tick(300000));
+  assert.equal(v.state.linksReads, stopped);
+  v.state.linksError = null;
+  await v.act(async () =>
+    v.fireEvent.click(v.getByRole("button", { name: "Refresh work" })),
+  );
+  assert.equal(v.state.linksReads, stopped + 2);
+  assert.equal(v.queryByRole("button", { name: "Retry work links" }), null);
+  assert.equal(v.queryByRole("button", { name: "Retry dependencies" }), null);
+  assert.ok(v.getByText("No child work is currently visible."));
+  assert.ok(v.getByText("No active dependencies."));
+  v.unchanged();
 });
 
 test("routine polling does not disable a focused native selection while the next read is pending", async (context) => {

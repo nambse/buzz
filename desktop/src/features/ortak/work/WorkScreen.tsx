@@ -284,6 +284,7 @@ export function WorkScreen({
                 </section>
                 {data.item ? (
                   <ItemDetail
+                    refresh={refresh}
                     selectItem={setItemId}
                     targets={data.items?.work_items ?? []}
                     client={client}

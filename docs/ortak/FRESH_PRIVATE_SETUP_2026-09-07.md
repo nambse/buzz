@@ -11,6 +11,20 @@ Do not run the historical `/private/tmp` launch or restore instructions.
 
 Current verified facts:
 
+- Checkpoint `b49c04a` is now deployed on schema80. Existing eight conversation
+  snapshots retained identical bytes/hashes. Native Work acceptance produced
+  two real artifacts, revised only the requested section using the prior version
+  without repasting it, then completed through operator criteria and review
+  decisions. Each Work dispatch/materialization ran once. Evidence:
+  `evidence/native-work-context80-acceptance.json`.
+  Current service selection is `artifacts/active-services.json`, immutable
+  binaries under `artifacts/backend80-b49c04a`; current Hermes selection is V3.
+  Worker/controller digests are respectively
+  `sha256:7d77af258ff982f7e03b11106cb089c4f5c75f05242d1e0fe5af16512b7af63d`
+  and `sha256:617cb771c8ad1184d0c699a761a18e2a13e01d9aee525a71a8becb89ec9f5c11`.
+  The remaining entries describe the preceding fresh79 installation; image and
+  registry selections below are historical where superseded by this entry.
+
 - Fresh PostgreSQL and Redis pass their configured health checks. Schema79 was
   installed by `buzz-admin migrate`; the authenticated object-store bucket check
   passed. The native relay and API have started against the fresh database.

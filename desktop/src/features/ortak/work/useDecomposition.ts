@@ -9,9 +9,10 @@ export function useDecomposition(
   version: number,
   project: string,
   revoke: () => void,
+  parentRefresh = 0,
 ) {
   const [refresh, setRefresh] = useState(0);
-  const key = `${project}:${id}:${version}:${refresh}`;
+  const key = `${project}:${id}:${version}:${refresh}:${parentRefresh}`;
   const [state, setState] = useState<{
     client: OrtakClient;
     key: string;

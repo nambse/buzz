@@ -8,9 +8,10 @@ export function useDependencies(
   id: string,
   version: number,
   revoke: () => void,
+  parentRefresh = 0,
 ) {
   const [refresh, setRefresh] = useState(0);
-  const key = `${id}:${version}:${refresh}`;
+  const key = `${id}:${version}:${refresh}:${parentRefresh}`;
   const [state, setState] = useState<{
     client: OrtakClient;
     key: string;

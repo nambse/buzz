@@ -24,6 +24,7 @@ export function ItemDetail({
   revoke,
   targets: dependencyTargets,
   selectItem,
+  refresh = 0,
 }: {
   item: WorkItem;
   project: WorkProject;
@@ -35,6 +36,7 @@ export function ItemDetail({
   revoke: () => void;
   targets: WorkSummary[];
   selectItem: (id: string) => void;
+  refresh?: number;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
@@ -87,6 +89,7 @@ export function ItemDetail({
         submit={submit}
       />
       <DecompositionPanel
+        refresh={refresh}
         key={`${item.id}:${item.version}:decomposition`}
         client={client}
         item={item}
@@ -256,6 +259,7 @@ export function ItemDetail({
         submit={submit}
       />
       <DependencyPanel
+        refresh={refresh}
         client={client}
         item={item}
         project={project}

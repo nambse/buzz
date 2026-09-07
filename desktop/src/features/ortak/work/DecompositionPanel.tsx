@@ -16,6 +16,7 @@ export function DecompositionPanel({
   submit,
   revoke,
   selectItem,
+  refresh = 0,
 }: {
   client: OrtakClient;
   item: WorkItem;
@@ -24,6 +25,7 @@ export function DecompositionPanel({
   submit: SubmitWork;
   revoke: () => void;
   selectItem: (id: string) => void;
+  refresh?: number;
 }) {
   const state = useDecomposition(
     client,
@@ -31,6 +33,7 @@ export function DecompositionPanel({
     item.version,
     item.project_id,
     revoke,
+    refresh,
   );
   const [error, setError] = useState<string | null>(null);
   const parent = state.data?.parent;

@@ -17,7 +17,56 @@ new task is the sole implementation owner and continues under an active goal,
 without a deadline or token budget. The old account/login notes below are
 historical; the new shared Hermes OAuth enrollment is already ready.
 
-## Current checkpoint — 2026-09-07, fresh native conversation and model continuity
+## Current checkpoint — 2026-09-07, native Work revision80 accepted
+
+Signed and pushed `b49c04a` is deployed: schema80, eight immutable native service
+artifacts, rebuilt private desktop, and the verified Work80 Hermes images below.
+The selected controller uses `config-v3.json` / `launch-argv-v3.json`. Its stopped
+schema79 predecessor, old native bundle and pre-upgrade backup remain retained.
+All eight historical conversation snapshot bytes and hashes survived migration.
+The logical PostgreSQL79 dump and cold journal archive were parsed and hashed;
+they have not been restore-tested. Evidence: `live-migration80-receipt.json` and
+`backups/pre-upgrade80-b49c04a/receipt.json`, under the persistent private root.
+
+Native acceptance completed the actual Office root → Fikir Panosu project →
+assigned Work → Ada deliverable → revision → operator criteria/review/completion
+flow. The first execution used12 messages from its linked thread. The second
+selected that exact artifact (execution version4), retained Amaç and
+Sorumluluklar byte-for-byte, and changed only İlk Sürüm to idea entry and voting,
+without repasting the prior output. Both results entered REVIEW with pending
+human decisions. UI acceptance of both criteria and the required review gate
+preceded terminal work version13. Read-only evidence confirms two runs, two
+artifacts, two delivered Work dispatches and two materializations, each one
+attempt; no Office publication or automatic memory write was requested by Work.
+Full evidence: `evidence/native-work-context80-acceptance.json`.
+
+The persistent `bin/ortak` now provides install/status/start/stop/restart and
+launcher-only upgrade. It pins actual container IDs/images/mounts and native
+binary hashes, freezes its own code outside the checkout, serializes operator
+actions, drains pending work before stopping stores, and supervises child groups
+with bounded rotating logs. Twelve production-bound tests pass. Live restart
+closed/reopened all six containers and four launchd services with the same IDs;
+ten runs, two artifacts, terminal Work and frozen Work snapshots were preserved.
+Native directory/Work/Activity recovered through visible refresh controls.
+The first refusal exposed nondeterministic Docker mount ordering; canonical
+ordering retains permissions/identity checks. The next refusal exposed launchd's
+short asynchronous retirement; stop now waits for both unload and PID exit.
+No abandoned child or replacement data store was created.
+
+The native interruption exposed Work links/dependencies whose error text offered
+Refresh work while their stopped retry loops did not receive that refresh. The
+source now passes the existing refresh generation down without remounting forms.
+The actual WorkScreen regression exhausts both retry loops and restores them
+with one click, preserving unrelated drafts. All24 scoped UI tests and TypeScript
+pass. The current native bundle still needs this small UI fix rebuilt.
+See [persistent operations](PERSISTENT_PRIVATE_OPERATIONS.md); evidence is under
+`evidence/lifecycle-*` in the private root.
+
+Next: complete schema80 backup/recovery and the remaining fresh selected feature
+gates, then final source/build/CI/PR validation and native refresh fix deployment.
+The general v0 goal remains active; this completes its conversational Work gate.
+
+## Previous checkpoint — 2026-09-07, fresh native conversation and model continuity
 
 All three fresh employees passed real runtime, signer, membership and Honcho
 write/recall gates and are active. Native Office reproduced Ada's three real

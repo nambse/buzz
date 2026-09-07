@@ -15,6 +15,7 @@ export function DependencyPanel({
   disabled,
   submit,
   revoke,
+  refresh = 0,
 }: {
   client: OrtakClient;
   item: WorkItem;
@@ -23,8 +24,9 @@ export function DependencyPanel({
   disabled: boolean;
   submit: SubmitWork;
   revoke: () => void;
+  refresh?: number;
 }) {
-  const state = useDependencies(client, item.id, item.version, revoke);
+  const state = useDependencies(client, item.id, item.version, revoke, refresh);
   const [error, setError] = useState("");
   const editable =
     !!state.data &&
