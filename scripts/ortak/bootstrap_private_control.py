@@ -143,7 +143,7 @@ COMMIT;
 """
     subprocess.run(
         ["/usr/local/bin/docker", "--host", "unix:///Users/nambse/.docker/run/docker.sock",
-         "exec", "-i", "ortak-private-20260905-postgres-1",
+         "exec", "-i", f"{PROJECT}-postgres-1",
          "psql", "--no-psqlrc", "--no-password", "--quiet", "--set", "ON_ERROR_STOP=1",
          "-h", "/var/run/postgresql", "-U", "ortak", "-d", "ortak"],
         input=sql.encode(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

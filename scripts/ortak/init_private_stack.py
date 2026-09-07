@@ -12,8 +12,10 @@ from pathlib import Path
 import secrets
 
 
-PROJECT = "ortak-private-20260905"
-STATE_DIRECTORY = Path("/private/tmp/ortak-private-20260905")
+PROJECT = "ortak-private-v0"
+# This includes credentials and recovery metadata, not disposable build output.
+# macOS clears /private/tmp on reboot; the active stack must live in user storage.
+STATE_DIRECTORY = Path.home() / ".local/share/ortak/private-v0"
 
 
 def create_file(path: Path, content: str, mode: int = 0o600) -> None:
@@ -59,6 +61,10 @@ def main() -> None:
         print(f"Existing marked state preserved: {root}")
         return
     os.umask(0o077)
+    root.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if (root.parent.is_symlink() or root.parent.stat().st_uid != os.getuid()
+            or root.parent.stat().st_mode & 0o077):
+        raise ValueError("private stack parent must remain owner-private")
     root.mkdir(mode=0o700, parents=False)
     secret_root = root / "secrets"
     secret_root.mkdir(mode=0o700)

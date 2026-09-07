@@ -5,9 +5,9 @@
 //! Run with a disposable database that can receive the embedded migrations:
 //! `ORTAK_TEST_DATABASE_URL=postgres://... cargo test -p ortak-office --test postgres_channel_normalization -- --ignored`
 
+mod cohort;
 #[path = "../../../ortak-control/tests/cohort_support.rs"]
 mod cohort_support;
-mod cohort;
 mod direct;
 mod fencing;
 mod fixture;

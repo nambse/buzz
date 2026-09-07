@@ -71,6 +71,7 @@ class ControlBootstrapTests(unittest.TestCase):
         self.assertEqual(self.db.call_count, 2)
         for call in self.db.call_args_list:
             self.assertEqual(call.args[0][:3], ["/usr/local/bin/docker", "--host", "unix:///Users/nambse/.docker/run/docker.sock"])
+            self.assertEqual(call.args[0][3:6], ["exec", "-i", f"{subject.PROJECT}-postgres-1"])
             self.assertEqual(call.kwargs["env"], {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "C", "LC_ALL": "C"})
             self.assertEqual(call.kwargs["timeout"], 20)
             self.assertEqual(call.kwargs["stdout"], subprocess.DEVNULL)

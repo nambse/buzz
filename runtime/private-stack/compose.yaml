@@ -1,4 +1,4 @@
-name: ortak-private-20260905
+name: ortak-private-v0
 
 services:
   postgres:

@@ -17,7 +17,18 @@ new task is the sole implementation owner and continues under an active goal,
 without a deadline or token budget. The old account/login notes below are
 historical; the new shared Hermes OAuth enrollment is already ready.
 
-## Current checkpoint — 2026-09-07, reboot and authorized fresh test setup
+## Current checkpoint — 2026-09-07, persistent setup and fresh OAuth verified
+
+The fresh stack now uses `/Users/nambse/.local/share/ortak/private-v0` and the
+`ortak-private-v0` Compose project. The user completed device enrollment; separate
+Ada, Bora and Deniz real Sol/high profile probes all completed through the same
+explicitly shared OAuth connection. Fresh schema79, private Office channel and
+API audience are prepared. Employee activation, native acceptance and repeatable
+lifecycle are still pending. See [the fresh setup receipt](FRESH_PRIVATE_SETUP_2026-09-07.md)
+for exact public identities, image pins and validation limits. Full CI is running
+with the fork's actual `origin/ortak/main` merge base selected for the file-size gate.
+
+## Previous checkpoint — 2026-09-07, reboot and authorized fresh test setup
 
 The user restarted the Mac; `/private/tmp/ortak-private-20260905`, the Hermes
 runtime directory and temporary evidence/backups are absent afterward. Source,

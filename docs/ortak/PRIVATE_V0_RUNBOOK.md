@@ -1,5 +1,11 @@
 # Yerel Ortak kullanım notları
 
+Yeni kalıcı kurulum `~/.local/share/ortak/private-v0` altında hazırlanıyor.
+Tek yeni OAuth girişiyle Ada, Bora ve Deniz'in gerçek Sol/high bağlantı testleri
+geçti. Güncel durum ve henüz tamamlanmayan kontroller
+[temiz kurulum kaydında](FRESH_PRIVATE_SETUP_2026-09-07.md). Aşağıdaki eski
+başlatma komutları yeni kurulum için kullanılmamalı.
+
 > **7 Eylül yeniden başlatma sonrası:** Aşağıdaki `/private/tmp` tarifleri artık
 > çalıştırılmamalı; bu geçici dosyalar temizlendi. Kod ve Docker volume'ları duruyor.
 > Kullanıcı eski test kimliklerini/OAuth/verilerini yeniden oluşturmayı onayladı.
