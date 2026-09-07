@@ -741,7 +741,13 @@ mod postgres_tests {
         let mut migrations: Vec<_> = MIGRATOR.iter().collect();
         migrations.sort_by_key(|migration| migration.version);
 
-        assert_eq!(migrations.len(), 77);
+        assert_eq!(
+            migrations
+                .iter()
+                .map(|migration| migration.version)
+                .collect::<Vec<_>>(),
+            (1..=79).collect::<Vec<_>>()
+        );
         assert_eq!(migrations[0].version, 1);
         assert_eq!(&*migrations[0].description, "initial schema");
         assert!(migrations[0]
@@ -2002,9 +2008,35 @@ mod postgres_tests {
                         .to_owned();
                     surface.fence_attachments.insert(target);
                 }
+                // Migration77 attaches the employee-memory fences in a literal
+                // FOREACH loop. Read only the array belonging to the loop that
+                // actually calls the attachment function; adjacent immutable
+                // trigger loops are not fence authority.
+                if normalized.starts_with("do ") {
+                    for selected in normalized.split("foreach relation in array array[").skip(1) {
+                        let Some((targets, rest)) = selected.split_once("] loop") else {
+                            continue;
+                        };
+                        let body = rest.split("end loop").next().expect("loop body");
+                        if body.contains("perform attach_community_write_fence(relation)") {
+                            surface.fence_attachments.extend(quoted_strings(targets));
+                        }
+                    }
+                }
             }
             surface
         }
+
+        assert_eq!(
+            surface(
+                "DO $$ BEGIN FOREACH relation IN ARRAY ARRAY['fenced'] LOOP \
+                PERFORM attach_community_write_fence(relation); END LOOP; \
+                FOREACH relation IN ARRAY ARRAY['unfenced'] LOOP \
+                PERFORM other_function(relation); END LOOP; END $$;"
+            )
+            .fence_attachments,
+            BTreeSet::from(["fenced".to_owned()])
+        );
 
         let migration_0029: &str = MIGRATOR
             .iter()

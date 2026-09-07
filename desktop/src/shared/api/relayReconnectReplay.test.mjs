@@ -112,9 +112,11 @@ test("channel replay lookback stays coupled to relay and DB source constants", a
   assert.match(
     ingest,
     new RegExp(
-      `MAX_TIMESTAMP_DRIFT_SECS: i64 = ${RELAY_INGEST_FUTURE_TOLERANCE_SECS}`,
+      `CLOCK_SKEW_SECONDS: u64 = ${RELAY_INGEST_FUTURE_TOLERANCE_SECS}`,
     ),
   );
+  assert.match(ingest, /validate_event_timestamp\(&event, now\)\?/);
+  assert.match(ingest, /timestamp > now\.saturating_add\(CLOCK_SKEW_SECONDS\)/);
   assert.match(
     fence,
     new RegExp(`CREATED_AT_FLOOR_SECS: i64 = ${DB_CREATED_AT_FLOOR_SECS}`),

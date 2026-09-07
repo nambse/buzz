@@ -52,6 +52,10 @@ pub struct Draft {
 
 impl Store {
     pub(super) fn at(app_data: &Path) -> Result<Self> {
+        // macOS can supply an app-data parent through /var -> /private/var.
+        // Resolve only that caller-selected parent: the protected directory and
+        // database below it must still pass the no-symlink/ownership checks.
+        let app_data = app_data.canonicalize().map_err(|_| Error::Storage)?;
         let root = app_data.join("ortak-encrypted-dm-v1");
         #[cfg(unix)]
         {

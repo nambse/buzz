@@ -33,6 +33,11 @@ def reference(value):
     require(isinstance(value, str) and re.fullmatch('[a-z][a-z0-9+.-]*://[A-Za-z0-9][A-Za-z0-9/_.:-]{0,240}', value), 'invalid_reference')
 
 
+def profile_reference(value):
+    """Accept bounded opaque names and URI-style references used by the bridge."""
+    return isinstance(value, str) and re.fullmatch('[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}', value)
+
+
 def path(value):
     require(isinstance(value, str) and len(value) <= 1024 and ',' not in value and '\0' not in value, 'invalid_path')
     result = Path(value)
@@ -58,7 +63,7 @@ def validate(value):
     binding = value['runtime_binding']
     exact(binding, ('adapter', 'profile_ref', 'workspace_ref', 'model', 'credential_refs', 'options'))
     require(binding['adapter'] == 'hermes' and binding['workspace_ref'] == 'none', 'initial_empty_policy_profile_required')
-    require(isinstance(binding['profile_ref'], str) and re.fullmatch('[A-Za-z0-9][A-Za-z0-9._:-]{0,127}', binding['profile_ref']), 'invalid_profile_ref')
+    require(profile_reference(binding['profile_ref']), 'invalid_profile_ref')
     require(isinstance(binding['model'], str) and re.fullmatch('[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}', binding['model']), 'invalid_model')
     exact(binding['options'], ('reasoning_effort',))
     effort = binding['options']['reasoning_effort']
@@ -73,8 +78,7 @@ def validate(value):
         require(owner['format'] == 'ortak-oauth-identity/1' and owner['company_id'] == value['company_id']
                 and owner['employee_id'] != value['employee_id']
                 and owner['credential_ref'] == binding['credential_refs'][0]
-                and isinstance(owner['profile_ref'], str)
-                and re.fullmatch('[A-Za-z0-9][A-Za-z0-9._:-]{0,127}', owner['profile_ref']),
+                and profile_reference(owner['profile_ref']),
                 'invalid_shared_connection_selection')
     memory = value['memory']
     exact(memory, ('deployment_id', 'origin', 'token_ref', 'token_env', 'binding', 'creation_key',

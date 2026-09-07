@@ -17,16 +17,34 @@ new task is the sole implementation owner and continues under an active goal,
 without a deadline or token budget. The old account/login notes below are
 historical; the new shared Hermes OAuth enrollment is already ready.
 
-## Current checkpoint — 2026-09-07, persistent setup and fresh OAuth verified
+## Current checkpoint — 2026-09-07, fresh native conversation and model continuity
 
-The fresh stack now uses `/Users/nambse/.local/share/ortak/private-v0` and the
-`ortak-private-v0` Compose project. The user completed device enrollment; separate
-Ada, Bora and Deniz real Sol/high profile probes all completed through the same
-explicitly shared OAuth connection. Fresh schema79, private Office channel and
-API audience are prepared. Employee activation, native acceptance and repeatable
-lifecycle are still pending. See [the fresh setup receipt](FRESH_PRIVATE_SETUP_2026-09-07.md)
-for exact public identities, image pins and validation limits. Full CI is running
-with the fork's actual `origin/ortak/main` merge base selected for the file-size gate.
+All three fresh employees passed real runtime, signer, membership and Honcho
+write/recall gates and are active. Native Office reproduced Ada's three real
+team roles, Bora's translation without repasting, and a shorter English revision.
+A separate coffee-slogan thread was translated independently. After restarting
+the Hermes controller and central worker, Bora was updated through Employees to
+Luna/high. Returning to the first thread correctly retained and relabeled the
+three short bullets. All six accepted requests have one completed run and one
+delivered Office publication, each with one attempt. Frozen context evidence is
+in persistent `evidence/native-model-restart-and-threads.json`; no credentials
+belong in this ledger.
+
+Four selected user LaunchAgents now restart native services after login; this is
+bootstrap operation, not yet the final lifecycle interface or a completed Mac
+reboot acceptance. Current Hermes registry uses `config-v2.json` and
+`launch-argv-v2.json`; the stopped `-registry-v1` container is retained. See
+[the fresh setup receipt](FRESH_PRIVATE_SETUP_2026-09-07.md) for deployment limits.
+
+Full CI attempt04 passed workspace checks/unit tests, all6,652 desktop tests,
+desktop build and Tauri check, then found three ciphertext-store failures from
+macOS's symlinked temporary parent and the new native admission file missing
+from the identity-command inventory. Resolving only the app-data parent keeps
+protected child path checks; all four store regressions and the inventory check
+now pass. Earlier stale migration-version, community-fence parser and reconnect
+constant assertions were corrected against production paths. Full CI remains
+pending. Next: complete the required validation checkpoint, then implement
+server-selected Work source/artifact context and its revocation/retry gates.
 
 ## Previous checkpoint — 2026-09-07, reboot and authorized fresh test setup
 

@@ -376,5 +376,18 @@ subject.main(['--selection',sys.argv[1],'--action','prepare'])
         with self.assertRaises(contract.Refused): subject.plan(selected)
         self.assertFalse(self.root.exists())
 
+    def test_uri_profile_references_preserve_shared_oauth_ownership(self):
+        self.shared_selection()
+        self.selection['runtime_binding']['profile_ref'] = 'profile://private/second'
+        self.selection['oauth_owner']['profile_ref'] = 'profile://private/original'
+        self.prepared()
+        profile = contract.read(self.root / 'controller-profile.json')
+        self.assertEqual(profile['binding']['profile_ref'], 'profile://private/second')
+        self.assertEqual(profile['oauth_owner'], self.selection['oauth_owner'])
+        for invalid in ('bad profile', 'x' * 257, 'profile://private/\noriginal'):
+            self.selection['oauth_owner']['profile_ref'] = invalid
+            with self.assertRaises(contract.Refused):
+                subject.plan(self.selection)
+
 
 if __name__ == '__main__': unittest.main()

@@ -64,6 +64,30 @@ async fn durable_freeze_lost_ack_and_draft_ciphertext_use_production_store() {
 
 #[cfg(unix)]
 #[test]
+fn app_data_parent_alias_preserves_protected_store_checks() {
+    use std::os::unix::fs::symlink;
+    let dir = tempfile::tempdir().unwrap();
+    let aliases = tempfile::tempdir().unwrap();
+    let alias = aliases.path().join("app-data");
+    symlink(dir.path(), &alias).unwrap();
+    let store = Store::at(&alias).unwrap();
+    assert_eq!(
+        store.0,
+        dir.path()
+            .canonicalize()
+            .unwrap()
+            .join("ortak-encrypted-dm-v1/ciphertext.sqlite")
+    );
+    drop(store);
+    let database = dir.path().join("ortak-encrypted-dm-v1/ciphertext.sqlite");
+    let moved = dir.path().join("moved.sqlite");
+    fs::rename(&database, &moved).unwrap();
+    symlink(&moved, &database).unwrap();
+    assert!(Store::at(&alias).is_err());
+}
+
+#[cfg(unix)]
+#[test]
 fn protected_store_refuses_symlink_and_hardlinked_database() {
     use std::os::unix::fs::symlink;
     let dir = tempfile::tempdir().unwrap();

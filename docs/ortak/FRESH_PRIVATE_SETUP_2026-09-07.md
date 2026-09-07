@@ -29,19 +29,36 @@ Current verified facts:
   fresh named journal volume. Its service listens only at host127.0.0.1:8650.
   Profile probes are historical execution evidence, not permanent health grants.
 - Fresh Honcho storage and API configuration were prepared with full-text recall,
-  embeddings disabled and no deriver. Memory bootstrap and employee activation
-  are still being verified. A running container alone is not their acceptance.
+  embeddings disabled and no deriver. All three employee bootstraps passed real
+  write/recall checks and production activation gates. Docker Desktop requires
+  the additional selected API bridge for the host-published Honcho endpoint.
+- Ada and Deniz remain Sol/high. Bora was changed through the native prepared
+  employee update flow to Luna/high, revision
+  `33515e90-46ad-4d53-8d6a-78adc62e3597`. Controller registry V2 retains the old
+  Sol profile and explicitly adds this immutable Luna choice. Original enrollment
+  ownership and the one shared refresh lock remain unchanged.
+- Real native Office passed Ada→Bora translation without repasting, a shorter
+  revision, a separate slogan thread, and a return to the first thread after
+  controller/worker restart and model change. Six runs completed; six dispatch
+  and six Office publication rows were delivered once each. Frozen input and
+  outbox evidence is `evidence/native-model-restart-and-threads.json`.
 
 Operational selections are under `hermes/controller`, `honcho`, and `memory`.
 Initial model receipts are `evidence/hermes-initial-probes.jsonl`. The temporary
 operator preparation scripts there record this bootstrap; they are not yet the
-finished repeatable install/start/stop/restart interface. Native UI acceptance,
-reboot acceptance, employee activation and the remaining product goal are pending.
+finished repeatable install/start/stop/restart interface. Four `dev.ortak.private-v0`
+user LaunchAgents currently manage the relay, API, worker and management service
+with immutable copied artifacts. Full Mac reboot, backup/recovery, final rebuilt
+artifact provenance and the remaining product goal are pending. Current Hermes
+launch selection is `hermes/controller/launch-argv-v2.json`, not V1.
 
 Validation: eight production-bound control-bootstrap tests passed, including the
 selected Compose container name. Repository formatting, Clippy, desktop/web and
 mobile checks passed in the first fresh CI attempt. Its file-size gate required
 an explicit base because this fork has `origin/ortak/main`, not `origin/main`.
 The gate passed with `CHECK_FILE_SIZES_BASE` set to that branch's merge base.
-The second full `just ci` uses the same explicit base and is still running;
-no full-CI success is claimed. Logs are in the persistent `evidence` directory.
+Attempt04 passed the desktop's6,652 tests and build, then failed three protected
+store tests and the native identity-command inventory. The macOS parent-path
+fix, retained child link rejection and inventory update pass focused tests.
+Earlier migration/reconnect assertion fixes also pass. Full CI remains pending;
+logs are in the persistent `evidence` directory.
