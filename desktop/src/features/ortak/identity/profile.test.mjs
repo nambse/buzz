@@ -11,6 +11,8 @@ export async function load(url,context,nextLoad) {
  if(url.endsWith('/shared/api/tauri.ts')) return {format:'module',shortCircuit:true,source:
   "export * from "+JSON.stringify(url+'?actual')+"; export const signRelayEvent = async (event) => { globalThis.__identityFixture.signed.push(event); return {...event,id:'fixture-signature'}; }; export const getRelayHttpUrl=async()=>globalThis.__identityFixture.relay;"};
  if(url.endsWith('/app/navigation/useAppNavigation.ts')) return {format:'module',shortCircuit:true,source:'export const useAppNavigation=()=>({goAgents:()=>globalThis.__identityFixture.opened++});'};
+ if(url.endsWith('/app/AppShellContext.tsx')) return {format:'module',shortCircuit:true,source:'export const useAppShell=()=>({hasSidebarUnreadProjections:false,unreadThreadChannelIds:new Set()});'};
+ if(url.endsWith('/features/user-status/ui/UserNameIndicators.tsx')) return {format:'module',shortCircuit:true,source:'export const UserNameIndicators=()=>null;'};
  const result=await nextLoad(url,context);
  if(url.endsWith('/features/ortak/privateMode.ts')) result.source=String(result.source).replace('import.meta.env?.VITE_ORTAK_PRIVATE_MODE','"true"');
  if(url.endsWith('/features/ortak/useOrtakOrigin.ts')) result.source=String(result.source).replace('import.meta.env.VITE_ORTAK_API_BINDINGS_JSON',JSON.stringify(JSON.stringify({'http://localhost:3038':'http://127.0.0.1:8787','http://localhost:3039':'http://127.0.0.1:8788'})));
@@ -33,6 +35,11 @@ Object.assign(globalThis, {
   getComputedStyle: dom.window.getComputedStyle,
   IS_REACT_ACT_ENVIRONMENT: true,
 });
+dom.window.matchMedia = () => ({
+  matches: false,
+  addEventListener() {},
+  removeEventListener() {},
+});
 const { createElement: h } = await import("react");
 const { render, cleanup, waitFor, fireEvent } = await import(
   "@testing-library/react"
@@ -50,6 +57,11 @@ const { MessageAgentOwner } = await import(
 const { UserProfilePopover } = await import(
   "../../profile/ui/UserProfilePopover.tsx"
 );
+const { ChannelMenuButton } = await import(
+  "../../sidebar/ui/SidebarSection.tsx"
+);
+const { SidebarProvider } = await import("../../../shared/ui/sidebar.tsx");
+const { ConfidentialDm } = await import("../confidentialDm/ConfidentialDm.tsx");
 const originalFetch = globalThis.fetch;
 const key = "ab".repeat(32);
 const employee = {
@@ -70,7 +82,7 @@ function Refresh() {
   const refresh = useEmployeeDirectoryRefresh();
   return h("button", { onClick: refresh }, "Refresh identities");
 }
-function setup() {
+function setup(extra = []) {
   const state = {
     signed: [],
     opened: 0,
@@ -114,6 +126,7 @@ function setup() {
           { key: "profile", pubkey: key, triggerAriaLabel: "Open Ada" },
           "Ada profile",
         ),
+        ...extra,
       ]),
     );
   return { state, client, tree };
@@ -140,4 +153,94 @@ test("Employee profile hover and pointer/keyboard actions use the real identity 
   fireEvent.keyDown(trigger, { key: "Enter" });
   fireEvent.keyDown(trigger, { key: " " });
   assert.equal(state.opened, 4);
+});
+
+test("private DM identity fails closed without falling back to gateway Offline", async () => {
+  const channelId = "11111111-1111-4111-8111-111111111111";
+  const human = "cd".repeat(32);
+  const selected = { channelId, human, relay: "ws://localhost:3038" };
+  const native = async (command) => {
+    if (command === "encrypted_dm_close") return;
+    return {
+      scope: "selected-pair",
+      pair: {
+        channel_id: channelId,
+        human_public_key: human,
+        employee_public_key: key,
+        valid_before: new Date(Date.now() + 5000).toISOString(),
+      },
+      draft: { version: 0, text: "" },
+      pending: null,
+      retired: [],
+      messages: [],
+      limited: false,
+      withheld_count: 0,
+    };
+  };
+  const { state, tree } = setup([
+    h(
+      SidebarProvider,
+      { key: "sidebar" },
+      h(ChannelMenuButton, {
+        channel: {
+          id: channelId,
+          name: "test-dm",
+          channelType: "dm",
+          participantPubkeys: [human, key],
+        },
+        label: "Office participant",
+        isActive: true,
+        hasUnread: false,
+        // Real Ortak identities need not carry the inherited bot flag.
+        dmParticipants: [
+          {
+            pubkey: key,
+            label: "Office participant",
+            isAgent: false,
+            avatarUrl: null,
+          },
+        ],
+        presenceStatus: "offline",
+        onSelectChannel: () => {},
+      }),
+    ),
+    h(ConfidentialDm, {
+      key: "encrypted",
+      selected,
+      native,
+      employeeName: "Employee",
+    }),
+  ]);
+  const view = render(tree());
+  assert.equal(view.queryByRole("img", { name: "Offline" }), null);
+  await waitFor(() =>
+    assert.ok(
+      view.queryByRole("heading", { name: "Private conversation with Ada" }),
+    ),
+  );
+  state.denied = true;
+  fireEvent.click(view.getByRole("button", { name: "Refresh identities" }));
+  await waitFor(() =>
+    assert.ok(
+      view.queryByRole("heading", {
+        name: "Private conversation with Employee",
+      }),
+    ),
+  );
+  assert.equal(view.queryByTestId("channel-presence-test-dm"), null);
+  assert.equal(
+    view.queryByTestId(`channel-agent-provenance-${channelId}`),
+    null,
+  );
+  assert.doesNotMatch(
+    view.container.textContent,
+    /Offline|Fake inherited owner/,
+  );
+  state.denied = false;
+  fireEvent.click(view.getByRole("button", { name: "Refresh identities" }));
+  await waitFor(() =>
+    assert.ok(
+      view.queryByRole("heading", { name: "Private conversation with Ada" }),
+    ),
+  );
 });

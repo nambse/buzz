@@ -269,8 +269,9 @@ export function ChannelMenuButton({
   const participant =
     dmParticipants?.length === 1 ? dmParticipants[0] : undefined;
   const employee = useOfficeEmployee(participant?.pubkey);
-  const employeeSurface =
-    employee !== null || (privateOrtakMode && participant?.isAgent === true);
+  // Missing directory metadata cannot turn gateway presence into Employee health.
+  // In private Office, only the authorized Employee record supplies that status.
+  const employeeSurface = employee !== null || privateOrtakMode;
   const resolvedLabel = employee?.employee.name ?? label ?? channel.name;
   const ephemeralDisplay = getEphemeralChannelDisplay(channel);
   const { hasSidebarUnreadProjections, unreadThreadChannelIds } = useAppShell();

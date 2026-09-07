@@ -12,13 +12,15 @@ ecd9c1b). Context79 is pushed in993dc9d, deployed with verified installed artifa
 actual native Ada→Bora translation passed without a re-paste. Disposable schema
 parity passed; live services now use79.
 
-Current remaining gates: bounded authorized
-conversation/team/thread/Work context and Ada→Bora acceptance; conversational
-Work/artifact revision flow; truthful Employee identity and availability;
-repeatable service lifecycle and durable state location; changed-schema
-install/recovery validation; required integration and full CI; final GitHub
-review link and Turkish operating notes. Existing schema78 and single-turn
-acceptance do not close these conversation gates.
+Current remaining gates: install the final native identity corrections; complete
+final source CI and required integration checks; capture/verify the current
+populated stack including Files, mixed memory and encrypted DM; provide the
+GitHub draft review link and updated Turkish operating notes. Actual context79,
+Work80 revision, semantic zero/one/two, Files80, project and mixed-memory
+publication/use/Stop, encrypted80, Activity cancellation and persistent lifecycle
+acceptance are recorded in the current ledger. Full Mac reboot and activation
+of a restored runtime are distinct unproven boundaries; previous offline-store
+restore and service restart do not establish them.
 
 This is the dependency-ordered working plan. It supersedes stale per-milestone
 implementation notes, not [Architecture v0](ARCHITECTURE_V0.md) or its acceptance

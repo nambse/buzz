@@ -1,5 +1,6 @@
 import type { NativeDm } from "./types";
 import { useConfidentialDm } from "./useConfidentialDm";
+import { useOfficeEmployee } from "../identity/EmployeeDirectoryProvider";
 
 /** Root mounts this instead of the ordinary composer/timeline for an explicitly
  * selected encrypted pair. The component itself never enables that selection. */
@@ -13,6 +14,8 @@ export function ConfidentialDm({
   native?: NativeDm;
 }) {
   const dm = useConfidentialDm(selected, native);
+  const employee = useOfficeEmployee(dm.view?.pair.employee_public_key);
+  const displayedName = employee?.employee.name ?? employeeName;
   const pending = dm.view?.pending;
   return (
     <section
@@ -21,7 +24,7 @@ export function ConfidentialDm({
     >
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-base font-semibold">
-          Private conversation with {employeeName}
+          Private conversation with {displayedName}
         </h2>
         <button
           type="button"
@@ -60,7 +63,7 @@ export function ConfidentialDm({
             {dm.view.messages.map((message) => (
               <li key={message.rumor_id} className="space-y-1">
                 <p className="text-xs font-medium">
-                  {message.sender === selected?.human ? "You" : employeeName}
+                  {message.sender === selected?.human ? "You" : displayedName}
                 </p>
                 <p className="whitespace-pre-wrap break-words text-message">
                   {message.text}

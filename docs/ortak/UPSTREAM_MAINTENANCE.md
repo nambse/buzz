@@ -483,3 +483,16 @@ verified; archive SHA-256 is76b99a8be9b77d66833c3cfe2b35c6d6f6a58e4ff9637ef8effc
 Persistent metadata receipt: `evidence/upstream-work-context80.json` in the fresh
 private state directory. Work80 worker/controller build and deployment receipts
 are separate; an observed head does not select it for the runtime.
+
+### Files80 selection checkpoint, 2026-09-07 04:59 UTC
+
+The three official commit endpoints still report the same observed heads:
+Hermes693641aa8b4359c602283bdbbc14041e03bc47bc, Buzz3c7f288c60d67df78577b237e27c3dfc8831aaa1,
+and Honchobe54355545b64ddb10203829d323861f52423685. No new delta appeared since
+the bounded review above. Retain the reviewed pinned runtime; no import or image
+change accompanies this selected input grant. Its real installed workspace gate
+has already passed complete/cancel/refusal/forged-policy cases through the pinned
+SDK/HTTPX and central reader boundary. The custom tool does not enable upstream
+filesystem discovery, gateway tools, generic tool-result names or session-reset
+behavior. Fresh live Work/file acceptance is separate from those installed tests.
+Metadata receipt: `evidence/upstream-files80-checkpoint.json` in the private root.

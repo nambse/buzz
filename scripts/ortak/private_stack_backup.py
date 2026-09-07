@@ -25,7 +25,7 @@ VOLUMES = {"main": "postgres-1", "redis": "redis-1", "minio": "minio-1",
 LIMIT = 2 * 1024**3
 PRIVATE = (".ortak-private-stack.json", "compose.env", "runtime.env", "identities.json",
            "api-config.json", "worker-config.json", "prepared-catalog.json", "employees",
-           "hermes", "honcho", "memory", "object-store", "secrets", "lifecycle", "bin")
+           "hermes", "honcho", "memory", "object-store", "secrets", "workspaces", "lifecycle", "bin")
 
 
 class BackupCommands(Commands):

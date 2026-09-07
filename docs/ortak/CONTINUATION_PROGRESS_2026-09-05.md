@@ -17,7 +17,71 @@ new task is the sole implementation owner and continues under an active goal,
 without a deadline or token budget. The old account/login notes below are
 historical; the new shared Hermes OAuth enrollment is already ready.
 
-## Current checkpoint — 2026-09-07, semantic80 native acceptance and CI
+## Current checkpoint — 2026-09-07, Files80 accepted and ordinary Office restored
+
+Native Work417f1636-99c6-439f-96c9-47148c29bb30 completed at version9 after
+operator review of its saved text artifact and both pending criteria. Run
+20f4cd0f-b5de-4ed4-bf07-5ab4de839db4 used the actual installed
+`read_workspace_text` tool exactly once, reading227 bytes from the selected
+file87d466f3-092e-42d2-90ec-17495983f27a. The fresh answer marker was absent
+from the Work request and returned exactly from that file. Artifact
+2a432185-6c9e-4e5c-9eb0-cb5706e1ec86 contains the marker and two correct
+Turkish summary sentences. Tool delivery and artifact materialization each
+completed on attempt1; both retained reader processes have reaped stop proof.
+Evidence: `evidence/native-files80-acceptance.json` in the private root.
+
+The Files revision kept Office routing disabled. Explicit Ada message807db475…38d1d
+recorded `routing_disabled`, zero wakes. After draining and stopping all selected
+resources, the same retained config-v4 controller f51cf4b…41ba2 was reselected;
+the Files controller930369f4…1e6f remains stopped as `ortak-private-v0-hermes-files80`.
+No new image or data volume was created for the return. Ada's normal F2 update
+passed on attempt1 with its real connection probe completed and stopped. Current
+revision d2c46295-3235-4d2b-86e5-25896b964a97 has empty tool/workspace/network
+permissions, workspace `none`, and Office routing enabled. Fresh cohort
+7ed58f50-c09e-4deb-999e-b59cf8a7a0ad reconciled Office23/0 scanned/inserted
+and the encrypted DM0/0 before enable. The selected workspace roots, binding,
+immutable input and sealed run copy remain retained for recovery. The current
+backup source includes `workspaces`; its frozen launcher upgrade is still pending.
+
+Two source UI corrections address the observed restart behavior: private DM
+rows no longer substitute gateway presence when Employee metadata is unavailable,
+and the encrypted view resolves its displayed name by the native pair's exact
+Employee key through the authorized directory. A production component test
+exercises initial absence, forbidden refresh and recovery without retaining
+unauthorized names. Focused identity/composer tests and TypeScript pass; these
+changes are not yet in the installed688997b bundle.
+
+Fresh mixed-memory acceptance now passes as well. The existing operator has
+explicit employee-memory review access. Ada's original owned Honcho namespace
+was inspected and its bounded diagnostic cleaned before target22588134-e237-4870-875e-e1683944adc6
+registration, with fixed expiry2026-09-14T05:22:50.415781Z. The worker explicitly
+selects that target for the Office channel; the operator configuration/receipt
+and immutable example binary are retained outside Git. No OAuth reenrollment or
+new employee namespace was needed.
+
+Native separate editing/approval/publication produced conversation fact
+84f74b65-a066-4354-9b92-36ea36296c3f (only thread807db475…38d1d) and employee
+experience fact3e68d1c5-8396-4e16-9871-8b8c66ff7618 (Ada in Office). Both
+had the chosen09:30UTC expiry, independently of the seven-day target.
+Run69a3126f-a26b-468f-be0c-c87e86877896 received only the two lookup names in
+its human request, then returned both fresh answer markers exactly. Its frozen
+mixed snapshot includes employee ordinal0 and conversation ordinal1; Activity
+displayed each original audience/approval. One dispatch and one Office publication
+were ACKed on attempt1. Native Stop then revoked both at version2; both remote
+withdrawals were ACKed on attempt1. Honcho retains one header and tombstone and
+zero content rows for each. Reloaded Activity withholds fact and scratch note
+text while preserving use receipts. The frozen hash be6fcd36…b2c82 is unchanged;
+the already delivered reply is not retracted. Evidence: `native-mixed-memory80-*`.
+
+Native Activity cancellation also passed: runf2eed219-e5f1-4a9f-a7c4-8a12b0b246d8
+was running when Cancel run was clicked, displayed requested before confirmed,
+then terminal `cancelled` with `human_requested` ACK on attempt1. No Office
+publication was created. Evidence: `native-cancel80-acceptance.json`.
+
+Next: current native package, final integration/CI, backup and draft PR. Full Mac
+reboot and active cloned-runtime recovery remain distinct unproven boundaries.
+
+## Previous checkpoint — 2026-09-07, semantic80 native acceptance and CI
 
 Persistent native opening is signed and pushed at f09ff49. `just ci` started from
 that source and completed successfully: desktop6654, mobile2072, workspace/Tauri
