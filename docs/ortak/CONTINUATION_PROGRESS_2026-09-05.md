@@ -57,9 +57,10 @@ and six nonignored cases filtered by `--ignored` (the ordinary lane is covered
 separately). This replaces the earlier partial145-case evidence. Evidence:
 `evidence/final-330991b-{integration,authenticated-api}.{json,log}`.
 
-Next: signed operating-note checkpoint and draft review PR, then user-controlled
-Mac reboot acceptance. All source changes after330991b in this checkpoint are
-documentation only. Active cloned-runtime activation is not established by the
+Signed operating-note checkpoint f3985cb is pushed. The open
+[draft review PR #1](https://github.com/nambse/buzz/pull/1) targets `ortak/main`;
+it is not merged or released. All source changes after330991b in this checkpoint
+are documentation only. The remaining acceptance is a user-controlled Mac reboot. Active cloned-runtime activation is not established by the
 offline restore and is not silently claimed. The actual reboot acceptance needs
 a new boot time, the permanent launcher after Docker Desktop starts, preserved
 identity/Work/artifacts/encrypted history and no duplicate delivery. Do not

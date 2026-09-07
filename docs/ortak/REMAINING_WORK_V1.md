@@ -12,8 +12,9 @@ ecd9c1b). Context79 is pushed in993dc9d, deployed with verified installed artifa
 actual native Ada→Bora translation passed without a re-paste. Disposable schema
 parity passed; the current deployed schema is80, including Work references.
 
-Current remaining gates: provide the signed GitHub draft review link and complete
-a user-controlled Mac reboot acceptance. Final330991b `just ci`, `just test` and
+Current remaining gate: user-controlled Mac reboot acceptance. Signed operating
+notes are pushed and [draft PR #1](https://github.com/nambse/buzz/pull/1) is open
+against `ortak/main`; it is not merged or released. Final330991b `just ci`, `just test` and
 the147-case encrypted-feature signed API suite passed. Native330991b
 identity/reconnect corrections are installed.
 The current populated stack, including Files, mixed memory, encrypted DM and the
