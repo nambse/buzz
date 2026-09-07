@@ -1,3 +1,4 @@
+import { useEmployeeDirectoryRefresh } from "./identity/EmployeeDirectoryProvider";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { signRelayEvent } from "@/shared/api/tauri";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
@@ -49,6 +50,7 @@ export function OrtakScreen({
   const [workOpened, setWorkOpened] = useState(Boolean(initialWork));
   const [accessRevoked, setAccessRevoked] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const refreshDirectory = useEmployeeDirectoryRefresh();
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     // Refresh intentionally retries this page after the automatic retry budget.
@@ -138,7 +140,10 @@ export function OrtakScreen({
         <Button
           variant="outline"
           size="sm"
-          onClick={() => setRefresh((value) => value + 1)}
+          onClick={() => {
+            refreshDirectory();
+            setRefresh((value) => value + 1);
+          }}
         >
           Refresh
         </Button>

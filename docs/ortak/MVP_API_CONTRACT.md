@@ -68,7 +68,7 @@ All endpoints require fresh signed authentication. Responses are `no-store`.
 
 | Method / path | Result |
 | --- | --- |
-| `GET /api/v1/employees?after=<employee_id>&limit=25` | Granted durable directory, ordered by ID, `next_after` and `has_more`. |
+| `GET /api/v1/employees?after=<employee_id>&limit=25` | Granted durable directory, ordered by ID, `next_after` and `has_more`. Each entry includes up to32 verified `office_public_keys`, including retired keys for stable historical authorship; these identify an Employee, not signer validity or runtime presence. |
 | `GET /api/v1/employees/{id}` | Directory entry and newest visible nonterminal run, plus whether others exist. Runtime health is explicitly `not_probed`; permission enforcement is `not_verified_by_api`. |
 | `GET /api/v1/runs?employee_id=<id>&status=<status>&cursor=<cursor>&limit=25` | Existing Activity `RunListPage`, filtered before keyset paging. |
 | `GET /api/v1/runs/{id}` | `{detail: RunDetail, cancellation: null | Cancellation, can_request_cancel: boolean, office_delivery: null | OfficeDelivery, memory: RunMemory}` from durable Activity, delivery and request records. |

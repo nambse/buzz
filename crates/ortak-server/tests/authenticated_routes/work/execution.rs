@@ -239,8 +239,25 @@ async fn shared_work_runtime_saves_one_verified_artifact_and_review_and_streams_
     );
     let counts:(i64,i64,i64)=sqlx::query_as("SELECT (SELECT count(*) FROM artifacts WHERE company_id=$1),(SELECT count(*) FROM runtime_office_outputs WHERE company_id=$1),(SELECT count(*) FROM runtime_memory_writes WHERE company_id=$1)").bind(f.company).fetch_one(&f.pool).await.unwrap();
     assert_eq!(counts, (1, 0, 0));
-    sqlx::query("UPDATE project_access_grants SET revoked_at=now() WHERE company_id=$1 AND project_id=$2 AND actor_pubkey=$3")
-        .bind(f.company).bind(project).bind(f.operator.public_key().to_hex()).execute(&f.pool).await.unwrap();
+    // A fresh stream projection may still hold its short shared authority fence.
+    // The real grant guard deliberately rejects that race with NOWAIT; retry
+    // only that transient conflict, then assert the stream's post-commit fence.
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let result = sqlx::query("UPDATE project_access_grants SET revoked_at=now() WHERE company_id=$1 AND project_id=$2 AND actor_pubkey=$3")
+                .bind(f.company).bind(project).bind(f.operator.public_key().to_hex()).execute(&f.pool).await;
+            match result {
+                Ok(result) => {
+                    assert_eq!(result.rows_affected(), 1);
+                    break;
+                }
+                Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some("55P03") => {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Err(error) => panic!("project revocation failed: {error}"),
+            }
+        }
+    }).await.expect("project revocation must acquire its authority fence within three seconds");
     let mut revoked = frame(&mut stream).await;
     if revoked.contains("event: activity") {
         // The producer has exactly one buffered slot. A snapshot authorized

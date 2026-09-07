@@ -1,3 +1,4 @@
+import { EmployeeDirectoryProvider } from "@/features/ortak/identity/EmployeeDirectoryProvider";
 import { isTauri } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -345,7 +346,9 @@ function AppReady({
       }
     >
       <KnownAgentPubkeysProvider>
-        <RouterProvider router={router} />
+        <EmployeeDirectoryProvider>
+          <RouterProvider router={router} />
+        </EmployeeDirectoryProvider>
       </KnownAgentPubkeysProvider>
     </EncryptedBackupProvider>
   );

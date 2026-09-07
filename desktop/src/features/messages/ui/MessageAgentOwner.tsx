@@ -1,14 +1,19 @@
+import { EmployeeIdentityBadge } from "@/features/ortak/identity/EmployeeIdentityBadge";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 import { Bot } from "lucide-react";
 
 import { UserProfilePopover } from "@/features/profile/ui/UserProfilePopover";
 
 export function MessageAgentOwner({
+  pubkey,
   ownerLabel,
   ownerPubkey,
 }: {
+  pubkey?: string | null;
   ownerLabel?: string | null;
   ownerPubkey?: string | null;
 }) {
+  if (privateOrtakMode) return <EmployeeIdentityBadge pubkey={pubkey} />;
   return (
     <span
       className="inline-flex min-w-0 max-w-56 items-baseline gap-1 text-xs leading-4 text-muted-foreground/65"

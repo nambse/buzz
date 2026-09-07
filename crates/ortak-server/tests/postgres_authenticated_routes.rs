@@ -556,3 +556,61 @@ mod employee_memory;
 #[cfg(feature = "encrypted-dm")]
 #[path = "authenticated_routes/encrypted_dm.rs"]
 mod encrypted_dm;
+
+#[tokio::test]
+#[ignore = "requires explicit disposable PostgreSQL"]
+async fn employee_identity_is_verified_scoped_and_survives_key_retirement() {
+    let f = Fixture::new().await;
+    let key = Keys::generate().public_key();
+    let binding = Uuid::new_v4();
+    sqlx::query("INSERT INTO employee_office_bindings(company_id,id,employee_id,revision_id,provisioning_mode,public_key,signer_ref) VALUES($1,$2,'cem',$3,'create',$4,'secret://fixture/employee')")
+        .bind(f.company).bind(binding).bind(f.revision).bind(key.to_bytes().as_slice())
+        .execute(&f.pool).await.unwrap();
+    let (_, page) = response(
+        &f.app,
+        signed(&f.operator, "GET", "/api/v1/employees", "", false),
+    )
+    .await;
+    assert_eq!(page["employees"][0]["office_public_keys"], json!([]));
+    sqlx::query("UPDATE employee_office_bindings SET verified_at=clock_timestamp() WHERE company_id=$1 AND id=$2")
+        .bind(f.company).bind(binding).execute(&f.pool).await.unwrap();
+    for retired in [false, true] {
+        if retired {
+            sqlx::query("UPDATE employee_office_bindings SET valid_until=clock_timestamp() WHERE company_id=$1 AND id=$2")
+                .bind(f.company).bind(binding).execute(&f.pool).await.unwrap();
+        }
+        let (_, page) = response(
+            &f.app,
+            signed(&f.reader, "GET", "/api/v1/employees", "", false),
+        )
+        .await;
+        assert_eq!(
+            page["employees"][0]["office_public_keys"],
+            json!([key.to_hex()])
+        );
+        let (_, detail) = response(
+            &f.app,
+            signed(&f.reader, "GET", "/api/v1/employees/cem", "", false),
+        )
+        .await;
+        assert_eq!(
+            detail["employee"]["office_public_keys"],
+            json!([key.to_hex()])
+        );
+        assert_eq!(detail["runtime_health"], "not_probed");
+    }
+    sqlx::query(
+        "UPDATE employee_office_bindings SET verified_at=NULL WHERE company_id=$1 AND id=$2",
+    )
+    .bind(f.company)
+    .bind(binding)
+    .execute(&f.pool)
+    .await
+    .unwrap();
+    let (_, page) = response(
+        &f.app,
+        signed(&f.reader, "GET", "/api/v1/employees", "", false),
+    )
+    .await;
+    assert_eq!(page["employees"][0]["office_public_keys"], json!([]));
+}

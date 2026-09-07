@@ -1,3 +1,7 @@
+import { useOfficeEmployee } from "@/features/ortak/identity/EmployeeDirectoryProvider";
+import type { OfficeEmployee } from "@/features/ortak/identity/directory";
+import { EmployeeHoverCard } from "@/features/ortak/identity/EmployeeHoverCard";
+import { useAppNavigation } from "@/app/navigation/useAppNavigation";
 import * as React from "react";
 import { Activity, Headphones, MessageSquare } from "lucide-react";
 
@@ -125,7 +129,23 @@ function StatusLine({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function UserProfilePopover({
+export function UserProfilePopover(props: UserProfilePopoverProps) {
+  const employee = useOfficeEmployee(props.pubkey);
+  return employee ? (
+    <EmployeeProfilePopover {...props} employee={employee} />
+  ) : (
+    <ProfilePopoverShell {...props} />
+  );
+}
+
+function EmployeeProfilePopover(
+  props: UserProfilePopoverProps & { employee: OfficeEmployee },
+) {
+  const { goAgents } = useAppNavigation();
+  return <ProfilePopoverShell {...props} onOpenEmployee={goAgents} />;
+}
+
+function ProfilePopoverShell({
   children,
   pubkey,
   triggerElement = "div",
@@ -134,13 +154,23 @@ export function UserProfilePopover({
   enableHoverPopover = true,
   role,
   botIdenticonValue,
-}: UserProfilePopoverProps) {
+  employee,
+  onOpenEmployee,
+}: UserProfilePopoverProps & {
+  employee?: OfficeEmployee;
+  onOpenEmployee?: () => void;
+}) {
   const [open, setOpen] = React.useState(false);
   const hoverTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
   const { openProfilePanel } = useProfilePanel();
-  const canOpenProfilePanel = enableProfilePanel && Boolean(openProfilePanel);
+  const canOpenProfilePanel =
+    enableProfilePanel && Boolean(onOpenEmployee || openProfilePanel);
+  const openProfile = React.useCallback(() => {
+    if (onOpenEmployee) onOpenEmployee();
+    else openProfilePanel?.(pubkey);
+  }, [onOpenEmployee, openProfilePanel, pubkey]);
 
   const clearHoverTimer = React.useCallback(() => {
     if (hoverTimerRef.current !== null) {
@@ -173,14 +203,14 @@ export function UserProfilePopover({
   const handleTriggerClick = React.useCallback(
     (event: React.MouseEvent) => {
       clearHoverTimer();
-      if (canOpenProfilePanel && openProfilePanel) {
+      if (canOpenProfilePanel) {
         event.preventDefault();
         event.stopPropagation();
         setOpen(false);
-        openProfilePanel(pubkey);
+        openProfile();
       }
     },
-    [canOpenProfilePanel, clearHoverTimer, openProfilePanel, pubkey],
+    [canOpenProfilePanel, clearHoverTimer, openProfile],
   );
 
   React.useEffect(() => {
@@ -197,16 +227,12 @@ export function UserProfilePopover({
           tabIndex={canOpenProfilePanel ? 0 : undefined}
           onClick={handleTriggerClick}
           onKeyDown={(e) => {
-            if (
-              (e.key === "Enter" || e.key === " ") &&
-              canOpenProfilePanel &&
-              openProfilePanel
-            ) {
+            if ((e.key === "Enter" || e.key === " ") && canOpenProfilePanel) {
               e.preventDefault();
               e.stopPropagation();
               clearHoverTimer();
               setOpen(false);
-              openProfilePanel(pubkey);
+              openProfile();
             }
           }}
           onMouseEnter={handleTriggerMouseEnter}
@@ -219,7 +245,15 @@ export function UserProfilePopover({
           {children}
         </TriggerElement>
       </PopoverAnchor>
-      {open ? (
+      {open && employee ? (
+        <EmployeeHoverCard
+          employee={employee}
+          pubkey={pubkey}
+          onMouseEnter={handleContentMouseEnter}
+          onMouseLeave={handleMouseLeave}
+          onOpen={canOpenProfilePanel ? handleTriggerClick : undefined}
+        />
+      ) : open ? (
         <UserProfilePopoverBody
           botIdenticonValue={botIdenticonValue}
           canOpenProfilePanel={canOpenProfilePanel}

@@ -17,7 +17,27 @@ new task is the sole implementation owner and continues under an active goal,
 without a deadline or token budget. The old account/login notes below are
 historical; the new shared Hermes OAuth enrollment is already ready.
 
-## Current checkpoint — 2026-09-07, context79 deployed and native Ada→Bora passed
+## Current source checkpoint — 2026-09-07, Employee Office identity
+
+The signed Employee API now projects bounded verified Office public keys,
+including retired keys for historical identity. The desktop resolves Employee
+labels from that authorized directory, clears them on failed authorization or
+community changes, and uses saved Employee state or visible active run state
+without claiming provider presence. Message ownership, DM sidebar and profile
+hover/click/keyboard paths use the Employee surface. Existing Employees Refresh
+also retries a failed directory request.
+
+Seven production-bound identity/profile tests pass, plus the existing sidebar
+and system-message tests (25 tests before adding the seventh identity test).
+Scoped Biome and TypeScript checks pass. Disposable authenticated API suite:
+140/141 passed; its Work stream revocation fixture raced the production NOWAIT
+project fence. A bounded retry of only SQLSTATE55P03 fixes that fixture and the
+isolated test passes, including the post-revocation stream closure. The new
+verified/retired/unverified identity API test also passes on the final source.
+Repository-wide Rust formatting still has inherited differences; final CI is
+pending. These source changes are not yet deployed to the native app/API.
+
+## Current deployment — 2026-09-07, context79 and native Ada→Bora passed
 
 DCO commit `993dc9d` is pushed. Immutable backend79, worker
 `sha256:ce23f9f95b9573cacc4eaf855e9826161bc725ac9ee8ccdf44f69df823b1e9f3`,

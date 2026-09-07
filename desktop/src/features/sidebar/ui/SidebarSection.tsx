@@ -1,3 +1,6 @@
+import { useOfficeEmployee } from "@/features/ortak/identity/EmployeeDirectoryProvider";
+import { EmployeeIdentityBadge } from "@/features/ortak/identity/EmployeeIdentityBadge";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 import type * as React from "react";
 import { BellOff, ChevronDown, CircleDot, X } from "lucide-react";
 
@@ -263,7 +266,12 @@ export function ChannelMenuButton({
   presenceStatus?: PresenceStatus;
   onSelectChannel: (channelId: string) => void;
 }) {
-  const resolvedLabel = label ?? channel.name;
+  const participant =
+    dmParticipants?.length === 1 ? dmParticipants[0] : undefined;
+  const employee = useOfficeEmployee(participant?.pubkey);
+  const employeeSurface =
+    employee !== null || (privateOrtakMode && participant?.isAgent === true);
+  const resolvedLabel = employee?.employee.name ?? label ?? channel.name;
   const ephemeralDisplay = getEphemeralChannelDisplay(channel);
   const { hasSidebarUnreadProjections, unreadThreadChannelIds } = useAppShell();
   const hasThreadUnread =
@@ -305,7 +313,7 @@ export function ChannelMenuButton({
           channel.channelType === "dm" ? undefined : inactiveContentOpacity
         }
         dmParticipants={dmParticipants}
-        presenceStatus={presenceStatus}
+        presenceStatus={employeeSurface ? undefined : presenceStatus}
       />
       <span
         className={cn(
@@ -325,6 +333,9 @@ export function ChannelMenuButton({
           />
         ) : null}
       </span>
+      {employee ? (
+        <EmployeeIdentityBadge pubkey={participant?.pubkey} showState />
+      ) : null}
       {showsEphemeralBadge && ephemeralDisplay ? (
         <EphemeralChannelBadge
           display={ephemeralDisplay}
@@ -332,7 +343,9 @@ export function ChannelMenuButton({
           variant="sidebar"
         />
       ) : null}
-      {channel.channelType === "dm" && dmParticipants?.length === 1 ? (
+      {channel.channelType === "dm" &&
+      dmParticipants?.length === 1 &&
+      !employeeSurface ? (
         <AgentManagementMarker
           pubkey={dmParticipants[0].pubkey}
           testId={`channel-agent-provenance-${channel.id}`}

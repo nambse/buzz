@@ -9,6 +9,8 @@ export type RunStatus =
   | "failed"
   | "cancelled";
 export type Employee = {
+  /** Verified Office identities, including retired signing keys; never presence. */
+  office_public_keys?: string[];
   employee_id: string;
   name: string | null;
   title: string | null;

@@ -34,7 +34,12 @@ pub(crate) async fn list(
         .collect::<Vec<_>>();
     let limit = query.limit.unwrap_or(25).clamp(1, 25);
     let rows = sqlx::query("SELECT e.id, e.status, e.active_revision_id,
-            r.manifest->>'name' AS name, r.manifest->>'title' AS title
+            r.manifest->>'name' AS name, r.manifest->>'title' AS title,
+            (SELECT coalesce(jsonb_agg(keys.public_key ORDER BY keys.public_key),'[]'::jsonb) FROM (
+                SELECT encode(b.public_key,'hex') AS public_key FROM employee_office_bindings b
+                WHERE b.company_id=e.company_id AND b.employee_id=e.id AND b.verified_at IS NOT NULL
+                ORDER BY b.created_at DESC,b.id DESC LIMIT 32
+            ) keys) AS office_public_keys
           FROM employees e LEFT JOIN employee_revisions r ON r.company_id = e.company_id AND r.id = e.active_revision_id
           WHERE e.company_id = $1 AND e.id = ANY($2) AND ($3::text IS NULL OR e.id > $3)
           ORDER BY e.id LIMIT $4")
@@ -70,7 +75,12 @@ pub(crate) async fn detail(
         return Err(ApiError::not_found());
     }
     let row = sqlx::query("SELECT e.id, e.status, e.active_revision_id,
-            r.manifest->>'name' AS name, r.manifest->>'title' AS title
+            r.manifest->>'name' AS name, r.manifest->>'title' AS title,
+            (SELECT coalesce(jsonb_agg(keys.public_key ORDER BY keys.public_key),'[]'::jsonb) FROM (
+                SELECT encode(b.public_key,'hex') AS public_key FROM employee_office_bindings b
+                WHERE b.company_id=e.company_id AND b.employee_id=e.id AND b.verified_at IS NOT NULL
+                ORDER BY b.created_at DESC,b.id DESC LIMIT 32
+            ) keys) AS office_public_keys
           FROM employees e LEFT JOIN employee_revisions r ON r.company_id = e.company_id AND r.id = e.active_revision_id
           WHERE e.company_id = $1 AND e.id = $2")
         .bind(principal.scope.company_id()).bind(employee_id.as_str())
@@ -105,8 +115,9 @@ fn employee_json(row: &sqlx::postgres::PgRow) -> Result<serde_json::Value> {
     let name: Option<String> = row.try_get("name")?;
     let title: Option<String> = row.try_get("title")?;
     let revision: Option<Uuid> = row.try_get("active_revision_id")?;
+    let office_public_keys: serde_json::Value = row.try_get("office_public_keys")?;
     Ok(
         serde_json::json!({"employee_id": id, "name": name.map(|v| bound_row_text(&v, 128)),
-        "title": title.map(|v| bound_row_text(&v, 256)), "status": status, "active_revision_id": revision}),
+        "title": title.map(|v| bound_row_text(&v, 256)), "status": status, "active_revision_id": revision, "office_public_keys": office_public_keys}),
     )
 }
