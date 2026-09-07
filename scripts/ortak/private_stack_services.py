@@ -164,7 +164,7 @@ def start(installation):
     return {"state": "running", "new_resources": False, "provider_health": "not_probed"}
 
 
-def stop(installation):
+def stop(installation, *, before_stores=None):
     """Close ingress, drain bounded obligations, then stop owned compute and stores."""
     states = installation.verify()
     for name in SERVICES:
@@ -189,6 +189,8 @@ def stop(installation):
     running = docker("ps", "-q", "--filter", f"label=org.ortak.company={company}",
                      "--filter", "label=org.ortak.start_key", maximum=8192)[1]
     require(not running.strip())
+    if before_stores is not None:
+        before_stores()
     installation.record("stop", "stopping_stores")
     for name in reversed(CONTAINERS):
         if states[name]["Running"]:

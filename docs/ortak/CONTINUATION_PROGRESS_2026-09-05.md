@@ -62,8 +62,27 @@ pass. The current native bundle still needs this small UI fix rebuilt.
 See [persistent operations](PERSISTENT_PRIVATE_OPERATIONS.md); evidence is under
 `evidence/lifecycle-*` in the private root.
 
-Next: complete schema80 backup/recovery and the remaining fresh selected feature
-gates, then final source/build/CI/PR validation and native refresh fix deployment.
+Recovery80 is now implemented and exercised in separate commands behind the
+same installed CLI. Backup `8bfe40a32533441bad311de811fd24e9` includes five cold
+volumes, selected private/app state, immutable native artifacts and seven image
+exports. Restore `12b55f9d120c4d25b95ea5ca0ec1dd35` created new labeled offline
+targets; main156 and Honcho26 tables matched all logical row/catalog/sequence
+hashes after actual database startup. Both verification DBs are retained stopped.
+The five trees matched exact files/metadata; image gzip validation and Docker
+load passed, and configuration/native archives were restored inertly. The
+restored journal passed SQLite integrity and FK checks (17 runs include7 profile
+probes). An initial read-only SQLite probe needed a WAL/SHM working directory;
+inspection now uses a bounded private temporary copy, keeping the restored
+source read-only, with a committed-WAL regression. All23 lifecycle/archive/scope/
+journal tests pass, including stopping the exact restored database after a failed
+metadata comparison. Main source services reopened without new identities or
+containers. Native app was closed normally for capture and remains closed.
+This proves offline recovery80, not active cloned-controller activation, an
+automatic source replacement, independent-machine recovery or full Mac reboot.
+
+Next: map and finish remaining fresh selected feature gates (semantic routing,
+reviewed memory, workspace and the fresh encrypted-DM selection), deploy the
+native refresh fix in the final artifact, then final source/build/CI/PR checks.
 The general v0 goal remains active; this completes its conversational Work gate.
 
 ## Previous checkpoint — 2026-09-07, fresh native conversation and model continuity
