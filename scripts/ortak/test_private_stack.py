@@ -121,6 +121,35 @@ class PrivateStackTests(unittest.TestCase):
             self.assertEqual(json.loads(path.read_text()), {"phase": "stopping_stores"})
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
+    def test_scorer_failed_credential_owner_join_keeps_other_stores_running(self):
+        installation = Mock()
+        states = {"postgres-1": {"Running": False}, "hermes": {"Running": True},
+                  "semantic": {"Running": True}}
+        installation.manifest = {"company_id": "company", "containers": {
+            name: {"id": name + "-owned"} for name in states}}
+        failed = {**states, "semantic": {"Running": False, "ExitCode": 137, "OOMKilled": False}}
+        installation.verify.side_effect = [states, states, failed]
+        with patch.object(services, "job"), patch.object(services, "unboot"), \
+                patch.object(services, "docker", return_value=(0, "")) as docker:
+            with self.assertRaises(ValueError):
+                services.stop(installation)
+        stops = [call for call in docker.call_args_list if call.args[0] == "stop"]
+        self.assertEqual(len(stops), 1)
+        self.assertEqual(stops[0].args, ("stop", "--time", "45", "semantic-owned"))
+
+    def test_scorer_contract_preserves_shutdown_and_resource_limits(self):
+        row = {"Id": "scorer", "Name": "/selected", "Image": "image", "Mounts": [],
+               "Config": {"Labels": {"org.ortak.role": "semantic-scorer"}, "User": "10001:10001",
+                          "Entrypoint": ["python"], "Cmd": [], "StopTimeout": 45},
+               "HostConfig": {"PortBindings": {}, "RestartPolicy": {}, "Memory": 512},
+               "NetworkSettings": {"Networks": {}}}
+        original = state.container_contract(row)
+        row["Config"]["StopTimeout"] = 10
+        self.assertNotEqual(original, state.container_contract(row))
+        row["Config"]["StopTimeout"] = 45
+        row["HostConfig"]["Memory"] = 0
+        self.assertNotEqual(original, state.container_contract(row))
+
 
 if __name__ == "__main__":
     unittest.main()

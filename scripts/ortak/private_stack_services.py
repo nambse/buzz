@@ -10,7 +10,7 @@ import time
 
 from private_native_services import private_file
 from private_stack_install import plist_path
-from private_stack_state import CONTAINERS, SERVICES, command, docker, require
+from private_stack_state import CONTAINERS, OPTIONAL_CONTAINERS, SERVICES, command, docker, require
 
 DOMAIN = f"gui/{os.getuid()}"
 ENDPOINTS = (("relay", 8089, "/_readiness", (200,)),
@@ -83,10 +83,11 @@ def boot(installation, action):
     command(["/bin/launchctl", "bootstrap", DOMAIN, path])
 
 
-def probes():
+def probes(include_scorer=False):
     """Read only local response statuses; a 401 proves an auth boundary, not authorization."""
     result = {}
-    for name, port, path, expected in ENDPOINTS:
+    endpoints = ENDPOINTS + ((("semantic", 8651, "/v1/semantic/status", (401, 403)),) if include_scorer else ())
+    for name, port, path, expected in endpoints:
         connection = http.client.HTTPConnection("127.0.0.1", port, timeout=1)
         try:
             connection.request("GET", path, headers={"Connection": "close"})
@@ -150,7 +151,7 @@ def status(installation):
     counts = pending(installation) if containers["postgres-1"]["Running"] else None
     return {"containers": {name: {"running": row["Running"], "status": row["Status"]}
                            for name, row in containers.items()}, "services": jobs,
-            "endpoints": probes(), "pending": counts, "identity": "verified",
+            "endpoints": probes("semantic" in containers), "pending": counts, "identity": "verified",
             "provider_health": "not_probed", "credentials": "not_loaded"}
 
 
@@ -160,7 +161,9 @@ def start(installation):
     for name in SERVICES:
         job(installation, name)
     installation.record("start", "starting_stores")
-    for name in CONTAINERS:
+    for name in CONTAINERS + OPTIONAL_CONTAINERS:
+        if name not in states:
+            continue
         if not states[name]["Running"]:
             docker("start", installation.manifest["containers"][name]["id"], timeout=30)
     deadline = time.monotonic() + 45
@@ -178,7 +181,7 @@ def start(installation):
         boot(installation, name)
     deadline = time.monotonic() + 45
     while True:
-        current = probes()
+        current = probes("semantic" in states)
         if all(value["responding"] for value in current.values()) and all(job(installation, name)["running"] for name in SERVICES):
             break
         require(time.monotonic() < deadline)
@@ -215,9 +218,15 @@ def stop(installation, *, before_stores=None):
     if before_stores is not None:
         before_stores()
     installation.record("stop", "stopping_stores")
-    for name in reversed(CONTAINERS):
+    for name in reversed(CONTAINERS + OPTIONAL_CONTAINERS):
+        if name not in states:
+            continue
         if states[name]["Running"]:
-            docker("stop", "--time", "30", installation.manifest["containers"][name]["id"], timeout=40)
+            grace = 45 if name == "semantic" else 30
+            docker("stop", "--time", str(grace), installation.manifest["containers"][name]["id"], timeout=grace + 10)
+        if name == "semantic":
+            stopped = installation.verify()[name]
+            require(not stopped["Running"] and stopped["ExitCode"] == 0 and not stopped["OOMKilled"])
     require(not any(row["Running"] for row in installation.verify().values()))
     installation.record("stop", "stopped")
     return {"state": "stopped", "data_retained": True}

@@ -14,7 +14,7 @@ from private_stack_state import Installation
 def main():
     """One locked operator action; failure keeps its durable checkpoint for recovery."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("install", "upgrade-launcher", "install-app", "open", "status", "start", "stop", "restart", "backup", "verify-backup"))
+    parser.add_argument("action", choices=("install", "upgrade-launcher", "install-app", "open", "select-scorer", "status", "start", "stop", "restart", "backup", "verify-backup"))
     parser.add_argument("--native-bundle", type=Path)
     parser.add_argument("--backup", type=Path)
     args = parser.parse_args()
@@ -29,7 +29,10 @@ def main():
             result = register(installation, upgrade=args.action == "upgrade-launcher")
         else:
             installation.load()
-            if args.action in ("install-app", "open"):
+            if args.action == "select-scorer":
+                from private_stack_scorer import select_scorer
+                result = select_scorer(installation)
+            elif args.action in ("install-app", "open"):
                 from private_stack_desktop import install_app, open_app
                 result = install_app(installation, args.native_bundle) if args.action == "install-app" else open_app(installation)
             elif args.action == "restart":

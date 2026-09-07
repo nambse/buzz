@@ -17,7 +17,55 @@ new task is the sole implementation owner and continues under an active goal,
 without a deadline or token budget. The old account/login notes below are
 historical; the new shared Hermes OAuth enrollment is already ready.
 
-## Current checkpoint — 2026-09-07, encrypted80 and persistent native opening
+## Current checkpoint — 2026-09-07, semantic80 native acceptance and CI
+
+Persistent native opening is signed and pushed at f09ff49. `just ci` started from
+that source and completed successfully: desktop6654, mobile2072, workspace/Tauri
+checks and tests, desktop/web builds. Only Python scorer lifecycle files changed
+while CI ran; those have29 passing focused local tests (two PostgreSQL cases
+skipped without explicit disposable selection). A final source/file-size/CI
+checkpoint remains required after the remaining changes. Evidence:
+`evidence/ci-f09ff49.{json,log}` in the private root.
+
+Fresh scorer container095ce0407238f38962398ee23027b0a0e69dd3a38dccc0ffae96b449ffe5d569
+uses the existing worker image7d77af… at8651, deployment
+0cebf37a-7046-4c79-8a93-791d8c06df92, Luna/low. Its full binding hash is
+775d08386ee3688d297caa3a8363f6a9d1ccbd195861b62c122c739ea0774a2d.
+This explicit scorer variant retains Ada's OAuth identity/store; employee
+revisions and employee inference models are unchanged. The listener has its own
+service token, no Docker socket/journal/workspace mount, and only the shared
+OAuth parent is writable. Configuration and selection live in `hermes/semantic/`.
+
+The installed image gate passed6 actual pinned transport and4 lifecycle cases
+with synthetic socket I/O and no provider access. Six subsequent real provider
+cases passed at2062–3703ms: English→Bora, Turkish→Deniz, planning→Ada,
+two skills→Bora+Deniz, unclear→zero, injected recipient/score commands→zero.
+Thresholds/deadlines were not relaxed. The worker then selected this service.
+
+Native Office inputs, without employee names or fabricated tags:
+-4624c286…2159: silent/no_relevant_employee, zero runs; native routing dialog
+ showed all three below-threshold candidates, Luna/low and2706ms.
+-6badb9b1…3bb9: semantic, only Bora,4271ms. Actual reply: “We develop ideas together.”
+-53c659a1…e4b2: semantic, Bora+Deniz,3023ms. Both independently replied in the
+ correct thread. This demonstrates bounded parallel routing, not a sequential
+ translation of the other employee's not-yet-produced answer.
+All three new runs completed with output enqueue and Office ACK on attempt1.
+Evidence: `semantic80-{installed-check,quality,status}` and
+`native-semantic80-acceptance.json`.
+
+The installed lifecycle now owns seven containers and four native services.
+Explicit `select-scorer` registers only the verified stopped prepared listener;
+start/status/stop/backup include it. Shutdown allows45 seconds for the OAuth
+maintenance owner and refuses a killed/OOM/failed stop before closing the other
+stores. Actual restart passed with unchanged resource IDs:16 real runs remain
+(14 ordinary,2 protected), with14 ordinary frozen contexts. The earlier protected
+reply failure remains recorded. `lifecycle-semantic80-restart.log` records success.
+
+Next: fresh Files input/read/Work acceptance and remaining conversation/employee
+memory scope acceptance, then final source/integration/CI, current backup and PR.
+Full Mac reboot and active cloned-runtime recovery are still unproven boundaries.
+
+## Previous checkpoint — 2026-09-07, encrypted80 and persistent native opening
 
 The688997b native package now includes the Work refresh fix and fresh Deniz DM.
 It is installed outside the checkout under the private root's content-addressed

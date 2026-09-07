@@ -17,6 +17,7 @@ from private_native_services import private_file, selected_root
 SERVICES = {"relay": "buzz-relay", "api": "ortak-server",
             "worker": "ortak-worker", "management": "ortak-management"}
 CONTAINERS = ("postgres-1", "redis-1", "minio-1", "honcho-db-1", "honcho-1", "hermes")
+OPTIONAL_CONTAINERS = ("semantic",)
 DOCKER = Path("/Applications/Docker.app/Contents/Resources/bin/docker")
 
 
@@ -97,13 +98,20 @@ def save_json(path, value):
 
 def container_contract(row):
     """Persist only identity and security/topology metadata, never environment."""
-    return {"id": row["Id"], "name": row["Name"], "image": row["Image"],
+    result = {"id": row["Id"], "name": row["Name"], "image": row["Image"],
             "labels": row["Config"].get("Labels", {}),
             "mounts": sorted([{k: m.get(k) for k in ("Type", "Name", "Source", "Destination", "RW")}
                               for m in row["Mounts"]], key=lambda mount: mount["Destination"]),
             "ports": row["HostConfig"]["PortBindings"],
             "restart": row["HostConfig"]["RestartPolicy"],
             "network_names": sorted(row["NetworkSettings"]["Networks"])}
+    if row["Config"].get("Labels", {}).get("org.ortak.role") == "semantic-scorer":
+        result["scorer_contract"] = {
+            "user": row["Config"]["User"], "entrypoint": row["Config"]["Entrypoint"],
+            "cmd": row["Config"]["Cmd"], "stop_timeout": row["Config"].get("StopTimeout"),
+            **{key: row["HostConfig"].get(key) for key in
+               ("ReadonlyRootfs", "Init", "CapDrop", "SecurityOpt", "PidsLimit", "Memory", "NanoCpus", "Tmpfs", "NetworkMode")}}
+    return result
 
 
 def inspect_container(name):
@@ -137,7 +145,7 @@ class Installation:
         self.manifest = json.loads(private_file(self.directory / "installation.json", 131072))
         require(self.manifest["format"] == "ortak-private-installation/1"
                 and self.manifest["state_directory"] == str(self.root)
-                and set(self.manifest["containers"]) == set(CONTAINERS)
+                and set(CONTAINERS) <= set(self.manifest["containers"]) <= set(CONTAINERS + OPTIONAL_CONTAINERS)
                 and set(self.manifest["services"]) == set(SERVICES))
         return self.manifest
 

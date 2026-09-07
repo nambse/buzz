@@ -19,7 +19,7 @@ Başka konumdan açık eski özel paketi önce **Quit** ile kapatın. Güncel pa
 kalıcı `desktop/02362e325da0cc6c3e85d80029db1a8c96285d6d72ac6b657a2770275f73de67/Ortak Private.app`
 altındadır. Kimlik ve OAuth değerleri komut satırına veya açılış günlüğüne yazılmaz.
 
-Docker Desktop açık olmalıdır. `start` mevcut altı container'ı ve dört kullanıcı
+Docker Desktop açık olmalıdır. `start` mevcut yedi container'ı ve dört kullanıcı
 servisini açar. `stop` önce yeni istek girişini kapatır, en fazla45 saniye bekleyen
 işlerin bitmesini bekler, sonra çalışan süreçleri ve veri servislerini kapatır.
 Verileri silmez. İşler bitmezse worker ve veri servisleri açık kalır;
@@ -27,6 +27,12 @@ Verileri silmez. İşler bitmezse worker ve veri servisleri açık kalır;
 Activity'den işi inceleyebilir veya iptal edebilirsiniz. Daha sonra `stop` tekrar
 denenebilir. Manuel kapanan servisler sonraki oturum açılışında da kapalı kalır;
 `start` bu tercihi geri açar.
+
+Yedinci container merkezi anlamsal yönlendirme servisidir; çalışan model
+oturumlarından ayrıdır. Kapanışta OAuth yenileme sürecinin bitmesi için45 saniye
+tanınır. Bu süreç hata veya zorla sonlandırmayla kapanırsa diğer depoları kapatma
+başarı sayılmaz. `status` bu servisin de kimliğini ve erişim durumunu denetler;
+sağlık okumak model çağrısı yapmaz. Gerçek yedi-container yeniden başlatma geçti.
 
 `status` sabit container kimliği, image, disk bağlantıları, ağ adları ve yerel
 portları kayıtla karşılaştırır. Native binary ve kurulu launcher dosyalarını

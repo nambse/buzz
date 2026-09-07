@@ -40,7 +40,14 @@ def service_environment(root, action):
             require(key.startswith("ORTAK_") and key.replace("_", "").isalnum())
             env[key] = signer["secret_key"]
     if action == "worker":
-        env.update(ORTAK_WORKER_ENABLED="true", ORTAK_WORKER_CONFIG_JSON=private_file(root / "worker-config.json"))
+        config = private_file(root / "worker-config.json")
+        selected = json.loads(config).get("semantic")
+        if selected is not None:
+            require(selected.get("adapter") == "hermes-codex"
+                    and selected.get("bridge_token_env") == "ORTAK_SEMANTIC_SERVICE_TOKEN"
+                    and selected.get("deployment", {}).get("bridge_token_ref") == "secret://ortak-private-v0/semantic-service")
+            env["ORTAK_SEMANTIC_SERVICE_TOKEN"] = private_file(root / "hermes/semantic/service-token").strip()
+        env.update(ORTAK_WORKER_ENABLED="true", ORTAK_WORKER_CONFIG_JSON=config)
     if action == "management":
         env.update(ORTAK_MANAGEMENT_ENABLED="true", ORTAK_MANAGEMENT_ACTION="work",
                    ORTAK_MANAGEMENT_COMMUNITY_ID=api["community_id"])

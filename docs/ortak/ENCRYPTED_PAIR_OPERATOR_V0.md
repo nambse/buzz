@@ -30,3 +30,11 @@ Registration, cohort capture/reconciliation, worker purpose-specific key selecti
 and controller capability activation are separate explicit steps. The native
 bundle must be rebuilt before testing its protected composer. None of these steps
 adopts or replaces the old Cem/Zeynep resources.
+
+Fresh80 activation subsequently passed with the feature-enabled688997b API and
+worker, explicit operator channel audience and protected controller capability.
+Select the canonical community origin `ws://localhost:3038/`:127.0.0.1 addresses
+this same machine but has no matching community and returns404. The first native
+request's failed reply receipts remain historical. A new request completed with
+both frozen encrypted copies ACKed on attempt1 and was visible after native
+reopen. Current evidence and exact run IDs are in the continuation ledger.
