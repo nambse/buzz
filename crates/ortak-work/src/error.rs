@@ -10,6 +10,22 @@ use uuid::Uuid;
 /// variant, so existence in a foreign company is never observable.
 #[derive(Debug, Error)]
 pub enum WorkError {
+    /// Unknown or ungranted employee queue; neither exposes a foreign employee.
+    #[error("employee {employee_id} is unavailable in this audience")]
+    EmployeeNotFound {
+        /// Requested employee.
+        employee_id: EmployeeId,
+    },
+    /// The authenticated human lacks the requested action on a visible project.
+    #[error("Work action is not authorized")]
+    AccessDenied,
+    /// An operation id or immutable creation identity has a conflicting payload.
+    #[error("Work operation conflicts with an existing operation")]
+    OperationConflict,
+    /// The bounded database operation could not finish; retry with the same operation id.
+    #[error("Work operation timed out")]
+    OperationTimedOut,
+
     /// The control plane or database failed.
     #[error(transparent)]
     Control(#[from] ControlError),

@@ -29,17 +29,24 @@
 //! the production `MessageNormalizer` that turns a claimed inbox row into a
 //! routable envelope or an explicit refusal from canonical Office rows.
 //!
-//! Nothing here connects to a real Office, runs a worker, or stores secrets.
+//! [`identity::PgOfficeIdentityAdapter`] additionally adopts prepared identities
+//! inside a finite company/community/employee/channel allowlist and publishes
+//! journaled profiles through the production HTTP transport. Callers explicitly
+//! construct and invoke these adapters; this crate starts no background worker.
 
 pub mod delivery;
+#[cfg(feature = "encrypted-dm")]
+pub mod encrypted;
 mod error;
 pub mod event;
 pub mod fakes;
+pub mod identity;
 pub mod normalizer;
 pub mod postgres;
 pub mod publisher;
 pub mod repository;
 pub mod signer;
+pub mod transport;
 
 pub use delivery::{DeliveryConfig, DeliveryOutcome, OfficeDeliveryService};
 pub use error::{BindingRejection, OfficeDeliveryError, Result};

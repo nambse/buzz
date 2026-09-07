@@ -1,4 +1,5 @@
 import * as React from "react";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 
 import { hasPrimaryShortcutModifier } from "@/shared/lib/platform";
 import {
@@ -37,6 +38,7 @@ export function useAppShellKeyboardShortcuts({
     // live here: capture-phase handling of the other shortcuts would steal
     // them from more specific handlers (e.g. the composer's ⌘K link dialog).
     function handleHuddleShortcut(event: KeyboardEvent) {
+      if (privateOrtakMode) return;
       const isHuddleShortcut =
         event.ctrlKey &&
         event.shiftKey &&

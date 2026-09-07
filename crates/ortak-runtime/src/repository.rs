@@ -50,6 +50,8 @@ pub struct PreparedRun {
 /// Result of preparing the durable run.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PrepareOutcome {
+    /// Office inputs changed after authorization; no run was admitted.
+    Refused(DispatchRefusal),
     /// The run row exists (new or replayed) and the lease is still ours.
     Prepared(PreparedRun),
     /// The lease token no longer matches; nothing was written.

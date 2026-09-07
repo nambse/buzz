@@ -455,6 +455,7 @@ pub fn build_profile(
 // ── Huddles ──────────────────────────────────────────────────────────────────
 
 /// Validate that a string is a valid UUID (defense-in-depth for `&str` channel IDs).
+#[cfg(any(feature = "legacy-voice", test))]
 fn validate_channel_id(id: &str) -> Result<(), String> {
     uuid::Uuid::parse_str(id).map_err(|_| format!("invalid channel UUID: {id}"))?;
     Ok(())
@@ -464,6 +465,7 @@ fn validate_channel_id(id: &str) -> Result<(), String> {
 /// All huddle events share: validate two channel IDs, JSON content with
 /// `ephemeral_channel_id`, an `["h", parent_channel_id]` tag, and an
 /// optional `["p", participant_pubkey]` tag for join/leave identity.
+#[cfg(any(feature = "legacy-voice", test))]
 fn build_huddle_event(
     kind: u16,
     parent_channel_id: &str,
@@ -487,6 +489,7 @@ fn build_huddle_event(
 }
 
 /// Kind 48100 — huddle started advisory posted to the parent channel.
+#[cfg(any(feature = "legacy-voice", test))]
 pub fn build_huddle_started(
     parent_channel_id: &str,
     ephemeral_channel_id: &str,
@@ -495,6 +498,7 @@ pub fn build_huddle_started(
 }
 
 /// Kind 48103 — huddle ended, posted to the parent channel.
+#[cfg(any(feature = "legacy-voice", test))]
 pub fn build_huddle_ended(
     parent_channel_id: &str,
     ephemeral_channel_id: &str,
@@ -507,6 +511,7 @@ pub fn build_huddle_ended(
 /// Posted to the **ephemeral** channel (not the parent) so agents see it
 /// via EOSE replay when they subscribe. Uses a dedicated kind so the TTS
 /// pipeline can filter it out without fragile content-prefix matching.
+#[cfg(any(feature = "legacy-voice", test))]
 pub fn build_huddle_guidelines(
     ephemeral_channel_id: &str,
     guidelines_text: &str,

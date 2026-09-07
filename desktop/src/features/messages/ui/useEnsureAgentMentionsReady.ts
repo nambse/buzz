@@ -1,4 +1,5 @@
 import * as React from "react";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 import { applyReusableAgentAccessPolicy } from "@/features/agents/channelAgents";
 import type { AgentPersona, ManagedAgent } from "@/shared/api/types";
 import { normalizePubkey } from "@/shared/lib/pubkey";
@@ -78,6 +79,19 @@ export function useEnsureAgentMentionsReady({
       preparedManagedAgents: ManagedAgent[] = [],
       isCancelled: () => boolean = () => false,
     ) => {
+      // Ortak checks current Office membership at both send boundaries. No
+      // local persona, access-policy, membership write or runtime wake is due.
+      if (privateOrtakMode) {
+        return {
+          errors:
+            mentionPubkeys.length > 0 && !capturedChannelId
+              ? ["Ortak mentions require an existing Office channel."]
+              : [],
+          pubkeys: [] as string[],
+          wroteRelayState: false,
+          agentsToWake: [] as QueuedAgentWake[],
+        };
+      }
       if (!capturedChannelId || mentionPubkeys.length === 0) {
         return {
           errors: [] as string[],

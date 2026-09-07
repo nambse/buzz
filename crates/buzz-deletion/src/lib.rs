@@ -1246,6 +1246,7 @@ async fn execute_stage(
             let frozen = validate_frozen_inventory(request)?;
             if live_schema.scoped_tables != frozen.schema.scoped_tables
                 || live_schema.fenced_tables != frozen.schema.fenced_tables
+                || live_schema.retained_tables != frozen.schema.retained_tables
             {
                 return Err(permanent(
                     "approved structural catalog drifted before fencing",

@@ -4,6 +4,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ALargeSmall, Mic, Paperclip, X } from "lucide-react";
 
 import type { MediaUploadController } from "@/features/messages/lib/useMediaUpload";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 import { Button } from "@/shared/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import {
@@ -260,7 +261,7 @@ export const MessageComposerToolbar = React.memo(
                   </TooltipTrigger>
                   <TooltipContent>Attach file</TooltipContent>
                 </Tooltip>
-                {onVoiceNote ? (
+                {!privateOrtakMode && onVoiceNote ? (
                   <Tooltip disableHoverableContent>
                     <TooltipTrigger asChild>
                       <Button

@@ -1,4 +1,5 @@
 import * as React from "react";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 
 import { getPresenceLabel } from "@/features/presence/lib/presence";
 import { PresenceDot } from "@/features/presence/ui/PresenceBadge";
@@ -83,18 +84,21 @@ export function SidebarProfileCard({
     [toggleProfilePopover],
   );
   const hasStatus = Boolean(selfUserStatus?.text || selfUserStatus?.emoji);
-  const communityLabel = activeCommunity?.name ?? "No community";
+  const communityLabel =
+    activeCommunity?.name ?? (privateOrtakMode ? "Company" : "No community");
   const readonlyCommunityLabel = (
     <span
       className="flex min-w-0 cursor-pointer items-center gap-1 text-xs leading-snug text-sidebar-foreground/70"
       data-buzz-sidebar-secondary
     >
-      <span
-        aria-hidden="true"
-        className="flex w-3.5 shrink-0 items-center justify-center text-2xs"
-      >
-        <span className="-translate-y-px leading-normal">🐝</span>
-      </span>
+      {!privateOrtakMode ? (
+        <span
+          aria-hidden="true"
+          className="flex w-3.5 shrink-0 items-center justify-center text-2xs"
+        >
+          <span className="-translate-y-px leading-normal">🐝</span>
+        </span>
+      ) : null}
       <span className="truncate">{communityLabel}</span>
     </span>
   );
@@ -157,7 +161,7 @@ export function SidebarProfileCard({
             isStatusPending={isPresencePending}
             onClearUserStatus={onClearUserStatus}
             onOpenSettings={onOpenSettings}
-            onSendFeedback={onSendFeedback}
+            onSendFeedback={privateOrtakMode ? undefined : onSendFeedback}
             onSetStatus={onSetPresenceStatus ?? (() => {})}
             onSetUserStatus={onSetUserStatus}
             triggerContainerRef={profileCardRef}
@@ -166,23 +170,33 @@ export function SidebarProfileCard({
             userStatusText={selfUserStatus?.text}
             userStatusUpdatedAt={selfUserStatus?.updatedAt}
             communitySwitcherSlot={
-              <CommunitySwitcher
-                activeCommunity={activeCommunity}
-                canInvite={canInvite}
-                onAddCommunity={() => {
-                  setProfilePopoverOpen(false);
-                  onOpenAddCommunity();
-                }}
-                onInvite={() => {
-                  setProfilePopoverOpen(false);
-                  onOpenSettings("community-members");
-                }}
-                onRemoveCommunity={onRemoveCommunity}
-                onSwitchCommunity={onSwitchCommunity}
-                onUpdateCommunity={onUpdateCommunity}
-                variant="profile-menu"
-                communities={communities}
-              />
+              privateOrtakMode ? (
+                <div
+                  className="px-3 py-2 text-sm"
+                  data-testid="profile-company"
+                >
+                  <p className="text-xs text-muted-foreground">Company</p>
+                  <p className="truncate">{communityLabel}</p>
+                </div>
+              ) : (
+                <CommunitySwitcher
+                  activeCommunity={activeCommunity}
+                  canInvite={canInvite}
+                  onAddCommunity={() => {
+                    setProfilePopoverOpen(false);
+                    onOpenAddCommunity();
+                  }}
+                  onInvite={() => {
+                    setProfilePopoverOpen(false);
+                    onOpenSettings("community-members");
+                  }}
+                  onRemoveCommunity={onRemoveCommunity}
+                  onSwitchCommunity={onSwitchCommunity}
+                  onUpdateCommunity={onUpdateCommunity}
+                  variant="profile-menu"
+                  communities={communities}
+                />
+              )
             }
           >
             <button

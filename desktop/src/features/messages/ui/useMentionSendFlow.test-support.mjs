@@ -64,7 +64,11 @@ function load(name, stubs) {
   );
   return exports;
 }
-export async function setup({ lifecycle = false } = {}) {
+export async function setup({
+  lifecycle = false,
+  privateMode = false,
+  autoPrompt = true,
+} = {}) {
   const { act, renderHook } = await import("@testing-library/react");
   draftStore.clearAllDrafts();
   dom.window.localStorage.clear();
@@ -89,6 +93,7 @@ export async function setup({ lifecycle = false } = {}) {
   };
   const stubs = {
     react: React,
+    "@/features/ortak/privateMode": { privateOrtakMode: privateMode },
     "@/features/messages/lib/useDrafts": draftStore,
     sonner: { toast: { error: (error) => calls.push(["error", error]) } },
     "@/features/agents/hooks": new Proxy(
@@ -156,7 +161,11 @@ export async function setup({ lifecycle = false } = {}) {
     "@/features/messages/lib/imetaMediaMarkdown": {
       buildOutgoingMessage: (text) => ({ content: text, mediaTags: [] }),
     },
-    "@/shared/api/tauri": { invokeTauri: async () => {} },
+    "@/shared/api/tauri": {
+      invokeTauri: async (command) => {
+        calls.push(["native", command]);
+      },
+    },
     "@/shared/lib/pubkey": {
       normalizePubkey: (key) => key.toLowerCase(),
       truncatePubkey: (key) => key,
@@ -351,7 +360,7 @@ export async function setup({ lifecycle = false } = {}) {
         queuedAttachments: control.attachments ?? [],
       });
     });
-  await prompt();
+  if (autoPrompt) await prompt();
   const invite = async () =>
     act(async () => hook.result.current.nonMemberPromptProps.onInvite());
   const dismiss = () =>

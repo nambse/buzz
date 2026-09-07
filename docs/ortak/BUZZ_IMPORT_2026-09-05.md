@@ -99,7 +99,7 @@ Repository:
 
 Environment notes: the first Rust run exhausted disk; only reproducible build caches from the completed `m4-activity-queries` and `m2-office-delivery` worktrees (about 12.6 GiB) were cleared, and the retry passed. The pinned Playwright browser (v1223) was missing and was installed before the UI suite ran. Test-only sidecar placeholders were needed for the native checks; this was not a packaged application build.
 
-Relay/DB integration lanes (`just test` with Postgres and Redis) still apply because `buzz-relay` changed. The Ortak Postgres suites need `ORTAK_TEST_DATABASE_URL` as documented in `crates/buzz-relay/tests/office_ingress_postgres.rs`.
+Relay/DB integration lanes (`just test` with Postgres and Redis) still apply because `buzz-relay` changed. The Ortak Postgres suites need `ORTAK_TEST_DATABASE_URL` as documented in `crates/buzz-relay/tests/postgres_office_ingress.rs`.
 
 ## Merge
 

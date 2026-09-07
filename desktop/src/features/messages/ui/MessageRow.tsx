@@ -1,3 +1,4 @@
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 import * as React from "react";
 import { AlertTriangle } from "lucide-react";
 import {
@@ -545,12 +546,14 @@ export const MessageRow = React.memo(
     ) : (
       <MessageAuthorText as="h3">{message.author}</MessageAuthorText>
     );
-    const agentOwnerNode = message.isAgent ? (
-      <MessageAgentOwner
-        ownerLabel={message.ownerLabel}
-        ownerPubkey={message.ownerPubkey}
-      />
-    ) : null;
+    const agentOwnerNode =
+      message.isAgent || privateOrtakMode ? (
+        <MessageAgentOwner
+          pubkey={message.pubkey}
+          ownerLabel={message.ownerLabel}
+          ownerPubkey={message.ownerPubkey}
+        />
+      ) : null;
 
     const actionBarNode = (
       <div

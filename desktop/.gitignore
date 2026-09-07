@@ -10,6 +10,7 @@ lerna-debug.log*
 node_modules
 .pnpm-store
 dist
+dist-ortak-smoke
 dist-ssr
 playwright-report
 playwright-report.json

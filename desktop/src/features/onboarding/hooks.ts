@@ -1,3 +1,4 @@
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 import * as React from "react";
 import { useQueryClient, type QueryStatus } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -83,6 +84,8 @@ export async function initializeStarterChannels(
     communityScope: string | null;
   },
 ): Promise<ChannelInitResult> {
+  // Private Office channels and Employees are provisioned by the control plane.
+  if (privateOrtakMode) return { ok: true };
   try {
     let starterChannels: Awaited<
       ReturnType<typeof ensureStarterChannels>

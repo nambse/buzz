@@ -158,6 +158,7 @@ pub async fn apply_workspace(
     thread_scoped_acp_sessions: Option<bool>,
     app: AppHandle,
 ) -> Result<(), String> {
+    crate::private_native::require_workspace_apply(&relay_url, nsec.as_deref())?;
     let state = app.state::<AppState>();
     // Take the generation only after entering the serialized transaction. An
     // apply that is already running remains authoritative until it releases
@@ -194,7 +195,11 @@ pub async fn apply_workspace(
         // validate (inside `effective_repos_dir`) drives both the emit and the
         // persisted value. `nest` is resolved softly: when absent there is nothing
         // to persist or symlink, and relay/keys must still apply unconditionally.
-        let nest = nest_dir();
+        let nest = if crate::private_native::legacy_enabled() {
+            nest_dir()
+        } else {
+            None
+        };
         let effective_repos_dir = match nest.as_deref() {
             Some(nest) => match effective_repos_dir(nest, repos_dir.as_deref()) {
                 Ok(value) => value,
@@ -228,9 +233,10 @@ pub async fn apply_workspace(
         // Keep the backend-side reconcile guard aligned with the frontend
         // experiment before launch-time restore can spawn any agents. Missing
         // means the stable behavior: desktop remains authoritative.
-        state
-            .managed_agent_profile_reconcile_enabled()
-            .store(!agent_managed_profiles.unwrap_or(false), Ordering::Release);
+        state.managed_agent_profile_reconcile_enabled().store(
+            crate::private_native::legacy_enabled() && !agent_managed_profiles.unwrap_or(false),
+            Ordering::Release,
+        );
         // Persisted frontend experiment state must land before launch-time
         // restore so every restored agent starts with the selected ACP policy.
         // Missing preserves the stable channel-scoped behavior.
@@ -259,7 +265,9 @@ pub async fn apply_workspace(
             }
         }
 
-        try_regenerate_nest(&app);
+        if crate::private_native::legacy_enabled() {
+            try_regenerate_nest(&app);
+        }
 
         Ok::<(), String>(())
     })
@@ -269,6 +277,14 @@ pub async fn apply_workspace(
     assert_current_apply_generation(&state.workspace_apply_generation, apply_generation)?;
 
     let state = restore_app.state::<AppState>();
+    // Office relay/identity apply above remains serialized. No legacy
+    // provider reconciliation, persona publish, mesh or runtime restoration.
+    if !crate::private_native::legacy_enabled() {
+        state
+            .managed_agent_restore_pending
+            .store(false, Ordering::Release);
+        return Ok(());
+    }
     super::agents::provider_access::reconcile_on_workspace_apply(&restore_app, &state).await?;
     // The Bumble→Pollen migration may have renamed stopped agents. Reconcile
     // their relay profiles independently of runtime restore; successful writes

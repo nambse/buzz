@@ -67,6 +67,8 @@ import {
   type MentionCandidate,
 } from "./mentionCandidates";
 import { buildMentionCandidates } from "./buildMentionCandidates";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
+import { ortakMentionCandidates } from "./ortakMentionCandidates";
 const MENTION_DEBOUNCE_MS = 120,
   MENTION_SUGGESTION_LIMIT = 50;
 type UseMentionsOptions = {
@@ -113,7 +115,8 @@ export function useMentions(
   const relayAgentDirectoryReady = isAgentDirectoryReady(relayAgentsQuery);
   const agentDirectoriesReady =
     managedAgentDirectoryReady && relayAgentDirectoryReady;
-  const canSearchGlobalUsers = canSearchGlobalPeople && agentDirectoriesReady;
+  const canSearchGlobalUsers =
+    !privateOrtakMode && canSearchGlobalPeople && agentDirectoriesReady;
   const userSearchQuery = useInfiniteUserSearchQuery(mentionQuery ?? "", {
     allowEmpty: true,
     enabled: canSearchGlobalUsers && mentionQuery !== null,
@@ -253,35 +256,46 @@ export function useMentions(
   );
   const mentionCandidates = React.useMemo<MentionCandidate[]>(
     () =>
-      buildMentionCandidates({
-        activeAgentPubkeys,
-        activePersonaById,
-        activePersonas,
-        canSearchGlobalUsers,
-        currentPubkey,
-        isArchived: isArchivedDiscovery,
-        managedAgentDirectoryReady,
-        managedAgentNamesByPubkey,
-        managedAgentPersonaIds,
-        managedAgentPersonaIdsByPubkey,
-        managedAgents: managedAgentsQuery.data,
-        memberPubkeys,
-        members,
-        mentionChannelId,
-        mentionableAgentPubkeys,
-        personaNameByPubkey,
-        profiles,
-        relayAgentDirectoryReady,
-        relayAgentNamesByPubkey,
-        relayAgents: relayAgentsQuery.data,
-        userSearchResults,
-      }),
+      privateOrtakMode
+        ? ortakMentionCandidates({
+            channelId,
+            channelType: options?.channelType,
+            currentPubkey,
+            members: membersQuery.isError ? undefined : membersQuery.data,
+            profiles,
+            isArchived: isArchivedDiscovery,
+          })
+        : buildMentionCandidates({
+            activeAgentPubkeys,
+            activePersonaById,
+            activePersonas,
+            canSearchGlobalUsers,
+            currentPubkey,
+            isArchived: isArchivedDiscovery,
+            managedAgentDirectoryReady,
+            managedAgentNamesByPubkey,
+            managedAgentPersonaIds,
+            managedAgentPersonaIdsByPubkey,
+            managedAgents: managedAgentsQuery.data,
+            memberPubkeys,
+            members,
+            mentionChannelId,
+            mentionableAgentPubkeys,
+            personaNameByPubkey,
+            profiles,
+            relayAgentDirectoryReady,
+            relayAgentNamesByPubkey,
+            relayAgents: relayAgentsQuery.data,
+            userSearchResults,
+          }),
     [
       activePersonaById,
       activeAgentPubkeys,
       activePersonas,
       userSearchResults,
       canSearchGlobalUsers,
+      channelId,
+      options?.channelType,
       currentPubkey,
       isArchivedDiscovery,
       managedAgentDirectoryReady,
@@ -291,6 +305,8 @@ export function useMentions(
       managedAgentsQuery.data,
       memberPubkeys,
       members,
+      membersQuery.data,
+      membersQuery.isError,
       mentionChannelId,
       mentionableAgentPubkeys,
       personaNameByPubkey,
@@ -301,14 +317,17 @@ export function useMentions(
     ],
   );
   const mentionCandidatesWithTeams = React.useMemo(
-    () => [
-      ...mentionCandidates,
-      ...buildTeamMentionCandidates(
-        teamsQuery.data ?? [],
-        personasQuery.data ?? [],
-        mentionCandidates,
-      ),
-    ],
+    () =>
+      privateOrtakMode
+        ? mentionCandidates
+        : [
+            ...mentionCandidates,
+            ...buildTeamMentionCandidates(
+              teamsQuery.data ?? [],
+              personasQuery.data ?? [],
+              mentionCandidates,
+            ),
+          ],
     [mentionCandidates, personasQuery.data, teamsQuery.data],
   );
   const ownerPubkeys = React.useMemo(
@@ -384,7 +403,7 @@ export function useMentions(
       .slice(0, MENTION_SUGGESTION_LIMIT)
       .map(({ candidate, label }) =>
         mapMentionCandidateToSuggestion({
-          agentProvenanceReady: agentDirectoriesReady,
+          agentProvenanceReady: !privateOrtakMode && agentDirectoriesReady,
           candidate,
           label,
           channelType: options?.channelType,
@@ -405,7 +424,7 @@ export function useMentions(
   ]);
   const getDefaultAgentSuggestion = useDefaultAgentSuggestion({
     activePersonaIds,
-    agentProvenanceReady: agentDirectoriesReady,
+    agentProvenanceReady: !privateOrtakMode && agentDirectoriesReady,
     candidates: mentionCandidates,
     channelType: options?.channelType,
     currentPubkey,
@@ -414,7 +433,11 @@ export function useMentions(
     recentMentionPubkeys: options?.recentMentionPubkeys,
   });
   const fetchMoreSuggestions = React.useCallback(() => {
-    if (userSearchQuery.hasNextPage && !userSearchQuery.isFetchingNextPage) {
+    if (
+      !privateOrtakMode &&
+      userSearchQuery.hasNextPage &&
+      !userSearchQuery.isFetchingNextPage
+    ) {
       void userSearchQuery.fetchNextPage();
     }
   }, [userSearchQuery]);
@@ -425,7 +448,7 @@ export function useMentions(
     if (matchingSuggestions.length > 0) {
       return matchingSuggestions;
     }
-    if (userSearchQuery.isFetching) {
+    if (!privateOrtakMode && userSearchQuery.isFetching) {
       return filterCachedAgentSuggestions(
         previousSuggestionsRef.current,
         mentionCandidatesWithTeams,
@@ -869,7 +892,7 @@ export function useMentions(
             searchableNamesLowerRef,
             candidates: mentionCandidatesWithTeams,
             activePersonaIds,
-            agentProvenanceReady: agentDirectoriesReady,
+            agentProvenanceReady: !privateOrtakMode && agentDirectoriesReady,
             channelType: options?.channelType,
             currentPubkey,
             ownerProfiles: ownerProfilesQuery.data?.profiles,
@@ -945,8 +968,10 @@ export function useMentions(
     settlePendingMentionBindings: pasteBinding.settlePendingMentionBindings,
     suggestions,
     fetchMoreSuggestions,
-    hasMoreSuggestions: Boolean(userSearchQuery.hasNextPage),
-    isFetchingMoreSuggestions: userSearchQuery.isFetchingNextPage,
+    hasMoreSuggestions:
+      !privateOrtakMode && Boolean(userSearchQuery.hasNextPage),
+    isFetchingMoreSuggestions:
+      !privateOrtakMode && userSearchQuery.isFetchingNextPage,
     updateMentionQuery,
   };
 }

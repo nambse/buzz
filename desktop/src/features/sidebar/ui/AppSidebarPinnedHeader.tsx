@@ -1,5 +1,7 @@
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 import { Activity, Bot, Folders, Inbox, Zap } from "lucide-react";
 
+import { useOrtakOrigin } from "@/features/ortak/useOrtakOrigin";
 import { TopbarSearch } from "@/features/search/ui/TopbarSearch";
 import { SidebarProjectsSection } from "@/features/sidebar/ui/SidebarProjectsSection";
 import { FeatureGate } from "@/shared/features";
@@ -80,7 +82,7 @@ export function AppSidebarPinnedHeader({
         onOpenResult={onOpenSearchResult}
         onOpenUser={(user) => onOpenDm({ pubkeys: [user.pubkey] })}
         onBrowseChannels={onBrowseChannels}
-        onCreateAgent={onCreateAgent}
+        onCreateAgent={privateOrtakMode ? undefined : onCreateAgent}
         onCreateChannel={onCreateChannel}
         scopeFocusRequest={scopeSearchFocusRequest}
         suggestionChannels={suggestionChannels}
@@ -99,6 +101,7 @@ export function AppSidebarPrimaryMenu({
   projectsOverviewActive,
   selectedView,
 }: AppSidebarPrimaryMenuProps) {
+  const ortakOrigin = useOrtakOrigin();
   return (
     <>
       <SidebarHeader
@@ -161,11 +164,13 @@ export function AppSidebarPrimaryMenu({
               data-testid="open-agents-view"
               isActive={selectedView === "agents"}
               onClick={onSelectAgents}
-              tooltip="Agents"
+              tooltip={privateOrtakMode || ortakOrigin ? "Employees" : "Agents"}
               type="button"
             >
               <Bot className="h-4 w-4" />
-              <SidebarMenuLabel>Agents</SidebarMenuLabel>
+              <SidebarMenuLabel>
+                {privateOrtakMode || ortakOrigin ? "Employees" : "Agents"}
+              </SidebarMenuLabel>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <ProtectedBestieSidebarEntry />

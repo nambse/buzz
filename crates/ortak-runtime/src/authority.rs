@@ -1,5 +1,5 @@
 //! Dispatch authority derived from durable rows, and the pure validation
-//! that turns a pinned revision into a runtime binding and bounded input.
+//! that turns a pinned revision into runtime configuration and bounded input.
 //!
 //! A leased `run_dispatch` outbox row carries a JSON payload written by the
 //! routing commit. That payload is only a hint. Everything that reaches the
@@ -12,13 +12,26 @@ use std::fmt;
 use ortak_control::run_event::strip_control_characters;
 use ortak_control::runtime::{RunContext, RunSpec, RuntimeError, MAX_RUN_INPUT_BYTES};
 use ortak_control::MessageId;
-use ortak_domain::{CredentialRef, Employee, EmployeeId, EmployeeStatus, RuntimeBinding};
+use ortak_domain::{
+    CredentialRef, Employee, EmployeeId, EmployeeStatus, MemoryBinding, PermissionPolicy,
+    RuntimeBinding,
+};
 use uuid::Uuid;
 
 /// Why a leased dispatch cannot start a run. Every variant is bounded and
 /// carries identifiers or closed-vocabulary values only.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DispatchRefusal {
+    /// A durable stop request fences any subsequent start attempt.
+    CancellationRequested,
+    /// The company was suspended after the scope was resolved.
+    CompanyNotActive,
+    /// Canonical Office authorization changed since the committed decision.
+    OfficeAuthorityChanged,
+    /// Current Work project, source, assignment or execution version changed.
+    WorkAuthorityChanged,
+    /// A disable invalidated the employee lifecycle pinned by this work.
+    EmployeeLifecycleChanged,
     /// The outbox row names no routing decision.
     DecisionMissing,
     /// The decision has no recipient row for the employee.
@@ -58,6 +71,18 @@ pub enum DispatchRefusal {
         /// Field that differs.
         field: &'static str,
     },
+    /// A required memory binding row is missing.
+    MemoryBindingMissing,
+    /// The exact memory binding has not passed resource validation.
+    MemoryBindingUnvalidated,
+    /// Pinned, stored, and active memory identities disagree.
+    MemoryBindingChanged,
+    /// No configured adapter can serve the required memory binding.
+    MemoryAdapterUnavailable,
+    /// Memory health or bounded recall failed.
+    MemoryUnavailable,
+    /// Recalled records or the durable snapshot violate their scope or bounds.
+    MemoryContextRejected,
     /// The binding names a different adapter than the one dispatching.
     AdapterMismatch {
         /// Adapter the binding names.
@@ -90,6 +115,11 @@ pub enum DispatchRefusal {
 impl fmt::Display for DispatchRefusal {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::CancellationRequested => formatter.write_str("run cancellation requested"),
+            Self::CompanyNotActive => formatter.write_str("company is not active"),
+            Self::OfficeAuthorityChanged => formatter.write_str("Office authorization changed"),
+            Self::WorkAuthorityChanged => formatter.write_str("Work authorization changed"),
+            Self::EmployeeLifecycleChanged => formatter.write_str("employee lifecycle changed"),
             Self::DecisionMissing => formatter.write_str("routing decision missing"),
             Self::RecipientMissing => formatter.write_str("routing recipient missing"),
             Self::RecipientNotWake { action } => {
@@ -116,6 +146,12 @@ impl fmt::Display for DispatchRefusal {
                     "runtime binding {field} differs from the manifest"
                 )
             }
+            Self::MemoryBindingMissing => formatter.write_str("memory binding row missing"),
+            Self::MemoryBindingUnvalidated => formatter.write_str("memory binding not validated"),
+            Self::MemoryBindingChanged => formatter.write_str("memory binding identity changed"),
+            Self::MemoryAdapterUnavailable => formatter.write_str("memory adapter unavailable"),
+            Self::MemoryUnavailable => formatter.write_str("memory health or recall unavailable"),
+            Self::MemoryContextRejected => formatter.write_str("memory context rejected"),
             Self::AdapterMismatch { expected, found } => {
                 write!(formatter, "binding adapter {expected} is not {found}")
             }
@@ -171,8 +207,70 @@ pub struct StoredRuntimeBinding {
     pub validated: bool,
 }
 
+/// Memory row belonging to the same pinned employee revision.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StoredMemoryBinding {
+    /// Complete secret-free binding read from durable columns.
+    pub binding: MemoryBinding,
+    /// Whether resource validation was recorded for this revision.
+    pub validated: bool,
+}
+
+/// Runtime configuration validated together from one pinned revision manifest.
+/// No public constructor permits mixing a binding and another revision's policy.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ValidatedRunConfiguration {
+    binding: RuntimeBinding,
+    permissions: PermissionPolicy,
+    memory: Option<MemoryBinding>,
+    memory_validated: bool,
+}
+
+impl ValidatedRunConfiguration {
+    /// Runtime binding from the validated manifest.
+    pub fn binding(&self) -> &RuntimeBinding {
+        &self.binding
+    }
+
+    /// Complete memory identity pinned by the same employee manifest.
+    pub fn memory_binding(&self) -> Option<&MemoryBinding> {
+        self.memory.as_ref()
+    }
+
+    /// Validates the stored memory row and the employee's live memory identity.
+    /// Unlike policy, a retired memory workspace must not remain executable.
+    pub fn with_validated_memory(
+        mut self,
+        stored: Option<&StoredMemoryBinding>,
+        active: Option<&MemoryBinding>,
+    ) -> std::result::Result<Self, DispatchRefusal> {
+        match self.memory.as_ref() {
+            Some(binding) => {
+                let stored = stored.ok_or(DispatchRefusal::MemoryBindingMissing)?;
+                if !stored.validated {
+                    return Err(DispatchRefusal::MemoryBindingUnvalidated);
+                }
+                if &stored.binding != binding || active != Some(binding) {
+                    return Err(DispatchRefusal::MemoryBindingChanged);
+                }
+            }
+            None if stored.is_some() || active.is_some() => {
+                return Err(DispatchRefusal::MemoryBindingChanged);
+            }
+            None => {}
+        }
+        self.memory_validated = true;
+        Ok(self)
+    }
+
+    /// Structurally validated permission policy from the same manifest.
+    pub fn permissions(&self) -> &PermissionPolicy {
+        &self.permissions
+    }
+}
+
 /// Validates the pinned revision against its lifecycle and binding rows and
-/// returns the runtime binding the run must use.
+/// returns the runtime binding and permission policy the run must use.
 ///
 /// The manifest is parsed as a full [`Employee`], must describe
 /// `employee_id`, and must pass definition validation; the stored binding row
@@ -184,7 +282,7 @@ pub fn validate_pinned_revision(
     status: EmployeeStatus,
     manifest: &serde_json::Value,
     stored: Option<&StoredRuntimeBinding>,
-) -> std::result::Result<RuntimeBinding, DispatchRefusal> {
+) -> std::result::Result<ValidatedRunConfiguration, DispatchRefusal> {
     if status != EmployeeStatus::Active {
         return Err(DispatchRefusal::EmployeeNotActive { status });
     }
@@ -222,7 +320,12 @@ pub fn validate_pinned_revision(
     if stored.options != binding.options {
         return Err(mismatch("options"));
     }
-    Ok(binding)
+    Ok(ValidatedRunConfiguration {
+        binding,
+        permissions: employee.permissions,
+        memory_validated: employee.memory.is_none(),
+        memory: employee.memory,
+    })
 }
 
 /// Bounds the canonical message text for the runtime: control characters
@@ -250,20 +353,39 @@ pub fn run_idempotency_key(company_id: Uuid, run_id: Uuid) -> String {
 /// rows by [`RunDispatchRepository`](crate::repository::RunDispatchRepository).
 ///
 /// There is no public constructor and every field is read-only, so a caller
-/// cannot present identity, revision, message, or binding values of its own
+/// cannot present identity, revision, message, binding, or permission values of its own
 /// to run creation, runtime start, or correlation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DispatchAuthority {
+    office_authority: Option<ortak_control::office_authority::OfficeAuthority>,
     company_id: Uuid,
     outbox_id: Uuid,
     lease_token: Uuid,
-    routing_decision_id: Uuid,
+    routing_decision_id: Option<Uuid>,
     employee_id: EmployeeId,
     employee_revision_id: Uuid,
-    message_id: MessageId,
-    root_message_id: MessageId,
-    binding: RuntimeBinding,
+    message_id: Option<MessageId>,
+    root_message_id: Option<MessageId>,
+    work: Option<WorkRunOrigin>,
+    work_generation: Option<i64>,
+    configuration: ValidatedRunConfiguration,
     input: RunInput,
+}
+
+/// Immutable provenance of a human-requested Work run, never dispatch authority itself.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkRunOrigin {
+    /// Durable run created by the request transaction.
+    pub run_id: Uuid,
+    /// Owning Work item.
+    pub work_item_id: Uuid,
+    /// Owning project.
+    pub project_id: Uuid,
+    /// Work version created by execution request.
+    pub execution_version: i64,
+    /// Digest of immutable canonical definition bytes.
+    pub definition_hash: String,
 }
 
 impl DispatchAuthority {
@@ -278,26 +400,81 @@ impl DispatchAuthority {
         employee_revision_id: Uuid,
         message_id: MessageId,
         root_message_id: MessageId,
-        binding: RuntimeBinding,
+        configuration: ValidatedRunConfiguration,
         input: RunInput,
     ) -> Self {
         Self {
+            office_authority: None,
             company_id,
             outbox_id,
             lease_token,
-            routing_decision_id,
+            routing_decision_id: Some(routing_decision_id),
             employee_id,
             employee_revision_id,
-            message_id,
-            root_message_id,
-            binding,
+            message_id: Some(message_id),
+            root_message_id: Some(root_message_id),
+            work: None,
+            work_generation: None,
+            configuration,
             input,
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_work(
+        company_id: Uuid,
+        outbox_id: Uuid,
+        lease_token: Uuid,
+        employee_id: EmployeeId,
+        employee_revision_id: Uuid,
+        configuration: ValidatedRunConfiguration,
+        input: RunInput,
+        work: WorkRunOrigin,
+        generation: i64,
+    ) -> Self {
+        Self {
+            office_authority: None,
+            company_id,
+            outbox_id,
+            lease_token,
+            routing_decision_id: None,
+            employee_id,
+            employee_revision_id,
+            message_id: None,
+            root_message_id: None,
+            work: Some(work),
+            work_generation: Some(generation),
+            configuration,
+            input,
+        }
+    }
+
+    /// Work execution provenance, absent for conversational routing.
+    pub fn work_origin(&self) -> Option<&WorkRunOrigin> {
+        self.work.as_ref()
+    }
+
+    pub(crate) fn work_generation(&self) -> Option<i64> {
+        self.work_generation
     }
 
     /// Company boundary.
     pub fn company_id(&self) -> Uuid {
         self.company_id
+    }
+
+    pub(crate) fn with_office_authority(
+        mut self,
+        authority: ortak_control::office_authority::OfficeAuthority,
+    ) -> Self {
+        self.office_authority = Some(authority);
+        self
+    }
+
+    pub(crate) fn office_authority(
+        &self,
+    ) -> Option<&ortak_control::office_authority::OfficeAuthority> {
+        self.office_authority.as_ref()
     }
 
     /// Outbox row the lease was verified against.
@@ -311,7 +488,7 @@ impl DispatchAuthority {
     }
 
     /// Routing decision that woke the employee.
-    pub fn routing_decision_id(&self) -> Uuid {
+    pub fn routing_decision_id(&self) -> Option<Uuid> {
         self.routing_decision_id
     }
 
@@ -326,18 +503,35 @@ impl DispatchAuthority {
     }
 
     /// Triggering message, from the decision row.
-    pub fn message_id(&self) -> MessageId {
+    pub fn message_id(&self) -> Option<MessageId> {
         self.message_id
     }
 
     /// Delivery-chain root, from the decision row.
-    pub fn root_message_id(&self) -> MessageId {
+    pub fn root_message_id(&self) -> Option<MessageId> {
         self.root_message_id
     }
 
     /// Runtime binding from the validated revision manifest.
     pub fn binding(&self) -> &RuntimeBinding {
-        &self.binding
+        self.configuration.binding()
+    }
+
+    /// Permission policy from the same validated, pinned revision manifest.
+    pub fn permissions(&self) -> &PermissionPolicy {
+        self.configuration.permissions()
+    }
+
+    /// Complete memory identity from the same pinned revision.
+    pub fn memory_binding(&self) -> Option<&MemoryBinding> {
+        self.configuration.memory_binding()
+    }
+
+    pub(crate) fn require_validated_memory(&self) -> std::result::Result<(), DispatchRefusal> {
+        if !self.configuration.memory_validated {
+            return Err(DispatchRefusal::MemoryBindingUnvalidated);
+        }
+        Ok(())
     }
 
     /// Bounded input derived from the canonical Office event.
@@ -351,13 +545,20 @@ impl DispatchAuthority {
             run_id,
             employee_id: self.employee_id.clone(),
             revision_id: self.employee_revision_id,
-            binding: self.binding.clone(),
+            binding: self.binding().clone(),
+            permissions: self.permissions().clone(),
             input: self.input.body.clone(),
             context: RunContext {
-                conversation_ref: self.input.channel_id.map(|channel| channel.to_string()),
-                reply_to_message_id: Some(self.message_id.to_hex()),
-                work_item_id: None,
+                conversation_ref: self
+                    .input
+                    .channel_id
+                    .filter(|_| self.work.is_none())
+                    .map(|channel| channel.to_string()),
+                reply_to_message_id: self.message_id.map(|id| id.to_hex()),
+                work_item_id: self.work.as_ref().map(|work| work.work_item_id),
                 memory_context: Vec::new(),
+                conversation_context: None,
+                work_context: None,
             },
             idempotency_key: run_idempotency_key(self.company_id, run_id),
         };
@@ -370,12 +571,12 @@ impl DispatchAuthority {
 mod tests {
     use std::collections::BTreeMap;
 
-    use ortak_domain::{EmployeeId, EmployeeManifest, EmployeeStatus};
+    use ortak_domain::{EmployeeId, EmployeeManifest, EmployeeStatus, PermissionPolicy};
     use uuid::Uuid;
 
     use super::{
-        bound_message_text, run_idempotency_key, validate_pinned_revision, DispatchRefusal,
-        StoredRuntimeBinding,
+        bound_message_text, run_idempotency_key, validate_pinned_revision, DispatchAuthority,
+        DispatchRefusal, RunInput, StoredRuntimeBinding,
     };
 
     fn manifest() -> (EmployeeId, serde_json::Value, StoredRuntimeBinding) {
@@ -410,16 +611,48 @@ mod tests {
     }
 
     #[test]
-    fn matching_manifest_and_validated_binding_yield_the_manifest_binding() {
+    fn matching_manifest_yields_binding_and_permissions_and_rejects_invalid_specs() {
         let (id, manifest, stored) = manifest();
-        let binding =
+        let configuration =
             validate_pinned_revision(&id, EmployeeStatus::Active, &manifest, Some(&stored))
                 .expect("valid");
+        let binding = configuration.binding();
         assert_eq!(binding.adapter, "hermes");
         assert_eq!(
             binding.profile_ref.as_deref(),
             Some("/opt/data/profiles/cem")
         );
+        assert_eq!(
+            serde_json::to_value(configuration.permissions()).expect("permissions json"),
+            manifest["permissions"]
+        );
+        let authority = DispatchAuthority::new(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            id,
+            Uuid::new_v4(),
+            ortak_control::MessageId::from_bytes([1; 32]),
+            ortak_control::MessageId::from_bytes([1; 32]),
+            configuration,
+            RunInput {
+                body: "Cem, selam".to_owned(),
+                truncated: false,
+                channel_id: Some(Uuid::new_v4()),
+                event_kind: 9,
+            },
+        );
+        let mut spec = authority.run_spec(Uuid::new_v4()).expect("valid spec");
+        assert_eq!(&spec.permissions, authority.permissions());
+        spec.permissions = PermissionPolicy::default();
+        spec.validate().expect("empty policy is structurally valid");
+        spec.permissions.allowed_networks = vec!["private-policy-value\n".to_owned()];
+        assert!(matches!(
+            spec.validate(),
+            Err(ortak_control::runtime::RuntimeError::InvalidSpec { detail })
+                if detail.to_string() == "run permission policy is invalid"
+        ));
     }
 
     #[test]

@@ -6,6 +6,8 @@ checker="$repo_root/scripts/check-postgres-test-discovery.py"
 fixture_root="$(mktemp -d "${TMPDIR:-/tmp}/buzz-postgres-discovery.XXXXXX")"
 trap 'rm -rf "$fixture_root"' EXIT
 
+python3 "$repo_root/scripts/test-postgres-test-discovery.py"
+
 mkdir -p "$fixture_root/src/standard" "$fixture_root/src/tests" "$fixture_root/tests/common"
 
 cat >"$fixture_root/Cargo.toml" <<'TOML'

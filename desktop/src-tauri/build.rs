@@ -4,10 +4,23 @@ include!("src/commands/reconnect_hook_config.rs");
 // Same source of truth the runtime filters with, so a baked build env cannot
 // carry a reserved key the runtime believes it already rejected.
 include!("src/managed_agents/reserved_env_keys.rs");
+include!("src/private_build_flags.rs");
 
 use base64::Engine as _;
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=ORTAK_PRIVATE_DESKTOP");
+    println!("cargo:rerun-if-env-changed=VITE_ORTAK_PRIVATE_MODE");
+    println!("cargo:rustc-check-cfg=cfg(ortak_private_desktop)");
+    let private = validate_private_build_flags(
+        std::env::var("ORTAK_PRIVATE_DESKTOP").ok().as_deref(),
+        std::env::var("VITE_ORTAK_PRIVATE_MODE").ok().as_deref(),
+        std::env::var("BUZZ_BUILD_DEMO_SLUG").ok().as_deref(),
+    )
+    .unwrap_or_else(|reason| panic!("{reason}"));
+    if private {
+        println!("cargo:rustc-cfg=ortak_private_desktop");
+    }
     println!("cargo:rerun-if-env-changed=BUZZ_RELAY_URL");
     println!("cargo:rerun-if-env-changed=BUZZ_RELAY_HTTP");
     println!("cargo:rerun-if-env-changed=BUZZ_UPDATER_PUBLIC_KEY");
@@ -153,8 +166,17 @@ fn main() {
         );
     }
 
+    let attributes = tauri_build::Attributes::new();
+    // No-voice builds have no global-shortcut plugin or its permission manifest.
+    // Legacy defaults still load both capability files with the same permissions.
+    let attributes = if cfg!(feature = "legacy-voice") {
+        attributes
+    } else {
+        println!("cargo:rerun-if-changed=capabilities");
+        attributes.capabilities_path_pattern("./capabilities/default.json")
+    };
     tauri_build::try_build(
-        tauri_build::Attributes::new().plugin(
+        attributes.plugin(
             "websocket",
             tauri_build::InlinedPlugin::new()
                 .commands(&["connect", "send", "disconnect", "disconnect_all"])

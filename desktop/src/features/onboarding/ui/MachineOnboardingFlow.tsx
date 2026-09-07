@@ -1,6 +1,8 @@
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 import * as React from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import { motion, useReducedMotion } from "motion/react";
+import { useIdentityQuery } from "@/shared/api/hooks";
 
 import {
   getIdentity,
@@ -83,6 +85,11 @@ export function MachineOnboardingFlow({
    */
   navigateAfterComplete?: (nav: PostOnboardingNavigation) => void;
 }) {
+  const currentIdentity = useIdentityQuery().data;
+  const hasConfiguredIdentity =
+    privateOrtakMode &&
+    !identityLost &&
+    currentIdentity?.storage === "environment";
   const [page, setPage] = React.useState<MachineOnboardingPage>(
     identityLost ? "key-import" : (initialPage ?? "identity"),
   );
@@ -141,7 +148,11 @@ export function MachineOnboardingFlow({
       setTransitionDirection("forward");
       setReturningFromSecurity(false);
       setBackupSubview("created");
-      setPage("backup");
+      setPage(
+        privateOrtakMode && identity.storage === "environment"
+          ? "setup"
+          : "backup",
+      );
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Failed to load identity",
@@ -236,6 +247,11 @@ export function MachineOnboardingFlow({
   }, [backupSession]);
 
   const backFromSetup = React.useCallback(() => {
+    if (privateOrtakMode && identityStorage === "environment") {
+      setTransitionDirection("backward");
+      setPage("identity");
+      return;
+    }
     if (identityWasImported) {
       setKeyImportFormKey((current) => current + 1);
       setKeyImportStage("key-entry");
@@ -250,7 +266,7 @@ export function MachineOnboardingFlow({
     setTransitionDirection("backward");
     setReturningFromSecurity(false);
     setPage("backup");
-  }, [backupSession, backupSubview, identityWasImported]);
+  }, [backupSession, backupSubview, identityWasImported, identityStorage]);
 
   const chromeBackAction =
     page === "key-import" &&
@@ -293,7 +309,7 @@ export function MachineOnboardingFlow({
       data-testid="machine-onboarding-gate"
     >
       <StartupWindowDragRegion />
-      {page === "identity" ? <LandingBees /> : null}
+      {page === "identity" && !privateOrtakMode ? <LandingBees /> : null}
       {page !== "identity" && !isSecuritySubview ? (
         <OnboardingChrome
           current={page === "config" ? 4 : page === "setup" ? 3 : 2}
@@ -311,14 +327,24 @@ export function MachineOnboardingFlow({
               direction={transitionDirection}
               transitionKey={`machine-identity-${transitionDirection}`}
             >
-              <img
-                alt="Buzz"
-                className="w-full max-w-[600px]"
-                src="/landing/buzz-wordmark.png"
-              />
+              {privateOrtakMode ? (
+                <h1 className="text-5xl font-semibold">Ortak</h1>
+              ) : (
+                <img
+                  alt="Buzz"
+                  className="w-full max-w-[600px]"
+                  src="/landing/buzz-wordmark.png"
+                />
+              )}
               <p className="mt-2 max-w-[560px] text-center text-2xl font-normal leading-none text-foreground">
-                Your people, your agents, your projects —<br />
-                all in one place.
+                {privateOrtakMode ? (
+                  "Your Office, employees, and work in one place."
+                ) : (
+                  <>
+                    Your people, your agents, your projects —<br />
+                    all in one place.
+                  </>
+                )}
               </p>
               {error ? (
                 <p className="mt-4 text-sm text-destructive">{error}</p>
@@ -332,9 +358,11 @@ export function MachineOnboardingFlow({
                 >
                   {isPending
                     ? "Loading identity…"
-                    : selectedPubkey
-                      ? "Continue setup"
-                      : "Create a new identity key"}
+                    : hasConfiguredIdentity
+                      ? "Continue with configured identity"
+                      : selectedPubkey
+                        ? "Continue setup"
+                        : "Create a new identity key"}
                 </Button>
                 <Button
                   className={`${ONBOARDING_SECONDARY_CTA_CLASS} px-5`}
@@ -348,7 +376,7 @@ export function MachineOnboardingFlow({
                   type="button"
                   variant="ghost"
                 >
-                  {selectedPubkey
+                  {selectedPubkey || hasConfiguredIdentity
                     ? "Use a different key instead"
                     : "Use an existing key"}
                 </Button>
@@ -528,6 +556,22 @@ export function MachineOnboardingFlow({
                 returningFromSecurity={returningFromSecurity}
               />
             )
+          ) : privateOrtakMode ? (
+            <section className="flex flex-col items-center gap-4 text-center">
+              <h1 className="text-xl font-semibold">
+                Connect to your private Office
+              </h1>
+              <p className="max-w-md text-sm text-muted-foreground">
+                Your identity is ready. Employees are configured by your
+                company’s Ortak operator.
+              </p>
+              <Button
+                data-testid="ortak-onboarding-continue"
+                onClick={() => complete(selectedPubkey ?? undefined)}
+              >
+                Continue to Office
+              </Button>
+            </section>
           ) : page === "setup" ? (
             <SetupStep
               actions={{

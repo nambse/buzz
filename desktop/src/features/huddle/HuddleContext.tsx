@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import * as React from "react";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
+import { privateHuddleLevels, privateHuddleState } from "./privateHuddleState";
 
 import { setupAudioWorklet, type AudioWorkletHandle } from "./lib/audioWorklet";
 import { type AudioInputDevice, useAudioDevices } from "./lib/useAudioDevices";
@@ -62,7 +64,22 @@ function interruptAgentSpeech(agentPubkey: string) {
 const HuddleContext = React.createContext<HuddleContextValue | null>(null);
 const HuddleLevelsContext = React.createContext<HuddleLevelsValue | null>(null);
 
-export function HuddleProvider({
+export function HuddleProvider(
+  props: React.ComponentProps<typeof LegacyHuddleProvider>,
+) {
+  if (privateOrtakMode) {
+    return (
+      <HuddleContext.Provider value={privateHuddleState}>
+        <HuddleLevelsContext.Provider value={privateHuddleLevels}>
+          {props.children}
+        </HuddleLevelsContext.Provider>
+      </HuddleContext.Provider>
+    );
+  }
+  return <LegacyHuddleProvider {...props} />;
+}
+
+function LegacyHuddleProvider({
   children,
   ownsAudioSession = true,
   onHuddleStartPendingChange,

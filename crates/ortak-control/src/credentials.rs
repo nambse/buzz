@@ -45,3 +45,6 @@ pub trait CredentialResolver {
         credential_ref: &CredentialRef,
     ) -> Result<CredentialReferenceStatus, CredentialError>;
 }
+
+mod environment;
+pub use environment::{EnvCredentialBinding, EnvCredentialResolver};

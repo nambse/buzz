@@ -230,6 +230,9 @@ fn desktop_is_alive_for_instance(_instance_id: &str) -> bool {
 /// all agents from that dead instance are reaped.
 #[cfg(target_os = "macos")]
 pub(crate) fn reap_dead_instance_agents(our_instance_id: &str, skip_pids: &[u32]) {
+    if !crate::private_native::legacy_enabled() {
+        return;
+    }
     let my_uid = unsafe { libc::getuid() };
     let my_pid = std::process::id() as i32;
 
@@ -299,6 +302,9 @@ pub(crate) fn reap_dead_instance_agents(our_instance_id: &str, skip_pids: &[u32]
 
 #[cfg(all(unix, not(target_os = "macos")))]
 pub(crate) fn reap_dead_instance_agents(our_instance_id: &str, skip_pids: &[u32]) {
+    if !crate::private_native::legacy_enabled() {
+        return;
+    }
     let my_uid = unsafe { libc::getuid() };
     let my_pid = std::process::id() as i32;
     let mut foreign_agents: HashMap<String, Vec<i32>> = HashMap::new();

@@ -518,6 +518,7 @@ async fn dispatch_persistent_event_inner(
     }
 
     // Skip workflow triggering for workflow-execution kinds and relay-signed workflow messages.
+    #[cfg(feature = "legacy-workflow")]
     let is_relay_workflow_msg = stored_event.event.pubkey == state.relay_keypair.public_key()
         && stored_event
             .event
@@ -525,6 +526,7 @@ async fn dispatch_persistent_event_inner(
             .iter()
             .any(|t| t.as_slice().first().map(|s| s.as_str()) == Some("buzz:workflow"));
 
+    #[cfg(feature = "legacy-workflow")]
     if !buzz_core::kind::is_workflow_execution_kind(kind_u32)
         && !buzz_core::kind::is_command_kind(kind_u32)
         && !is_relay_workflow_msg
@@ -2027,6 +2029,7 @@ mod tests {
             let audit = buzz_audit::AuditService::new(pool.clone());
             let auth = buzz_auth::AuthService::new(config.auth.clone());
             let search = buzz_search::SearchService::new(pool.clone());
+            #[cfg(feature = "legacy-workflow")]
             let workflow_engine = Arc::new(buzz_workflow::WorkflowEngine::new(
                 db.clone(),
                 buzz_workflow::WorkflowConfig::default(),
@@ -2041,6 +2044,7 @@ mod tests {
                 pubsub,
                 auth,
                 search,
+                #[cfg(feature = "legacy-workflow")]
                 workflow_engine,
                 Keys::generate(),
                 media_storage,
@@ -2080,6 +2084,7 @@ mod tests {
             let audit = buzz_audit::AuditService::new(pool.clone());
             let auth = buzz_auth::AuthService::new(config.auth.clone());
             let search = buzz_search::SearchService::new(pool.clone());
+            #[cfg(feature = "legacy-workflow")]
             let workflow_engine = Arc::new(buzz_workflow::WorkflowEngine::new(
                 db.clone(),
                 buzz_workflow::WorkflowConfig::default(),
@@ -2093,6 +2098,7 @@ mod tests {
                 pubsub,
                 auth,
                 search,
+                #[cfg(feature = "legacy-workflow")]
                 workflow_engine,
                 Keys::generate(),
                 media_storage,

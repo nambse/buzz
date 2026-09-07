@@ -1,6 +1,7 @@
 import { useSystemColorScheme } from "@/shared/theme/useSystemColorScheme";
 import { Button } from "@/shared/ui/button";
 import { StartupWindowDragRegion } from "@/shared/ui/StartupWindowDragRegion";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 
 type CommunityApplyErrorScreenProps = {
   error: string;
@@ -24,7 +25,9 @@ export function CommunityApplyErrorScreen({
       <StartupWindowDragRegion />
       <div className="relative flex w-full max-w-[500px] flex-col items-center text-center">
         <h1 className="text-3xl font-semibold tracking-tight">
-          Community connection failed
+          {privateOrtakMode
+            ? "Company connection failed"
+            : "Community connection failed"}
         </h1>
         <p className="mt-3 text-sm leading-6 text-muted-foreground">{error}</p>
         <div className="mt-8 flex w-full max-w-[300px] flex-col gap-3">
@@ -36,14 +39,16 @@ export function CommunityApplyErrorScreen({
           >
             Retry
           </Button>
-          <Button
-            className="h-10 w-full"
-            onClick={onChangeCommunity}
-            type="button"
-            variant="secondary"
-          >
-            Change community
-          </Button>
+          {!privateOrtakMode ? (
+            <Button
+              className="h-10 w-full"
+              onClick={onChangeCommunity}
+              type="button"
+              variant="secondary"
+            >
+              Change community
+            </Button>
+          ) : null}
         </div>
       </div>
     </div>

@@ -143,6 +143,11 @@ fn run_boot_migrations_inner(app: &tauri::AppHandle, reset_completed: bool) {
         false
     };
 
+    // Private Office has no legacy agent store to migrate or adopt.
+    if !crate::private_native::legacy_enabled() {
+        return;
+    }
+
     // On dev builds, copy `.repos-dir` from ~/.buzz → ~/.buzz-dev before
     // resolve_repos_at_boot() reads it. Skip-if-dest-exists so it is idempotent
     // and never clobbers a value the dev nest already set explicitly.

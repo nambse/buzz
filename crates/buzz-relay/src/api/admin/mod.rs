@@ -1311,6 +1311,7 @@ mod postgres_tests {
         let audit = buzz_audit::AuditService::new(pool.clone());
         let auth = buzz_auth::AuthService::new(config.auth.clone());
         let search = buzz_search::SearchService::new(pool.clone());
+        #[cfg(feature = "legacy-workflow")]
         let workflow_engine = Arc::new(buzz_workflow::WorkflowEngine::new(
             db.clone(),
             buzz_workflow::WorkflowConfig::default(),
@@ -1324,6 +1325,7 @@ mod postgres_tests {
             pubsub,
             auth,
             search,
+            #[cfg(feature = "legacy-workflow")]
             workflow_engine,
             nostr::Keys::generate(),
             media_storage,
@@ -1816,6 +1818,7 @@ mod postgres_tests {
         let audit = buzz_audit::AuditService::new(pool.clone());
         let auth = buzz_auth::AuthService::new(config.auth.clone());
         let search = buzz_search::SearchService::new(pool.clone());
+        #[cfg(feature = "legacy-workflow")]
         let workflow_engine = Arc::new(buzz_workflow::WorkflowEngine::new(
             db.clone(),
             buzz_workflow::WorkflowConfig::default(),
@@ -1829,6 +1832,7 @@ mod postgres_tests {
             pubsub,
             auth,
             search,
+            #[cfg(feature = "legacy-workflow")]
             workflow_engine,
             nostr::Keys::generate(),
             media_storage,
@@ -2310,6 +2314,7 @@ mod postgres_tests {
         let audit = buzz_audit::AuditService::new(pool.clone());
         let auth = buzz_auth::AuthService::new(config.auth.clone());
         let search = buzz_search::SearchService::new(pool.clone());
+        #[cfg(feature = "legacy-workflow")]
         let workflow_engine = Arc::new(buzz_workflow::WorkflowEngine::new(
             db.clone(),
             buzz_workflow::WorkflowConfig::default(),
@@ -2323,6 +2328,7 @@ mod postgres_tests {
             pubsub,
             auth,
             search,
+            #[cfg(feature = "legacy-workflow")]
             workflow_engine,
             nostr::Keys::generate(),
             media_storage,
@@ -2388,6 +2394,7 @@ mod postgres_tests {
         let audit = buzz_audit::AuditService::new(pool.clone());
         let auth = buzz_auth::AuthService::new(config.auth.clone());
         let search = buzz_search::SearchService::new(pool.clone());
+        #[cfg(feature = "legacy-workflow")]
         let workflow_engine = Arc::new(buzz_workflow::WorkflowEngine::new(
             db.clone(),
             buzz_workflow::WorkflowConfig::default(),
@@ -2401,6 +2408,7 @@ mod postgres_tests {
             pubsub,
             auth,
             search,
+            #[cfg(feature = "legacy-workflow")]
             workflow_engine,
             nostr::Keys::generate(),
             media_storage,
@@ -2515,6 +2523,7 @@ mod postgres_tests {
         let audit = buzz_audit::AuditService::new(pool.clone());
         let auth = buzz_auth::AuthService::new(config.auth.clone());
         let search = buzz_search::SearchService::new(pool.clone());
+        #[cfg(feature = "legacy-workflow")]
         let workflow_engine = Arc::new(buzz_workflow::WorkflowEngine::new(
             db.clone(),
             buzz_workflow::WorkflowConfig::default(),
@@ -2528,6 +2537,7 @@ mod postgres_tests {
             pubsub,
             auth,
             search,
+            #[cfg(feature = "legacy-workflow")]
             workflow_engine,
             nostr::Keys::generate(),
             media_storage,
@@ -2884,6 +2894,7 @@ mod postgres_tests {
         let audit = buzz_audit::AuditService::new(pool.clone());
         let auth = buzz_auth::AuthService::new(config.auth.clone());
         let search = buzz_search::SearchService::new(pool.clone());
+        #[cfg(feature = "legacy-workflow")]
         let workflow_engine = Arc::new(buzz_workflow::WorkflowEngine::new(
             db.clone(),
             buzz_workflow::WorkflowConfig::default(),
@@ -2897,6 +2908,7 @@ mod postgres_tests {
             pubsub,
             auth,
             search,
+            #[cfg(feature = "legacy-workflow")]
             workflow_engine,
             nostr::Keys::generate(),
             media_storage,
@@ -2957,6 +2969,7 @@ mod postgres_tests {
         let audit = buzz_audit::AuditService::new(pool.clone());
         let auth = buzz_auth::AuthService::new(config.auth.clone());
         let search = buzz_search::SearchService::new(pool.clone());
+        #[cfg(feature = "legacy-workflow")]
         let workflow_engine = Arc::new(buzz_workflow::WorkflowEngine::new(
             db.clone(),
             buzz_workflow::WorkflowConfig::default(),
@@ -2970,6 +2983,7 @@ mod postgres_tests {
             pubsub,
             auth,
             search,
+            #[cfg(feature = "legacy-workflow")]
             workflow_engine,
             nostr::Keys::generate(),
             media_storage,
@@ -3027,6 +3041,7 @@ mod postgres_tests {
         let audit = buzz_audit::AuditService::new(pool.clone());
         let auth = buzz_auth::AuthService::new(config.auth.clone());
         let search = buzz_search::SearchService::new(pool.clone());
+        #[cfg(feature = "legacy-workflow")]
         let workflow_engine = Arc::new(buzz_workflow::WorkflowEngine::new(
             db.clone(),
             buzz_workflow::WorkflowConfig::default(),
@@ -3040,6 +3055,7 @@ mod postgres_tests {
             pubsub,
             auth,
             search,
+            #[cfg(feature = "legacy-workflow")]
             workflow_engine,
             nostr::Keys::generate(),
             media_storage,
@@ -4732,6 +4748,7 @@ mod postgres_tests {
         let audit = buzz_audit::AuditService::new(pool.clone());
         let auth = buzz_auth::AuthService::new(config.auth.clone());
         let search = buzz_search::SearchService::new(pool.clone());
+        #[cfg(feature = "legacy-workflow")]
         let workflow_engine = Arc::new(buzz_workflow::WorkflowEngine::new(
             db.clone(),
             buzz_workflow::WorkflowConfig::default(),
@@ -4745,6 +4762,7 @@ mod postgres_tests {
             pubsub,
             auth,
             search,
+            #[cfg(feature = "legacy-workflow")]
             workflow_engine,
             nostr::Keys::generate(),
             media_storage,

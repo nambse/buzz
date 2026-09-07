@@ -153,6 +153,7 @@ async fn boundary_submit_signed_event_with_keys_blocks_ncryptsec() {
 }
 
 /// Boundary 5: huddle STT publisher (`huddle/pipeline.rs`).
+#[cfg(feature = "legacy-voice")]
 #[test]
 fn boundary_huddle_stt_blocks_ncryptsec() {
     let keys = nostr::Keys::generate();
@@ -446,7 +447,8 @@ fn ncryptsec_handling_is_confined_to_allowlisted_files() {
         "src/egress_guard_tests.rs",
         "src/commands/identity.rs",
         "src/commands/identity_key_backup_tests.rs",
-        "src/lib.rs", // module registration + invoke handler
+        "src/lib.rs",            // module registration + invoke handler
+        "src/private_native.rs", // admission names for the same identity commands
         // boundary wiring (guard call sites name the module, not the codec):
         "src/relay.rs",
         "src/relay/submit.rs",

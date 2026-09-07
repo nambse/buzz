@@ -1,0 +1,9 @@
+**
+!Dockerfile
+!.dockerignore
+!hermes-source-lock.json
+!ortak_hermes_bridge/
+!ortak_hermes_bridge/*.py
+!Dockerfile.controller
+!checks/
+!checks/*.py

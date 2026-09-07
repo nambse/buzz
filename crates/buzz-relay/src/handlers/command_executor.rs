@@ -11,20 +11,28 @@
 
 use std::sync::Arc;
 
+#[cfg(feature = "legacy-workflow")]
 use chrono::Utc;
 use nostr::Event;
+#[cfg(feature = "legacy-workflow")]
 use sha2::{Digest, Sha256};
 use tracing::warn;
 use uuid::Uuid;
 
 use buzz_core::kind::*;
-use buzz_core::tenant::{CommunityId, TenantContext};
+#[cfg(feature = "legacy-workflow")]
+use buzz_core::tenant::CommunityId;
+use buzz_core::tenant::TenantContext;
 use buzz_datastore_tracing::datastore_span;
+#[cfg(feature = "legacy-workflow")]
 use buzz_db::workflow::{ApprovalStatus, RunStatus};
+#[cfg(feature = "legacy-workflow")]
 use buzz_db::DbError;
+#[cfg(feature = "legacy-workflow")]
 use buzz_workflow::executor::TriggerContext;
 
 use crate::state::AppState;
+#[cfg(feature = "legacy-workflow")]
 use crate::webhook_secret;
 
 use super::ingest::{extract_channel_id, IngestAuth, IngestError, IngestResult};
@@ -40,6 +48,9 @@ pub async fn handle_command(
     event: Event,
     auth: IngestAuth,
 ) -> Result<IngestResult, IngestError> {
+    if let Some(reason) = crate::legacy::unavailable_event(event.kind.as_u16() as u32) {
+        return Err(IngestError::Rejected(reason.to_string()));
+    }
     // Ensure the authenticated user exists in the users table (foreign key requirement).
     // The old REST handlers did this via extract_auth_context; command executor must do it explicitly.
     let pubkey_bytes = auth.pubkey().to_bytes().to_vec();
@@ -66,9 +77,13 @@ pub async fn handle_command(
         KIND_DM_OPEN => handle_dm_open(tenant, state, &event, &auth).await,
         KIND_DM_ADD_MEMBER => handle_dm_add_member(tenant, state, &event, &auth).await,
         KIND_DM_HIDE => handle_dm_hide(tenant, state, &event, &auth).await,
+        #[cfg(feature = "legacy-workflow")]
         KIND_WORKFLOW_DEF => handle_workflow_def(tenant, state, &event, &auth).await,
+        #[cfg(feature = "legacy-workflow")]
         KIND_WORKFLOW_TRIGGER => handle_workflow_trigger(tenant, state, &event, &auth).await,
+        #[cfg(feature = "legacy-workflow")]
         KIND_APPROVAL_GRANT => handle_approval_grant(tenant, state, &event, &auth).await,
+        #[cfg(feature = "legacy-workflow")]
         KIND_APPROVAL_DENY => handle_approval_deny(tenant, state, &event, &auth).await,
         _ => Err(IngestError::Rejected(format!(
             "unknown command kind: {kind}"
@@ -245,6 +260,7 @@ fn extract_h_tag(event: &Event) -> Option<String> {
 }
 
 /// Extract the first `d` tag value from an event.
+#[cfg(feature = "legacy-workflow")]
 fn extract_d_tag(event: &Event) -> Option<String> {
     event.tags.iter().find_map(|t| {
         if t.kind().to_string() == "d" {
@@ -256,6 +272,7 @@ fn extract_d_tag(event: &Event) -> Option<String> {
 }
 
 /// Extract the first `e` tag value from an event.
+#[cfg(feature = "legacy-workflow")]
 fn extract_e_tag(event: &Event) -> Option<String> {
     event.tags.iter().find_map(|t| {
         if t.kind().to_string() == "e" {
@@ -290,6 +307,7 @@ fn decode_pubkey(hex_str: &str) -> Result<Vec<u8>, IngestError> {
 }
 
 /// Compute SHA-256 hash of a string, returning raw bytes.
+#[cfg(feature = "legacy-workflow")]
 fn compute_definition_hash(json_str: &str) -> Vec<u8> {
     Sha256::digest(json_str.as_bytes()).to_vec()
 }
@@ -638,6 +656,7 @@ async fn handle_dm_hide(
     })
 }
 
+#[cfg(feature = "legacy-workflow")]
 async fn handle_workflow_def(
     tenant: &TenantContext,
     state: &Arc<AppState>,
@@ -812,6 +831,7 @@ async fn handle_workflow_def(
     })
 }
 
+#[cfg(feature = "legacy-workflow")]
 async fn handle_workflow_trigger(
     tenant: &TenantContext,
     state: &Arc<AppState>,
@@ -992,6 +1012,7 @@ async fn handle_workflow_trigger(
 /// - 64-char lowercase hex string — only that exact pubkey may approve.
 ///
 /// All other formats are rejected (fail-closed).
+#[cfg(feature = "legacy-workflow")]
 fn check_approver_spec(approver_spec: &str, requester_hex: &str) -> Result<(), IngestError> {
     let spec = approver_spec.trim();
 
@@ -1017,6 +1038,7 @@ fn check_approver_spec(approver_spec: &str, requester_hex: &str) -> Result<(), I
     )))
 }
 
+#[cfg(feature = "legacy-workflow")]
 async fn handle_approval_grant(
     tenant: &TenantContext,
     state: &Arc<AppState>,
@@ -1129,6 +1151,7 @@ async fn handle_approval_grant(
     })
 }
 
+#[cfg(feature = "legacy-workflow")]
 async fn handle_approval_deny(
     tenant: &TenantContext,
     state: &Arc<AppState>,
@@ -1270,6 +1293,7 @@ async fn handle_approval_deny(
 }
 
 /// Resume a suspended workflow run after an approval gate has been granted.
+#[cfg(feature = "legacy-workflow")]
 async fn resume_workflow_after_approval(
     engine: Arc<buzz_workflow::WorkflowEngine>,
     db: buzz_db::Db,
@@ -1366,7 +1390,7 @@ async fn resume_workflow_after_approval(
         .await;
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy-workflow"))]
 mod postgres_tests {
     use super::*;
     use nostr::{EventBuilder, Keys, Kind, Tag, Timestamp};

@@ -15,6 +15,7 @@ impl AppState {
     /// Convenience wrapper — replaces 15+ instances of
     /// `state.huddle_state.lock().map_err(|e| e.to_string())?` throughout the
     /// huddle module.
+    #[cfg(feature = "legacy-voice")]
     pub fn huddle(&self) -> Result<std::sync::MutexGuard<'_, crate::huddle::HuddleState>, String> {
         self.huddle_state.lock().map_err(|e| e.to_string())
     }
@@ -72,6 +73,7 @@ impl AppState {
     /// Acquires both locks (app_handle + huddle_state), clones a snapshot,
     /// releases both, then emits. Best-effort — no-op if either lock is
     /// poisoned or the app_handle hasn't been set yet.
+    #[cfg(feature = "legacy-voice")]
     pub fn emit_huddle_state_changed(&self) {
         let app = match self.app_handle.lock() {
             Ok(guard) => guard.clone(),

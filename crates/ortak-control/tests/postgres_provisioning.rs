@@ -80,7 +80,12 @@ fn fixture(name: &str) -> EmployeeManifest {
         env!("CARGO_MANIFEST_DIR")
     ))
     .expect("read fixture");
-    serde_yaml::from_str(&yaml).expect("parse fixture")
+    let mut value: EmployeeManifest = serde_yaml::from_str(&yaml).expect("parse fixture");
+    value.employee.runtime.adapter = "fake-runtime".into();
+    if let Some(memory) = &mut value.employee.memory {
+        memory.adapter = "fake-memory".into();
+    }
+    value
 }
 
 /// Unique-per-test disposable `create` employee so parallel runs never
@@ -200,8 +205,8 @@ fn request(manifest: &EmployeeManifest, mode: OperationMode, dry_run: bool) -> P
     }
 }
 
-/// The activation the saga would commit for `manifest` under `operation_id`,
-/// built directly so tests can hit the repository's SQL seam.
+/// An intentionally unprepared candidate for denial and committed-replay tests.
+/// Successful new activations must instead come from the real saga Capture seam.
 fn activation_for(manifest: &EmployeeManifest, operation_id: Uuid) -> RevisionActivation {
     let now = Utc::now();
     let mut employee = manifest.employee.clone();
@@ -212,6 +217,7 @@ fn activation_for(manifest: &EmployeeManifest, operation_id: Uuid) -> RevisionAc
     activation_step.started_at = Some(now);
     activation_step.finished_at = Some(now);
     RevisionActivation {
+        target: None,
         employee,
         provisioning_mode: ProvisioningMode::Create,
         manifest_fingerprint: [0; 32],
@@ -684,9 +690,9 @@ async fn stale_writes_never_regress_a_committed_activation() {
     assert_eq!(activation.attempt_count, 1);
     assert_eq!(revision_count(&pool, &scope, &id).await, 1);
 
-    // Even if the status column were regressed behind the repository's back,
-    // compensation refuses an operation that activated a revision.
-    sqlx::query(
+    // The durable audit guard also refuses direct status regression; the
+    // compensation API continues refusing the immutable activated operation.
+    let refused_sql = sqlx::query(
         "UPDATE provisioning_operations SET status = 'failed', current_step = 'activate_revision'
           WHERE company_id = $1 AND id = $2",
     )
@@ -694,7 +700,14 @@ async fn stale_writes_never_regress_a_committed_activation() {
     .bind(operation.id)
     .execute(&pool)
     .await
-    .expect("regress status");
+    .expect_err("activated operation cannot be regressed through direct SQL");
+    assert_eq!(
+        refused_sql
+            .as_database_error()
+            .and_then(|e| e.code())
+            .as_deref(),
+        Some("55000")
+    );
     let refused = saga.compensate(&scope, operation.id).await;
     assert!(
         matches!(
@@ -844,23 +857,36 @@ async fn retired_office_binding_is_never_reactivated() {
         .begin(&scope, &request(&manifest, OperationMode::Create, false))
         .await
         .expect("begin first");
-    let first_revision = control
-        .activate_revision(&scope, first.id, &activation_for(&manifest, first.id))
+    let first_revision = match saga
+        .resume(&scope, first.id)
         .await
-        .expect("activate first key");
-
+        .expect("activate first key")
+    {
+        SagaOutcome::Succeeded(op) => op.result_revision_id.expect("revision"),
+        other => panic!("first activation failed: {other:?}"),
+    };
+    let mut manifest = manifest;
+    manifest.provisioning = ProvisioningMode::Adopt;
+    manifest.employee.runtime.profile_ref =
+        Some(format!("fake://profiles/{}", manifest.employee.id));
     // Rotate to a second key: the first binding is retired, not deleted.
     let mut rotated = manifest.clone();
     let second_key = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
     rotated.employee.office.public_key = second_key.clone();
-    let second = saga
-        .begin(&scope, &request(&rotated, OperationMode::Create, false))
+    let second_fakes = Fakes::adoptable(&rotated);
+    let second_saga = second_fakes.saga(&control);
+    let second = second_saga
+        .begin(&scope, &request(&rotated, OperationMode::Update, false))
         .await
-        .expect("begin second");
-    let second_revision = control
-        .activate_revision(&scope, second.id, &activation_for(&rotated, second.id))
+        .expect("begin rotation");
+    let second_revision = match second_saga
+        .resume(&scope, second.id)
         .await
-        .expect("activate second key");
+        .expect("activate second key")
+    {
+        SagaOutcome::Succeeded(op) => op.result_revision_id.expect("revision"),
+        other => panic!("rotation failed: {other:?}"),
+    };
     assert_ne!(first_revision, second_revision);
     assert_eq!(
         office_binding(&pool, &scope, &first_key).await,
@@ -878,12 +904,29 @@ async fn retired_office_binding_is_never_reactivated() {
     );
 
     // Going back to the retired key must fail closed and roll back everything.
-    let third = saga
-        .begin(&scope, &request(&manifest, OperationMode::Create, false))
+    let third_fakes = Fakes::adoptable(&manifest);
+    let third_capture = support::Capture::new(&control);
+    let third_saga = ProvisioningSaga::new(
+        &third_capture,
+        &third_fakes.runtime,
+        &third_fakes.memory,
+        &third_fakes.office,
+        &third_fakes.credentials,
+        SagaConfig::default(),
+    );
+    let third = third_saga
+        .begin(&scope, &request(&manifest, OperationMode::Update, false))
         .await
-        .expect("begin third");
+        .expect("begin retired attempt");
+    assert!(third_saga.resume(&scope, third.id).await.is_err());
+    let third_candidate = third_capture.take();
+    let third_before = control
+        .load_operation(&scope, third.id)
+        .await
+        .unwrap()
+        .unwrap();
     let refused = control
-        .activate_revision(&scope, third.id, &activation_for(&manifest, third.id))
+        .activate_revision(&scope, third.id, &third_candidate)
         .await;
     match refused {
         Err(ControlError::InvalidData(detail)) => {
@@ -898,12 +941,29 @@ async fn retired_office_binding_is_never_reactivated() {
         "credential://ortak-runtime/{id}/office-signing-key-2"
     ))
     .expect("ref");
-    let fourth = saga
-        .begin(&scope, &request(&resigned, OperationMode::Create, false))
+    let fourth_fakes = Fakes::adoptable(&resigned);
+    let fourth_capture = support::Capture::new(&control);
+    let fourth_saga = ProvisioningSaga::new(
+        &fourth_capture,
+        &fourth_fakes.runtime,
+        &fourth_fakes.memory,
+        &fourth_fakes.office,
+        &fourth_fakes.credentials,
+        SagaConfig::default(),
+    );
+    let fourth = fourth_saga
+        .begin(&scope, &request(&resigned, OperationMode::Update, false))
         .await
-        .expect("begin fourth");
+        .expect("begin signer change");
+    assert!(fourth_saga.resume(&scope, fourth.id).await.is_err());
+    let fourth_candidate = fourth_capture.take();
+    let fourth_before = control
+        .load_operation(&scope, fourth.id)
+        .await
+        .unwrap()
+        .unwrap();
     let refused = control
-        .activate_revision(&scope, fourth.id, &activation_for(&resigned, fourth.id))
+        .activate_revision(&scope, fourth.id, &fourth_candidate)
         .await;
     match refused {
         Err(ControlError::InvalidData(detail)) => {
@@ -932,13 +992,17 @@ async fn retired_office_binding_is_never_reactivated() {
     let (status, active) = employee_row(&pool, &scope, &id).await;
     assert_eq!(status, "active");
     assert_eq!(active, Some(second_revision));
-    for operation_id in [third.id, fourth.id] {
+    for before in [third_before, fourth_before] {
+        let operation_id = before.id;
         let stored = control
             .load_operation(&scope, operation_id)
             .await
             .expect("load")
             .expect("exists");
-        assert_eq!(stored.status, OperationStatus::Pending);
+        assert_eq!(
+            stored, before,
+            "a refused activation rolls back its entire operation state"
+        );
         assert_eq!(stored.result_revision_id, None);
     }
 }
@@ -1112,3 +1176,12 @@ async fn succeeded_steps_cannot_be_regressed_by_a_stale_worker() {
     assert!(done.result_revision_id.is_some());
     assert_eq!(fakes.runtime.created_profiles().len(), 1);
 }
+
+#[path = "provisioning_support.rs"]
+mod support;
+
+#[path = "postgres_provisioning/freshness.rs"]
+mod freshness;
+
+#[path = "postgres_provisioning/reuse.rs"]
+mod reuse;

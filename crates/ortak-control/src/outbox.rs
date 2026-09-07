@@ -8,6 +8,8 @@ use uuid::Uuid;
 pub enum OutboxKind {
     /// Start a run for one decision recipient.
     RunDispatch,
+    /// Start an explicitly requested Work execution.
+    WorkRunDispatch,
     /// Publish a frozen signed Office event for a run.
     OfficePublish,
 }
@@ -17,6 +19,7 @@ impl OutboxKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::RunDispatch => "run_dispatch",
+            Self::WorkRunDispatch => "work_run_dispatch",
             Self::OfficePublish => "office_publish",
         }
     }
@@ -25,6 +28,7 @@ impl OutboxKind {
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "run_dispatch" => Some(Self::RunDispatch),
+            "work_run_dispatch" => Some(Self::WorkRunDispatch),
             "office_publish" => Some(Self::OfficePublish),
             _ => None,
         }

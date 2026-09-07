@@ -1,3 +1,5 @@
+import { privateOrtakMode } from "@/features/ortak/privateMode";
+import { LegacyAgentLifecycle } from "@/features/ortak/LegacyAgentLifecycle";
 import * as React from "react";
 import { ProtectedGlobalOverlay } from "@protected-feature-components";
 import { useQueryClient } from "@tanstack/react-query";
@@ -47,8 +49,6 @@ import {
 import { PreventSleepProvider } from "@/features/agents/usePreventSleep";
 import { requestOpenCreateAgent } from "@/features/agents/openCreateAgentEvent";
 import { useAgentsDataRefresh } from "@/features/agents/lib/useAgentsDataRefresh";
-import { useManagedAgentRuntimeReconciliation } from "@/features/agents/useManagedAgentRuntimeReconciliation";
-import { useAutoRestartPolicy } from "@/features/agents/lib/useAutoRestartPolicy";
 import { usePersonaSync } from "@/features/agents/lib/usePersonaSync";
 import { useAgentObserverIngestion } from "@/features/agents/useAgentObserverIngestion";
 import { AgentManagementDialogs } from "@/features/agents/ui/AgentManagementDialogs";
@@ -128,7 +128,8 @@ export function AppShell() {
     showHuddleInMainApp,
     viewHuddleChannel,
   } = useHuddlePresentation();
-  const hasCommunityRail = communitiesHook.communities.length > 1;
+  const hasCommunityRail =
+    !privateOrtakMode && communitiesHook.communities.length > 1;
   const addCommunityDialog = useAddCommunityDialogState();
   const [isChannelManagementOpen, setIsChannelManagementOpen] =
     React.useState(false);
@@ -143,7 +144,6 @@ export function AppShell() {
   const mainInsetRef = React.useRef<HTMLElement>(null);
   const location = useLocation();
   const queryClient = useQueryClient();
-  useManagedAgentRuntimeReconciliation(communitiesHook.communities); // sync storage snapshot
   const {
     goAgents,
     goChannel,
@@ -195,8 +195,6 @@ export function AppShell() {
     communitiesHook.activeCommunity?.relayUrl,
   );
   useAgentsDataRefresh();
-  // Chunk F: auto-restart drifted idle agents (per-agent opt-out, default ON).
-  useAutoRestartPolicy();
   // Owner-global observer ingestion: receives + decrypts agent observer
   // frames and keeps derived active-turn liveness in sync app-wide, so no
   // individual screen/panel has to mount its own bridge for ingestion.
@@ -938,7 +936,11 @@ export function AppShell() {
                           isHuddleRoomStarting={isHuddleRoomStarting}
                           mainInsetRef={mainInsetRef}
                           terminal={
-                            <TerminalBootstrap {...effectiveTerminalContext} />
+                            privateOrtakMode ? null : (
+                              <TerminalBootstrap
+                                {...effectiveTerminalContext}
+                              />
+                            )
                           }
                         >
                           <Outlet />
@@ -954,8 +956,15 @@ export function AppShell() {
                       ) : null}
                     </div>
                   )}
-                  <RequestedAgentCreateDialogs />
-                  <AgentManagementDialogs />
+                  {!privateOrtakMode ? (
+                    <>
+                      <LegacyAgentLifecycle
+                        communities={communitiesHook.communities}
+                      />
+                      <RequestedAgentCreateDialogs />
+                      <AgentManagementDialogs />
+                    </>
+                  ) : null}
                   <AppShellOverlays
                     activeChannel={managedChannel}
                     browseDialogType={browseDialogType}
@@ -989,7 +998,9 @@ export function AppShell() {
                     onOpenChange={setIsSendFeedbackOpen}
                     open={isSendFeedbackOpen}
                   />
-                  {!isHuddleRoom ? <ProtectedGlobalOverlay /> : null}
+                  {!isHuddleRoom && !privateOrtakMode ? (
+                    <ProtectedGlobalOverlay />
+                  ) : null}
                 </AppWorkflowEditorOverlayProvider>
               </AppProfilePanelProvider>
             </SidebarProvider>

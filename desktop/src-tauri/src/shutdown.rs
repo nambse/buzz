@@ -21,6 +21,7 @@ pub(crate) fn shut_down_app(app: &tauri::AppHandle, shutdown_done: &std::sync::a
         prevent_sleep::release(&app.state::<AppState>().prevent_sleep);
         crate::observed_unread::flush(app);
         crate::channel_head_cache::flush(app);
+        #[cfg(feature = "legacy-terminal")]
         app.state::<crate::terminal_runtime::TerminalSessions>()
             .shutdown_all();
         if let Err(error) = shutdown_managed_agents(app) {
@@ -44,6 +45,7 @@ pub(crate) fn install_signal_handler(
             .shutdown_started
             .store(true, Ordering::SeqCst);
         if !shutdown_done.swap(true, Ordering::SeqCst) {
+            #[cfg(feature = "legacy-terminal")]
             app.state::<crate::terminal_runtime::TerminalSessions>()
                 .shutdown_all();
             let _ = shutdown_managed_agents(&app);
@@ -125,6 +127,11 @@ pub(crate) fn shutdown_mesh_runtime(app: &tauri::AppHandle) {
 }
 
 pub(crate) fn shutdown_managed_agents(app: &tauri::AppHandle) -> Result<(), String> {
+    // No owned legacy runtime can be admitted in this compiled desktop. In
+    // particular do not read persisted PIDs or scan other desktop instances.
+    if !crate::private_native::legacy_enabled() {
+        return Ok(());
+    }
     let state = app.state::<AppState>();
     let _restore_transition = state
         .managed_agent_runtime_transition

@@ -932,6 +932,7 @@ export const SystemMessageRow = React.memo(function SystemMessageRow({
               {displayedIdentityIsAgent ? (
                 <>
                   <MessageAgentOwner
+                    pubkey={displayedIdentityPubkey}
                     ownerLabel={displayedOwnerLabel}
                     ownerPubkey={displayedOwnerPubkey}
                   />

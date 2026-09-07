@@ -7,6 +7,8 @@ import { revalidateRelayAgents } from "@/shared/api/tauriRelayAgents";
 import type { ManagedAgent, RelayAgent } from "@/shared/api/types";
 import { normalizePubkey } from "@/shared/lib/pubkey";
 import * as React from "react";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
+import { validateOrtakEmployeeMentions } from "./ortakEmployeeMentions";
 
 export type MentionRevalidationOptions = {
   phase?: "prepare" | "publish";
@@ -14,10 +16,10 @@ export type MentionRevalidationOptions = {
 };
 
 export class AgentMentionAuthorizationError extends Error {
-  constructor() {
-    super(
-      "Could not authorize a mentioned agent. Check its access and channel membership, then retry or remove the mention.",
-    );
+  constructor(
+    message = "Could not authorize a mentioned agent. Check its access and channel membership, then retry or remove the mention.",
+  ) {
+    super(message);
     this.name = "AgentMentionAuthorizationError";
   }
 }
@@ -111,7 +113,7 @@ export function useAgentMentionRevalidation({
   refetchManagedAgents: () => Promise<DirectoryResult<ManagedAgent[]>>;
 }) {
   return React.useCallback(
-    (
+    async (
       pubkeys: readonly string[],
       destinationChannelId?: string | null,
       options: MentionRevalidationOptions = {},
@@ -124,6 +126,21 @@ export function useAgentMentionRevalidation({
             channelId: destinationChannelId,
           }
         : eligibilityScope;
+      if (privateOrtakMode) {
+        try {
+          await validateOrtakEmployeeMentions(
+            pubkeys,
+            currentPubkey,
+            "channelId" in scope ? scope.channelId : null,
+            scope.type === "channel",
+          );
+          return [...pubkeys];
+        } catch {
+          throw new AgentMentionAuthorizationError(
+            "Could not verify the mentioned Office members. Check the channel connection and membership, then retry or remove the mention.",
+          );
+        }
+      }
       return revalidateAgentMentionPubkeys({
         pubkeys,
         agentPubkeys: new Set([

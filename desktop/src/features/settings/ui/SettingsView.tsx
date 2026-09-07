@@ -1,3 +1,7 @@
+import {
+  privateOrtakMode,
+  privateSettingsAllowed,
+} from "@/features/ortak/privateMode";
 import * as React from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { AlertCircle, ArrowLeft, LoaderCircle, RefreshCw } from "lucide-react";
@@ -66,7 +70,7 @@ const settingsNavGroups: Array<{
     ],
   },
   {
-    label: "Communities",
+    label: privateOrtakMode ? "Company" : "Communities",
     sections: ["hosted-communities", "community-members"],
   },
   {
@@ -132,6 +136,7 @@ export function SettingsView({
   const featureState = useFeatureSnapshot();
   const visibleSections = React.useMemo(() => {
     return settingsSections.filter((s) => {
+      if (!privateSettingsAllowed(s.value)) return false;
       // Feature gate check. Manifest is preview-only — if the gate id is in
       // the manifest, it's preview and needs an opt-in; if it's not, it's
       // stable and renders unconditionally (fail-open).
@@ -345,20 +350,23 @@ export function SettingsView({
               className="mx-auto flex min-h-full w-full max-w-4xl flex-col gap-4"
               data-testid={`settings-panel-${section}`}
             >
-              {renderSettingsSection(section, {
-                currentPubkey,
-                fallbackDisplayName,
-                isUpdatingDesktopNotifications,
-                notificationErrorMessage,
-                notificationPermission,
-                notificationSettings,
-                onSetDesktopNotificationsEnabled,
-                onSetHomeBadgeEnabled,
-                onSetSlotAlertsEnabled,
-                onSetNotifyWhileViewing,
-                onSetAllSlotAlertsEnabled,
-                onSetSoundForSlot,
-              })}
+              {renderSettingsSection(
+                privateSettingsAllowed(section) ? section : "appearance",
+                {
+                  currentPubkey,
+                  fallbackDisplayName,
+                  isUpdatingDesktopNotifications,
+                  notificationErrorMessage,
+                  notificationPermission,
+                  notificationSettings,
+                  onSetDesktopNotificationsEnabled,
+                  onSetHomeBadgeEnabled,
+                  onSetSlotAlertsEnabled,
+                  onSetNotifyWhileViewing,
+                  onSetAllSlotAlertsEnabled,
+                  onSetSoundForSlot,
+                },
+              )}
             </div>
           </section>
         </div>

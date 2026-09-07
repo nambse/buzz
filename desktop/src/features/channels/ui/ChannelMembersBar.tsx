@@ -1,3 +1,4 @@
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 import { EllipsisVertical, Settings2, Users } from "lucide-react";
 import * as React from "react";
 import { toast } from "sonner";
@@ -75,8 +76,12 @@ export function ChannelMembersBar({
     channel.id,
     channel.channelType === "dm",
   );
-  const providersQuery = useAvailableAcpRuntimes();
-  const managedAgentsQuery = useManagedAgentsQuery();
+  const providersQuery = useAvailableAcpRuntimes({
+    enabled: !privateOrtakMode,
+  });
+  const managedAgentsQuery = useManagedAgentsQuery({
+    enabled: !privateOrtakMode,
+  });
   const relayAgentsQuery = useRelayAgentsQuery();
   const members = membersQuery.data ?? [];
   const dmProfilesQuery = useUsersBatchQuery(
@@ -160,7 +165,7 @@ export function ChannelMembersBar({
           ? relayAgentsQuery.error.message
           : null;
 
-  const huddleIndicator = (
+  const huddleIndicator = privateOrtakMode ? null : (
     <HuddleIndicator
       channelId={channel.id}
       onStart={async () => {
@@ -274,20 +279,22 @@ export function ChannelMembersBar({
     <React.Fragment>
       {controls}
 
-      <AddChannelBotDialog
-        channelId={channel.id}
-        onCreateAgent={() => {
-          requestOpenCreateAgent({
-            channelId: channel.id,
-            channelName: channel.name,
-          });
-        }}
-        onOpenChange={setIsAddBotOpen}
-        open={isAddBotOpen}
-        providers={providers}
-        providersErrorMessage={dialogErrorMessage}
-        providersLoading={providersQuery.isLoading}
-      />
+      {!privateOrtakMode ? (
+        <AddChannelBotDialog
+          channelId={channel.id}
+          onCreateAgent={() => {
+            requestOpenCreateAgent({
+              channelId: channel.id,
+              channelName: channel.name,
+            });
+          }}
+          onOpenChange={setIsAddBotOpen}
+          open={isAddBotOpen}
+          providers={providers}
+          providersErrorMessage={dialogErrorMessage}
+          providersLoading={providersQuery.isLoading}
+        />
+      ) : null}
     </React.Fragment>
   );
 }

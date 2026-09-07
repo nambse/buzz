@@ -42,11 +42,23 @@
 //! a real Hermes, Honcho, or Office deployment.
 
 pub mod authority;
+pub mod cancellation;
+pub mod confidential;
+#[cfg(feature = "encrypted-dm")]
+pub mod encrypted;
 mod error;
+pub mod hermes;
+pub mod memory_context;
+pub mod memory_output;
+pub mod office_delivery;
+pub mod office_output;
 pub mod postgres;
+pub mod reconciliation;
 pub mod repository;
+pub mod reviewed_memory;
 pub mod state;
 pub mod supervisor;
+pub mod workspace_tools;
 
 pub use authority::{run_idempotency_key, DispatchAuthority, DispatchRefusal, RunInput};
 pub use error::{Result, RunSupervisionError};

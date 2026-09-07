@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import re
 import sys
+from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 
 try:
@@ -16,7 +18,10 @@ IGNORE_ATTRIBUTE = re.compile(r"#\s*\[\s*ignore\s*=")
 BARE_IGNORE_ATTRIBUTE = re.compile(r"#\s*\[\s*ignore\s*\]")
 FUNCTION = re.compile(r"\b(?:async\s+)?fn\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)")
 MODULE = re.compile(r"\bmod\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\{")
-OUT_OF_LINE_MODULE = re.compile(r"\bmod\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*;")
+OUT_OF_LINE_MODULE = re.compile(
+    r"(?P<attributes>(?:#\s*\[[^]]*\]\s*)*)"
+    r"(?:pub(?:\s*\([^)]*\))?\s+)?\bmod\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*;"
+)
 PATH_ATTRIBUTE = re.compile(r"#\s*\[\s*path\s*=\s*")
 EXTERNAL_INFRA = re.compile(r"\b(?:s3|minio|storage|docker|network)\b", re.IGNORECASE)
 RAW_STRING = re.compile(r'(?:b?r)(?P<hashes>#{0,255})"')
@@ -179,12 +184,20 @@ def integration_binary_is_postgres(path: Path) -> bool:
     root = crate_root(path)
     return (
         root is not None
-        and path.parent == root / "tests"
-        and path.name.startswith("postgres_")
+        and (
+            (path.parent == root / "tests" and path.name.startswith("postgres_"))
+            or (
+                path.name == "main.rs"
+                and path.parent.parent == root / "tests"
+                and path.parent.name.startswith("postgres_")
+            )
+        )
     )
 
 
-def standard_module_paths(parent_source: Path, module_name: str) -> list[Path]:
+def standard_module_paths(
+    parent_source: Path, module_name: str, inline_modules: tuple[str, ...] = ()
+) -> list[Path]:
     """Resolve Rust's conventional out-of-line module source paths."""
     root = crate_root(parent_source)
     is_crate_root = parent_source.name in {"lib.rs", "main.rs", "mod.rs"}
@@ -200,44 +213,97 @@ def standard_module_paths(parent_source: Path, module_name: str) -> list[Path]:
         if is_crate_root
         else parent_source.parent / parent_source.stem
     )
+    base = base.joinpath(*inline_modules)
     return [base / f"{module_name}.rs", base / module_name / "mod.rs"]
 
 
-def out_of_line_module_index(files: list[Path]) -> dict[Path, list[str]]:
-    """Index explicit and conventional module names by resolved source file."""
-    names: dict[Path, list[str]] = {}
-    context_files = set(files)
-    for path in files:
-        if (root := crate_root(path)) is not None:
-            context_files.update(root.rglob("*.rs"))
+@dataclass(frozen=True)
+class DiscoveryContext:
+    """The two namespace predicates used by the actual nextest profile."""
+
+    postgres: bool = False
+    external: bool = False
+
+    def under(self, modules: tuple[str, ...]) -> DiscoveryContext:
+        return DiscoveryContext(
+            self.postgres or any(name.endswith("postgres_tests") for name in modules),
+            self.external or any(name.startswith("external_infra") for name in modules),
+        )
+
+
+def out_of_line_module_index(files: list[Path]) -> dict[Path, set[DiscoveryContext]]:
+    """Carry binary and module namespace predicates through every module edge.
+
+    A file can be included by multiple binaries or namespaces. Keep those
+    contexts separate: a PostgreSQL path beneath external_infra must not lend
+    its PostgreSQL flag to an unrelated ordinary path. The four possible
+    contexts bound traversal even for cyclic or multiply included sources.
+    """
+    context_files = {path.resolve() for path in files}
+    roots = {root for path in context_files if (root := crate_root(path)) is not None}
+    for root in roots:
+        context_files.update(path.resolve() for path in root.rglob("*.rs") if "target" not in path.parts)
     for directory in {path.parent for path in files}:
-        context_files.update(directory.glob("*.rs"))
+        context_files.update(path.resolve() for path in directory.glob("*.rs"))
+    edges: dict[Path, list[tuple[Path, tuple[str, ...]]]] = {}
+    children: set[Path] = set()
     for parent_source in sorted(context_files):
         source = parent_source.read_text(encoding="utf-8")
         sanitized = sanitize_rust(source)
 
-        if "path" in source:
-            for attribute in PATH_ATTRIBUTE.finditer(sanitized):
+        ranges = module_ranges(source)
+        for module in OUT_OF_LINE_MODULE.finditer(sanitized):
+            module_name = module.group("name")
+            inline_modules = tuple(name for start, end, name in ranges if start < module.start() < end)
+            attribute = PATH_ATTRIBUTE.search(sanitized, module.start("attributes"), module.end("attributes"))
+            if attribute is not None:
                 equals = source.find("=", attribute.start(), attribute.end())
                 parsed = parse_rust_string_literal(source, equals + 1)
                 if parsed is None:
                     continue
-                module_path, literal_end = parsed
-                module = OUT_OF_LINE_MODULE.search(sanitized, literal_end)
-                if module is not None:
-                    resolved_path = (parent_source.parent / module_path).resolve()
-                    module_names = names.setdefault(resolved_path, [])
-                    if module.group("name") not in module_names:
-                        module_names.append(module.group("name"))
+                # In an inline module, Rust resolves #[path] from the inline
+                # module directory; without one it uses the containing file.
+                base = parent_source.parent
+                if inline_modules:
+                    base = standard_module_paths(parent_source, "unused", inline_modules)[0].parent
+                candidates = [base / parsed[0]]
+            else:
+                candidates = standard_module_paths(parent_source, module_name, inline_modules)
+            for candidate in candidates:
+                child = candidate.resolve()
+                if child in context_files:
+                    edges.setdefault(parent_source, []).append((child, inline_modules + (module_name,)))
+                    children.add(child)
 
-        for module in OUT_OF_LINE_MODULE.finditer(sanitized):
-            module_name = module.group("name")
-            for candidate in standard_module_paths(parent_source, module_name):
-                if candidate.is_file():
-                    module_names = names.setdefault(candidate.resolve(), [])
-                    if module_name not in module_names:
-                        module_names.append(module_name)
-    return names
+    contexts: dict[Path, set[DiscoveryContext]] = {}
+    pending: deque[tuple[Path, DiscoveryContext]] = deque()
+    for path in sorted(context_files):
+        # Unreferenced files retain standalone structural validation. Actual
+        # Cargo roots must also be seeded when another module includes them.
+        root = crate_root(path)
+        cargo_root = root is not None and (
+            path in {root / "src" / "lib.rs", root / "src" / "main.rs"}
+            or path.parent == root / "tests"
+            or (path.name == "main.rs" and path.parent.parent == root / "tests")
+        )
+        if path not in children or cargo_root:
+            pending.append((path, DiscoveryContext(postgres=integration_binary_is_postgres(path))))
+    while pending:
+        path, context = pending.popleft()
+        seen = contexts.setdefault(path, set())
+        if context in seen:
+            continue
+        seen.add(context)
+        for child, modules in edges.get(path, []):
+            pending.append((child, context.under(modules)))
+    return contexts
+
+
+def test_contexts(
+    path: Path, modules: tuple[str, ...], index: dict[Path, set[DiscoveryContext]]
+) -> set[DiscoveryContext]:
+    """Resolve one test's namespace without mixing distinct compilation paths."""
+    return {context.under(modules) for context in index.get(path.resolve(), {DiscoveryContext()})}
 
 
 def package_name(root: Path) -> str:
@@ -265,31 +331,26 @@ def package_name(root: Path) -> str:
 
 
 def file_has_postgres_lane_test(
-    path: Path, out_of_line_modules: dict[Path, list[str]]
+    path: Path, out_of_line_modules: dict[Path, set[DiscoveryContext]]
 ) -> bool:
     source = path.read_text(encoding="utf-8")
     sanitized = sanitize_rust(source)
     ranges = module_ranges(source)
-    external_modules = out_of_line_modules.get(path.resolve(), [])
 
     for attribute_start, _attribute_end, reason in ignore_attributes(source, sanitized):
         reason_lower = reason.lower()
-        modules = [name for start, end, name in ranges if start < attribute_start < end]
+        modules = tuple(name for start, end, name in ranges if start < attribute_start < end)
         if (
             ("postgres" in reason_lower or "postgresql" in reason_lower)
             and not EXTERNAL_INFRA.search(reason)
-            and not any(name.startswith("external_infra") for name in modules)
-            and (
-                any(name.endswith("postgres_tests") for name in modules + external_modules)
-                or integration_binary_is_postgres(path)
-            )
+            and any(context.postgres and not context.external for context in test_contexts(path, modules, out_of_line_modules))
         ):
             return True
     return False
 
 
 def postgres_packages(
-    files: list[Path], out_of_line_modules: dict[Path, list[str]]
+    files: list[Path], out_of_line_modules: dict[Path, set[DiscoveryContext]]
 ) -> list[str]:
     roots = {
         root
@@ -301,12 +362,11 @@ def postgres_packages(
 
 
 def validate_file(
-    path: Path, out_of_line_modules: dict[Path, list[str]]
+    path: Path, out_of_line_modules: dict[Path, set[DiscoveryContext]]
 ) -> list[str]:
     source = path.read_text(encoding="utf-8")
     sanitized = sanitize_rust(source)
     ranges = module_ranges(source)
-    external_modules = out_of_line_modules.get(path.resolve(), [])
     errors = []
 
     for match in BARE_IGNORE_ATTRIBUTE.finditer(sanitized):
@@ -314,11 +374,8 @@ def validate_file(
         if function is None:
             errors.append(f"{path}: ignored infrastructure test has no following function")
             continue
-        modules = [name for start, end, name in ranges if start < match.start() < end]
-        in_postgres_structure = (
-            any(name.endswith("postgres_tests") for name in modules + external_modules)
-            or integration_binary_is_postgres(path)
-        )
+        modules = tuple(name for start, end, name in ranges if start < match.start() < end)
+        in_postgres_structure = any(context.postgres for context in test_contexts(path, modules, out_of_line_modules))
         if in_postgres_structure:
             errors.append(
                 f"{path}:{source.count(chr(10), 0, function.start()) + 1}: "
@@ -338,14 +395,12 @@ def validate_file(
             errors.append(f"{path}: ignored infrastructure test has no following function")
             continue
         function_name = function.group("name")
-        modules = [
+        modules = tuple(
             name for start, end, name in ranges if start < attribute_start < end
-        ]
-        in_postgres_lane = (
-            any(name.endswith("postgres_tests") for name in modules + external_modules)
-            or integration_binary_is_postgres(path)
         )
-        in_external_module = any(name.startswith("external_infra") for name in modules)
+        contexts = test_contexts(path, modules, out_of_line_modules)
+        in_postgres_lane = any(context.postgres and not context.external for context in contexts)
+        in_external_module = all(context.external for context in contexts)
         needs_external_infra = bool(EXTERNAL_INFRA.search(reason))
 
         if mentions_redis and not mentions_postgres and in_postgres_lane and not in_external_module:

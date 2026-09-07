@@ -4,12 +4,15 @@ pub mod admin;
 pub mod bridge;
 pub mod events;
 pub mod gifs;
+#[cfg(feature = "legacy-git")]
 pub mod git;
 pub mod invites;
 pub mod media;
+#[cfg(feature = "legacy-mesh")]
 pub mod mesh_demo;
 pub mod nip05;
 pub mod operator;
+#[cfg(feature = "legacy-workflow")]
 pub mod workflows;
 
 // Re-export imeta helpers used by ingest pipeline.

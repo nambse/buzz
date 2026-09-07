@@ -34,12 +34,17 @@
 //!   module here connects to a real Hermes, Honcho, or Office deployment.
 
 pub mod adapter;
+pub mod cohort;
+pub mod confidential;
+pub mod conversation_context;
 pub mod credentials;
 mod error;
 pub mod fakes;
 mod ids;
 pub mod inbox;
 pub mod memory;
+pub mod memory_jobs;
+pub mod office_authority;
 pub mod office_identity;
 pub mod outbox;
 pub mod ports;
@@ -49,10 +54,14 @@ pub mod routing;
 pub mod run_event;
 pub mod runtime;
 pub mod scorer;
+pub mod semantic;
 pub mod service;
+pub mod work_context;
+pub mod workspace;
 
 pub use error::{ControlError, Result};
 pub use ids::{ClaimGeneration, CompanyScope, MessageId};
 pub use postgres::PgControlPlane;
 pub use scorer::DisabledSemanticScorer;
+pub use semantic::{ScoringBudget, SemanticScoringInput};
 pub use service::{InboxRoutingService, RoutingWorkerConfig, ServiceOutcome};

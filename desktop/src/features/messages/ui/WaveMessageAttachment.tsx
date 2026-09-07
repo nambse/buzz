@@ -1,4 +1,5 @@
 import * as React from "react";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -24,7 +25,19 @@ type WaveMessageAttachmentProps = {
   searchQuery?: string;
 };
 
-export function WaveMessageAttachment({
+export function WaveMessageAttachment(props: WaveMessageAttachmentProps) {
+  if (privateOrtakMode) {
+    return (
+      <HighlightedSearchText
+        query={props.searchQuery ?? ""}
+        text={props.fallbackText}
+      />
+    );
+  }
+  return <LegacyWaveMessageAttachment {...props} />;
+}
+
+function LegacyWaveMessageAttachment({
   channelId,
   fallbackText,
   huddleMemberPubkeys = [],

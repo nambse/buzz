@@ -1,0 +1,21 @@
+[package]
+name = "ortak-memory"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Scoped Honcho memory adapter with verified receipts and explicit roundtrip activation"
+
+[dependencies]
+chrono.workspace = true
+hex.workspace = true
+ortak-control.workspace = true
+ortak-domain.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+url.workspace = true
+uuid.workspace = true
+zeroize.workspace = true

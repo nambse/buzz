@@ -1,4 +1,5 @@
 import * as React from "react";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 import { claimDraftSend } from "@/features/messages/lib/useDrafts";
 import { toast } from "sonner";
 import {
@@ -124,6 +125,7 @@ export function useMentionSendFlow({
   // before the publish outcome is known.
   const startAgentDetached = useDetachedAgentStart();
   const getManagedAgentsByPubkey = React.useCallback(async () => {
+    if (privateOrtakMode) return new Map<string, ManagedAgent>();
     const agents =
       managedAgentsQuery.data ??
       (await managedAgentsQuery.refetch()).data ??
@@ -165,6 +167,10 @@ export function useMentionSendFlow({
       personaMentions: ReturnType<typeof mentions.extractMentionPersonas>,
       capturedChannelId: string,
     ) => {
+      if (privateOrtakMode && personaMentions.length > 0)
+        throw new Error(
+          "Select an existing Ortak employee in the Office channel.",
+        );
       if (!capturedChannelId || personaMentions.length === 0) {
         return {
           errors: [] as string[],
@@ -461,7 +467,11 @@ export function useMentionSendFlow({
           ...agentMentionPubkeys,
         ]);
         let sendChannelId = draft.capturedChannelId;
-        if (preparedAgentPubkeys.length > 0 && onPrepareSendChannel) {
+        if (
+          !privateOrtakMode &&
+          preparedAgentPubkeys.length > 0 &&
+          onPrepareSendChannel
+        ) {
           sendChannelId = await onPrepareSendChannel(preparedAgentPubkeys);
           if (isSendCancelled()) return restoreComposerAfterFailure();
           if (!sendChannelId) {
@@ -488,10 +498,12 @@ export function useMentionSendFlow({
         // so no wake (or "your message was sent" failure toast) can exist for
         // a message that never landed. First entry wins the dedupe because it
         // carries the earliest replay floor, and the floor is a lower bound.
-        const agentsToWake = dedupeQueuedAgentWakes([
-          ...(draft.queuedAgentWakes ?? []),
-          ...agentReadiness.agentsToWake,
-        ]);
+        const agentsToWake = privateOrtakMode
+          ? []
+          : dedupeQueuedAgentWakes([
+              ...(draft.queuedAgentWakes ?? []),
+              ...agentReadiness.agentsToWake,
+            ]);
         if (isSendCancelled()) return restoreComposerAfterFailure();
         if (!isMountedRef.current) {
           persistPreflightDraft();
@@ -508,7 +520,11 @@ export function useMentionSendFlow({
           toast.error(message);
           return restoreComposerAfterFailure();
         }
-        if (preparedAgentPubkeys.length > 0 && sendChannelId) {
+        if (
+          !privateOrtakMode &&
+          preparedAgentPubkeys.length > 0 &&
+          sendChannelId
+        ) {
           try {
             await invokeTauri("sync_agents_to_active_huddle", {
               channelId: sendChannelId,
@@ -770,6 +786,16 @@ export function useMentionSendFlow({
         const savedMentionRefs = mentions.getDraftMentionRefs(trimmed).slice();
         const selectedMentionPubkeys = mentions.extractMentionPubkeys(trimmed);
         const selectedPersonas = mentions.extractMentionPersonas(trimmed);
+        if (
+          privateOrtakMode &&
+          (selectedPersonas.length > 0 ||
+            ((selectedMentionPubkeys.length > 0 ||
+              addressedAgentPubkeys.length > 0) &&
+              (channelType !== "stream" || !capturedChannelId)))
+        )
+          throw new Error(
+            "Ortak employee mentions require an existing Office channel and a selected employee.",
+          );
         const dmThreadAgentMentionErrorMessage = dmThreadAgentMentionError({
           trimmed,
           isThreadReply: capturedThreadContext != null,
@@ -841,6 +867,7 @@ export function useMentionSendFlow({
           ...linkPreviewTags,
         ];
         const nonMemberPubkeys =
+          privateOrtakMode ||
           channelType === null ||
           channelType === "dm" ||
           !mentions.hasResolvedMembers

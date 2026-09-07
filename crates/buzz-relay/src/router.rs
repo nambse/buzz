@@ -20,6 +20,7 @@ use tower_http::services::ServeDir;
 use tower_http::trace::{HttpMakeClassifier, TraceLayer};
 
 use crate::api;
+#[cfg(feature = "legacy-mesh")]
 use crate::audio;
 use crate::connection::handle_connection;
 use crate::metrics::track_metrics;
@@ -47,8 +48,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .layer(RequestBodyLimitLayer::new(media_body_limit))
         .with_state(state.clone());
 
+    #[cfg(feature = "legacy-git")]
     let git_router = api::git::git_router(state.clone());
 
+    #[cfg(feature = "legacy-git")]
     let git_policy_router = api::git::git_policy_router(state.clone());
 
     let admin_enabled = state.config.admin.is_some();
@@ -76,14 +79,6 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         // Relay-owned third-party GIF metadata proxy (NIP-98 auth).
         .route(api::gifs::SEARCH_PATH, post(api::gifs::search))
         .route(api::gifs::SHARE_PATH, post(api::gifs::share))
-        .route(
-            "/workflows/{workflow_id}/runs",
-            get(api::workflows::workflow_runs),
-        )
-        .route(
-            "/workflows/{workflow_id}/runs/{run_id}/approvals",
-            get(api::workflows::run_approvals),
-        )
         .route(
             "/operator/communities",
             get(api::operator::list_owned_communities).post(api::operator::provision_community),
@@ -128,9 +123,21 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route(
             "/moderation/restricted",
             get(api::bridge::moderation_restricted),
+        );
+    #[cfg(feature = "legacy-workflow")]
+    let api_router = api_router
+        .route(
+            "/workflows/{workflow_id}/runs",
+            get(api::workflows::workflow_runs),
+        )
+        .route(
+            "/workflows/{workflow_id}/runs/{run_id}/approvals",
+            get(api::workflows::run_approvals),
         )
         // Webhook trigger (secret-authenticated, no NIP-98)
-        .route("/hooks/{id}", post(api::bridge::workflow_webhook))
+        .route("/hooks/{id}", post(api::bridge::workflow_webhook));
+    #[cfg(feature = "legacy-mesh")]
+    let api_router = api_router
         // Mesh demo echo probe — testbed-only; 404 unless BUZZ_MESH=on and
         // BUZZ_MESH_DEMO_ECHO=on (see api::mesh_demo).
         .route("/_mesh/demo/echo", post(api::mesh_demo::demo_echo))
@@ -138,17 +145,18 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route(
             "/huddle/{channel_id}/audio",
             get(audio::handler::ws_audio_handler),
-        )
+        );
+    let api_router = api_router
         // Reject request bodies larger than 1 MB to prevent resource exhaustion.
         .layer(RequestBodyLimitLayer::new(1024 * 1024))
         .with_state(state.clone());
 
     // Merge — each sub-router carries its own body limit.
     // Metrics → Trace → CORS applied once over the combined router.
-    let mut merged = api_router
-        .merge(media_router)
-        .merge(git_router)
-        .merge(git_policy_router);
+    let merged = api_router.merge(media_router);
+    #[cfg(feature = "legacy-git")]
+    let merged = merged.merge(git_router).merge(git_policy_router);
+    let mut merged = merged;
     if let Some(admin_router) = admin_router {
         merged = merged.merge(admin_router);
     }
@@ -242,7 +250,8 @@ fn is_invite_landing_path(path: &str) -> bool {
 }
 
 fn should_serve_spa(path: &str, serve_git_web_gui: bool) -> bool {
-    is_invite_landing_path(path) || (serve_git_web_gui && is_git_web_gui_path(path))
+    is_invite_landing_path(path)
+        || (cfg!(feature = "legacy-git") && serve_git_web_gui && is_git_web_gui_path(path))
 }
 
 fn is_git_web_gui_path(path: &str) -> bool {
@@ -293,12 +302,13 @@ async fn admin_spa_document(state: &AppState, accept: &str) -> axum::response::R
 ///
 /// No metrics middleware, no auth, no CORS, no body limit.
 pub fn build_health_router(state: Arc<AppState>) -> Router {
-    Router::new()
+    let router = Router::new()
         .route("/_liveness", get(liveness_handler))
         .route("/_readiness", get(kubernetes_readiness_handler))
-        .route("/_status", get(status_handler))
-        .route("/_mesh", get(mesh_status_handler))
-        .with_state(state)
+        .route("/_status", get(status_handler));
+    #[cfg(feature = "legacy-mesh")]
+    let router = router.route("/_mesh", get(mesh_status_handler));
+    router.with_state(state)
 }
 
 /// Content-negotiated: NIP-11 JSON for plain HTTP, WebSocket upgrade otherwise.
@@ -373,7 +383,7 @@ async fn nip11_or_ws_handler(
         }
         Err(_) => {
             // Browser requesting HTML and Git web GUI is enabled → serve SPA.
-            if state.config.serve_git_web_gui {
+            if cfg!(feature = "legacy-git") && state.config.serve_git_web_gui {
                 if let Some(ref dir) = state.config.web_dir {
                     if accept.contains("text/html") {
                         let index = dir.join("index.html");
@@ -485,6 +495,7 @@ async fn status_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse
 /// `/_mesh` — live mesh status: peer table, connection/phi state, per-peer
 /// counters, fence-rejection totals. Mesh-off reports `{"enabled": false}` so
 /// operators can distinguish "off" from "on with zero peers".
+#[cfg(feature = "legacy-mesh")]
 async fn mesh_status_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     match state.mesh() {
         Some(handle) => Json(serde_json::to_value(handle.status()).unwrap_or_else(
@@ -522,6 +533,9 @@ fn build_cors_layer(cors_origins: &[String]) -> CorsLayer {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(all(not(feature = "legacy-workflow"), not(feature = "legacy-git")))]
+    mod private_build;
+
     use std::collections::VecDeque;
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
     use std::sync::{Mutex, PoisonError};
@@ -657,8 +671,11 @@ mod tests {
         assert!(should_serve_spa("/invite/payload.mac", true));
         assert!(!should_serve_spa("/", false));
         assert!(!should_serve_spa("/repos/example", false));
-        assert!(should_serve_spa("/", true));
-        assert!(should_serve_spa("/repos/example", true));
+        assert_eq!(should_serve_spa("/", true), cfg!(feature = "legacy-git"));
+        assert_eq!(
+            should_serve_spa("/repos/example", true),
+            cfg!(feature = "legacy-git")
+        );
         assert!(!should_serve_spa("/arbitrary", true));
     }
 
@@ -687,6 +704,7 @@ mod tests {
         let audit = buzz_audit::AuditService::new(pool.clone());
         let auth = buzz_auth::AuthService::new(config.auth.clone());
         let search = buzz_search::SearchService::new(pool.clone());
+        #[cfg(feature = "legacy-workflow")]
         let workflow_engine = Arc::new(buzz_workflow::WorkflowEngine::new(
             db.clone(),
             buzz_workflow::WorkflowConfig::default(),
@@ -700,6 +718,7 @@ mod tests {
             pubsub,
             auth,
             search,
+            #[cfg(feature = "legacy-workflow")]
             workflow_engine,
             nostr::Keys::generate(),
             media_storage,
@@ -725,6 +744,7 @@ mod tests {
         let audit = buzz_audit::AuditService::new(pool.clone());
         let auth = buzz_auth::AuthService::new(config.auth.clone());
         let search = buzz_search::SearchService::new(pool.clone());
+        #[cfg(feature = "legacy-workflow")]
         let workflow_engine = Arc::new(buzz_workflow::WorkflowEngine::new(
             db.clone(),
             buzz_workflow::WorkflowConfig::default(),
@@ -738,12 +758,52 @@ mod tests {
             pubsub,
             auth,
             search,
+            #[cfg(feature = "legacy-workflow")]
             workflow_engine,
             nostr::Keys::generate(),
             media_storage,
         );
         state.set_readiness_evaluator(evaluator);
         Arc::new(state)
+    }
+
+    #[tokio::test]
+    #[cfg(not(feature = "legacy-mesh"))]
+    async fn private_build_omits_legacy_transport_routes() {
+        let mut state = readiness_state(Arc::new(ScriptedReadinessEvaluator::new([]))).await;
+        let config = Arc::make_mut(
+            &mut Arc::get_mut(&mut state)
+                .expect("unshared fixture state")
+                .config,
+        );
+        config.web_dir = None;
+        config.admin = None;
+        let public = build_router(state.clone());
+        let health = build_health_router(state);
+        for (router, method, path, expected) in [
+            (public.clone(), "GET", "/health", StatusCode::OK),
+            (
+                public.clone(),
+                "GET",
+                "/huddle/11111111-1111-4111-8111-111111111111/audio",
+                StatusCode::NOT_FOUND,
+            ),
+            (public, "POST", "/_mesh/demo/echo", StatusCode::NOT_FOUND),
+            (health.clone(), "GET", "/_mesh", StatusCode::NOT_FOUND),
+            (health, "GET", "/_status", StatusCode::OK),
+        ] {
+            let response = router
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(path)
+                        .body(Body::empty())
+                        .expect("fixture request"),
+                )
+                .await
+                .expect("route response");
+            assert_eq!(response.status(), expected, "{method} {path}");
+        }
     }
 
     async fn readiness_request(router: Router) -> (StatusCode, serde_json::Value) {

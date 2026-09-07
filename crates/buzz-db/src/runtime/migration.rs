@@ -463,8 +463,9 @@ mod postgres_tests {
             .iter()
             .filter_map(|definition| {
                 let column = column_definition_name(definition)?;
+                let normalized = normalize_sql(definition);
                 (TENANT_KEY_COLUMNS.contains(&column.as_str())
-                    && normalize_sql(definition).contains("not null"))
+                    && (normalized.contains("not null") || normalized.contains("primary key")))
                 .then_some(column)
             })
             .collect()
@@ -609,9 +610,17 @@ mod postgres_tests {
                 }
 
                 let add_pos = normalized.find(" add ")?;
-                let definition = normalized[add_pos + " add ".len()..].trim();
-                constraint_lint_for_definition(&table, definition)
+                let actions = split_top_level_csv(&normalized[add_pos + 1..]);
+                Some(actions.into_iter().filter_map(move |action| {
+                    let definition = action.strip_prefix("add ")?.trim();
+                    let definition = definition.strip_prefix("column ").unwrap_or(definition);
+                    let definition = definition
+                        .strip_prefix("if not exists ")
+                        .unwrap_or(definition);
+                    constraint_lint_for_definition(&table, definition)
+                }))
             })
+            .flatten()
             .collect()
     }
 
@@ -732,7 +741,13 @@ mod postgres_tests {
         let mut migrations: Vec<_> = MIGRATOR.iter().collect();
         migrations.sort_by_key(|migration| migration.version);
 
-        assert_eq!(migrations.len(), 47);
+        assert_eq!(
+            migrations
+                .iter()
+                .map(|migration| migration.version)
+                .collect::<Vec<_>>(),
+            (1..=80).collect::<Vec<_>>()
+        );
         assert_eq!(migrations[0].version, 1);
         assert_eq!(&*migrations[0].description, "initial schema");
         assert!(migrations[0]
@@ -1688,6 +1703,38 @@ mod postgres_tests {
     }
 
     #[test]
+    fn migration_lint_handles_inline_tenant_primary_key_and_each_alter_action() {
+        let sql = r#"
+            CREATE TABLE widgets (
+                company_id UUID PRIMARY KEY,
+                community_id UUID NOT NULL,
+                UNIQUE (company_id, community_id)
+            );
+            ALTER TABLE widgets
+                ADD COLUMN artifact_id UUID,
+                ADD CONSTRAINT scoped_artifact FOREIGN KEY(company_id, artifact_id) REFERENCES artifacts(company_id,id),
+                ADD COLUMN id UUID NOT NULL DEFAULT gen_random_uuid() CHECK(id<>'00000000-0000-0000-0000-000000000000'),
+                ADD CONSTRAINT scoped_id UNIQUE(company_id,id),
+                ADD CONSTRAINT bad_id UNIQUE(id),
+                ADD CONSTRAINT bad_artifact FOREIGN KEY(artifact_id) REFERENCES artifacts(id);
+        "#;
+        let violations = scoped_constraint_violations(sql);
+        assert_eq!(violations.len(), 2, "{violations:?}");
+        assert!(violations
+            .iter()
+            .any(|item| item.kind == ConstraintKind::Unique && item.columns == ["id"]));
+        assert!(
+            violations
+                .iter()
+                .any(|item| item.kind == ConstraintKind::ForeignKey
+                    && item.columns == ["artifact_id"])
+        );
+        assert!(!table_has_not_null_tenant_key(&[
+            "company_id UUID".to_owned()
+        ]));
+    }
+
+    #[test]
     fn all_non_operator_global_tables_have_not_null_community_id() {
         let sql = migration_sql();
         let sql = sql.as_str();
@@ -1961,9 +2008,35 @@ mod postgres_tests {
                         .to_owned();
                     surface.fence_attachments.insert(target);
                 }
+                // Migration77 attaches the employee-memory fences in a literal
+                // FOREACH loop. Read only the array belonging to the loop that
+                // actually calls the attachment function; adjacent immutable
+                // trigger loops are not fence authority.
+                if normalized.starts_with("do ") {
+                    for selected in normalized.split("foreach relation in array array[").skip(1) {
+                        let Some((targets, rest)) = selected.split_once("] loop") else {
+                            continue;
+                        };
+                        let body = rest.split("end loop").next().expect("loop body");
+                        if body.contains("perform attach_community_write_fence(relation)") {
+                            surface.fence_attachments.extend(quoted_strings(targets));
+                        }
+                    }
+                }
             }
             surface
         }
+
+        assert_eq!(
+            surface(
+                "DO $$ BEGIN FOREACH relation IN ARRAY ARRAY['fenced'] LOOP \
+                PERFORM attach_community_write_fence(relation); END LOOP; \
+                FOREACH relation IN ARRAY ARRAY['unfenced'] LOOP \
+                PERFORM other_function(relation); END LOOP; END $$;"
+            )
+            .fence_attachments,
+            BTreeSet::from(["fenced".to_owned()])
+        );
 
         let migration_0029: &str = MIGRATOR
             .iter()
@@ -2036,12 +2109,18 @@ mod postgres_tests {
                 "schema.sql is missing operator-global registry row {row:?}"
             );
         }
-        let mut expected_fences = migration.fence_attachments.clone();
+        // Include every additive immutable migration, not only the original
+        // deletion migration and the first Work binding. Dynamic attachments
+        // are separately verified by the live migration/desired catalog gate.
+        let mut expected_fences: BTreeSet<String> = MIGRATOR
+            .iter()
+            .flat_map(|migration| surface(migration.sql.as_ref()).fence_attachments)
+            .collect();
         expected_fences.remove("product_feedback");
         expected_fences.remove("rate_limit_violations");
         assert_eq!(
             expected_fences, schema.fence_attachments,
-            "write-fence attachment targets differ after recovery policy"
+            "write-fence attachment targets differ from the complete immutable migration chain"
         );
 
         // 0029's ALTER TABLE additions are expressed inline by the
@@ -2466,6 +2545,15 @@ mod postgres_tests {
         let desired = PgPool::connect(&format!("{base_prefix}/{desired_db}"))
             .await
             .expect("connect desired-state probe database");
+        let reconciliation = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../scripts/reconcile-schema-after-pgschema.sql"),
+        )
+        .expect("read post-pgschema reconciliation");
+        sqlx::raw_sql(AssertSqlSafe(reconciliation))
+            .execute(&desired)
+            .await
+            .expect("reconcile desired-state bootstrap after pgschema apply");
         let migrated = PgPool::connect(&format!("{base_prefix}/{migrated_db}"))
             .await
             .expect("connect migrated probe database");

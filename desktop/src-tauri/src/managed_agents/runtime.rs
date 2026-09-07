@@ -452,6 +452,7 @@ pub fn spawn_agent_child(
     owner_hex: Option<&str>,
     replay_floor_unix: Option<u64>,
 ) -> Result<crate::managed_agents::ManagedAgentProcess, String> {
+    crate::private_native::require_legacy()?;
     if let Some(error) = spawn_key_refusal(record) {
         return Err(error);
     }
@@ -882,6 +883,7 @@ pub fn start_managed_agent_process(
     workspace_relay: &crate::relay::ScopedWorkspaceRelay,
     replay_floor_unix: Option<u64>,
 ) -> Result<(), String> {
+    crate::private_native::require_legacy()?;
     let key = bound_runtime_key(record, workspace_relay)?;
     if let Some(runtime) = runtimes.get_mut(&key) {
         if runtime

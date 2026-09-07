@@ -41,6 +41,7 @@ dependencies = [
  "ctr",
  "ghash",
  "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -871,7 +872,6 @@ dependencies = [
  "buzz-media",
  "buzz-pubsub",
  "buzz-search",
- "buzz-workflow",
  "clap",
  "deadpool-redis",
  "hex",
@@ -6546,6 +6546,7 @@ checksum = "d7b497d21a8b6fbb4b5a544f8fadb77e801a09ae0add9e411d31c6f89e3c1e90"
 name = "ortak-control"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "buzz-db",
  "chrono",
  "hex",
@@ -6577,6 +6578,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "ortak-memory"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "hex",
+ "ortak-control",
+ "ortak-domain",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tokio",
+ "url",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "ortak-observability"
 version = "0.1.0"
 dependencies = [
@@ -6599,12 +6618,17 @@ dependencies = [
 name = "ortak-office"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "buzz-auth",
+ "buzz-core",
  "buzz-db",
  "chrono",
+ "futures-util",
  "hex",
  "nostr 0.44.7",
  "ortak-control",
  "ortak-domain",
+ "reqwest 0.13.4",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -6612,8 +6636,11 @@ dependencies = [
  "sqlx",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-tungstenite 0.29.0",
  "tracing",
+ "url",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
@@ -6626,14 +6653,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "ortak-routing-semantic"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "ortak-control",
+ "ortak-domain",
+ "ortak-router",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.11.0",
+ "tokio",
+ "url",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "ortak-runtime"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
+ "base64 0.22.1",
  "buzz-db",
  "chrono",
+ "futures-util",
+ "getrandom 0.4.3",
  "hex",
+ "hkdf 0.13.0",
+ "nostr 0.44.7",
  "ortak-control",
  "ortak-domain",
+ "ortak-office",
+ "reqwest 0.13.4",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -6641,7 +6695,46 @@ dependencies = [
  "sqlx",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-tungstenite 0.29.0",
  "tracing",
+ "url",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
+name = "ortak-server"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "buzz-auth",
+ "buzz-db",
+ "buzz-pubsub",
+ "chrono",
+ "deadpool-redis",
+ "futures-util",
+ "hex",
+ "nostr 0.44.7",
+ "ortak-control",
+ "ortak-domain",
+ "ortak-memory",
+ "ortak-observability",
+ "ortak-office",
+ "ortak-router",
+ "ortak-routing-semantic",
+ "ortak-runtime",
+ "ortak-work",
+ "rustix 1.1.4",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2 0.11.0",
+ "sqlx",
+ "tokio",
+ "tower",
+ "tower-http",
+ "url",
  "uuid",
 ]
 

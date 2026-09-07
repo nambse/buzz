@@ -25,16 +25,14 @@ buzz-auth = { workspace = true }
 buzz-pubsub = { workspace = true }
 buzz-audit = { workspace = true }
 buzz-search = { workspace = true }
-buzz-relay-mesh = { workspace = true }
+buzz-relay-mesh = { workspace = true, optional = true }
 ortak-control = { workspace = true }
 async-trait = "0.1"
-postcard = { workspace = true }
+postcard = { workspace = true, optional = true }
 axum = { workspace = true }
 tokio = { workspace = true }
-# `io` (ReaderStream) is needed to stream git subprocess stdout straight into
-# the HTTP response body — see api::git::transport read-path streaming. The
-# workspace default only enables rt+codec.
-tokio-util = { workspace = true, features = ["io"] }
+# Git adds the io stream feature only when its transport is compiled.
+tokio-util = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
 nostr = { workspace = true }
@@ -63,10 +61,10 @@ sqlx = { workspace = true }
 reqwest = { workspace = true }
 base64 = "0.22"
 buzz-sdk = { workspace = true }
-buzz-workflow = { workspace = true, features = ["reqwest"] }
+buzz-workflow = { workspace = true, features = ["reqwest"], optional = true }
 buzz-media = { workspace = true }
-s3 = { version = "0.37", package = "rust-s3", default-features = false, features = ["tokio-rustls-tls", "fail-on-err", "tags"] }
-tempfile = "3"
+s3 = { version = "0.37", package = "rust-s3", default-features = false, features = ["tokio-rustls-tls", "fail-on-err", "tags"], optional = true }
+tempfile = { version = "3", optional = true }
 bytes = "1"
 infer = "0.19"
 serde_yaml      = { workspace = true }
@@ -81,12 +79,21 @@ metrics         = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
 metrics-util    = { workspace = true }
 pulldown-cmark = { version = "0.13.4", default-features = false, features = ["html"] }
-async-compression = { version = "0.4.42", features = ["tokio", "gzip"] }
+async-compression = { version = "0.4.42", features = ["tokio", "gzip"], optional = true }
 
 [features]
+default = ["legacy-mesh", "legacy-workflow", "legacy-git"]
+# Retain inherited mesh/huddle behavior for development; Ortak private artifacts
+# disable defaults so this transport and its coupled audio graph are absent.
+legacy-mesh = ["dep:buzz-relay-mesh", "dep:postcard"]
+legacy-workflow = ["dep:buzz-workflow"]
+legacy-git = ["dep:s3", "dep:tempfile", "dep:async-compression", "tokio-util/io"]
 dev = ["buzz-auth/dev"]
 
 [dev-dependencies]
+tempfile = "3"
+# Exercise the actual pinned NIP-59 builder against the shared ingest time gate.
+nostr = { workspace = true, features = ["nip59"] }
 mesh-llm-sdk = { git = "https://github.com/Mesh-LLM/mesh-llm.git", tag = "v0.75.1", package = "mesh-llm-sdk", default-features = false, features = ["client", "serving"] }
 mesh-llm-host-runtime = { git = "https://github.com/Mesh-LLM/mesh-llm.git", tag = "v0.75.1", package = "mesh-llm-host-runtime", default-features = false, features = ["dynamic-native-runtime"] }
 # Relay-driven mesh lifecycle smoke (examples/mesh_relay_lifecycle_smoke.rs):

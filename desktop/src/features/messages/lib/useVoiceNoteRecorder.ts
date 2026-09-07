@@ -1,4 +1,5 @@
 import * as React from "react";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 
 import { encodeVoiceNoteWav } from "./voiceNoteWav";
 
@@ -66,6 +67,10 @@ export function useVoiceNoteRecorder() {
   }, []);
 
   const start = React.useCallback(async () => {
+    if (privateOrtakMode) {
+      setError("Voice recording is unavailable in this Ortak build.");
+      return;
+    }
     if (status !== "idle" || sessionRef.current) return;
     setError(null);
     if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {

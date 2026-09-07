@@ -3,6 +3,7 @@ import {
   getPlatformKeys,
   type KeyboardShortcut,
 } from "@/shared/lib/keyboard-shortcuts";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 import {
   SettingsOptionGroup,
   SettingsOptionGroupList,
@@ -45,25 +46,31 @@ export function KeyboardShortcutsCard() {
       <SettingsOptionGroupList>
         {[...categories.entries()].map(([category, shortcuts]) => (
           <SettingsOptionGroup key={category} title={category}>
-            {shortcuts.map((shortcut) => (
-              <SettingsOptionRow
-                className="min-h-12 px-3 py-2"
-                key={shortcut.id}
-              >
-                <div className="min-w-0 flex-1">
-                  <span className="text-sm font-medium text-foreground">
-                    {shortcut.label}
-                  </span>
-                  <span
-                    className="ml-2 text-muted-foreground/70"
-                    data-settings-subcopy
-                  >
-                    {shortcut.description}
-                  </span>
-                </div>
-                <KeyCombo shortcut={shortcut} />
-              </SettingsOptionRow>
-            ))}
+            {shortcuts
+              .filter(
+                (shortcut) =>
+                  !privateOrtakMode ||
+                  !["toggle-huddle", "push-to-talk"].includes(shortcut.id),
+              )
+              .map((shortcut) => (
+                <SettingsOptionRow
+                  className="min-h-12 px-3 py-2"
+                  key={shortcut.id}
+                >
+                  <div className="min-w-0 flex-1">
+                    <span className="text-sm font-medium text-foreground">
+                      {shortcut.label}
+                    </span>
+                    <span
+                      className="ml-2 text-muted-foreground/70"
+                      data-settings-subcopy
+                    >
+                      {shortcut.description}
+                    </span>
+                  </div>
+                  <KeyCombo shortcut={shortcut} />
+                </SettingsOptionRow>
+              ))}
           </SettingsOptionGroup>
         ))}
       </SettingsOptionGroupList>

@@ -302,6 +302,15 @@ fn p0_pool_acquisitions_use_typed_operation_pairs_without_other() {
         .expect("huddle link lookup must precede event insertion")
         .0;
     assert!(huddle_link.contains("acquire_writer(pool, operation)"));
+    let huddle_batch = event
+        .split_once("pub async fn huddle_started_links(")
+        .expect("batched liveness linkage seam")
+        .1
+        .split_once("pub async fn huddle_started_link_exists(")
+        .expect("single linkage seam follows the batch")
+        .0;
+    assert!(huddle_batch.contains("WriterOperation::SubscriptionHistory"));
+    assert!(huddle_batch.contains("fetch_all(&mut *connection)"));
     assert!(event.contains("pub async fn huddle_started_link_exists_for_event_write("));
     let ingest = include_str!("../../buzz-relay/src/handlers/ingest.rs");
     assert!(ingest.contains(".huddle_started_link_exists_for_event_write("));

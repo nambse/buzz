@@ -1,5 +1,6 @@
 import { LogIn, SquareTerminal } from "lucide-react";
 import type * as React from "react";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 
 import { ChatHeader } from "@/features/chat/ui/ChatHeader";
 import type { EphemeralChannelDisplay } from "@/features/channels/lib/ephemeralChannel";
@@ -84,20 +85,21 @@ export function ChannelScreenHeader({
     onJoinChannel;
 
   const terminalPanel = useTerminalPanel();
-  const terminalButton = activeChannel ? (
-    <Button
-      aria-label={
-        terminalPanel.mode === "closed" ? "Open Buzz Term" : "Hide Buzz Term"
-      }
-      onClick={toggleTerminalPanel}
-      size="icon"
-      title="Buzz Term (⌘J)"
-      type="button"
-      variant={terminalPanel.mode === "closed" ? "outline" : "secondary"}
-    >
-      <SquareTerminal />
-    </Button>
-  ) : null;
+  const terminalButton =
+    !privateOrtakMode && activeChannel ? (
+      <Button
+        aria-label={
+          terminalPanel.mode === "closed" ? "Open Buzz Term" : "Hide Buzz Term"
+        }
+        onClick={toggleTerminalPanel}
+        size="icon"
+        title="Buzz Term (⌘J)"
+        type="button"
+        variant={terminalPanel.mode === "closed" ? "outline" : "secondary"}
+      >
+        <SquareTerminal />
+      </Button>
+    ) : null;
   const channelActions = activeChannel ? (
     showJoinButton ? (
       <div className="flex items-center gap-1">

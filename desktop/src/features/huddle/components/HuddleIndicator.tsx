@@ -3,6 +3,7 @@ import { Headphones } from "lucide-react";
 import * as React from "react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 
 import { relayClient } from "@/shared/api/relayClient";
 import type { RelayEvent } from "@/shared/api/types";
@@ -44,7 +45,11 @@ type HuddleIndicatorProps = {
  * Shows a glowing headphone icon when a huddle is active, with participant count.
  * Click to join the huddle.
  */
-export function HuddleIndicator({
+export function HuddleIndicator(props: HuddleIndicatorProps) {
+  return privateOrtakMode ? null : <LegacyHuddleIndicator {...props} />;
+}
+
+function LegacyHuddleIndicator({
   channelId,
   className,
   renderMode = "button",

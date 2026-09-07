@@ -1,0 +1,30 @@
+services:
+  minio:
+    image: ${ORTAK_MINIO_IMAGE:?Build and select the pinned MinIO image}
+    command: ["server", "/data", "--address", ":9000"]
+    environment:
+      MINIO_ROOT_USER_FILE: /run/secrets/minio_root_user
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/minio_root_password
+      MINIO_BROWSER: "off"
+      MINIO_UPDATE: "off"
+    secrets: [minio_root_user, minio_root_password]
+    ports: ["127.0.0.1:9008:9000"]
+    volumes: [minio_data:/data]
+    networks: [stores]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=67108864"]
+    mem_limit: 1g
+    cpus: 2
+    pids_limit: 128
+    restart: unless-stopped
+
+volumes:
+  minio_data:
+
+secrets:
+  minio_root_user:
+    file: ${ORTAK_PRIVATE_STATE:?}/object-store/root-user
+  minio_root_password:
+    file: ${ORTAK_PRIVATE_STATE:?}/object-store/root-password

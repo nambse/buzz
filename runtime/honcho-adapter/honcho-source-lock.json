@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/plastic-labs/honcho",
+  "version": "3.1.1",
+  "commit": "5d992bc65afcfbc05a5911ab4edbaa88ef64c690",
+  "archive_sha256": "7a7453159892790359d7643f9608a348cc328f0c40b25ceee4e4b6da64f3d0fb",
+  "extension_protocol": "ortak-honcho/1",
+  "patched_inputs": {
+    "src/crud/message.py": "47e64f5f48d06a9e94691aae9a6a2e369b796897fb8d660eed2bf7cf4a019e4f",
+    "src/deriver/enqueue.py": "18c14d165acbfb623a2253be06725f7b9d48ce7355b3fad37e7e52fb3612af5f"
+  },
+  "candidate_build_base": "ghcr.io/astral-sh/uv:0.11.6-python3.13-trixie@sha256:b3c543b6c4f23a5f2df22866bd7857e5d304b67a564f4feab6ac22044dde719b",
+  "build_base_status": "Selected locally by operator; compatibility test pending"
+}

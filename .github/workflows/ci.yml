@@ -51,7 +51,9 @@ jobs:
               - 'bin/.pgschema-*.pkg'
               - 'scripts/check-postgres-test-discovery.py'
               - 'scripts/test-postgres-test-discovery.sh'
+              - 'scripts/test-postgres-test-discovery.py'
               - 'scripts/test-postgres-test-wrapper.sh'
+              - 'scripts/test-docker-pr-boundaries.sh'
               - 'deny.toml'
               - '.github/workflows/ci.yml'
               - '.github/workflows/_ci-*.yml'
@@ -90,6 +92,8 @@ jobs:
           scripts/test-postgres-test-wrapper.sh
       - name: Release workflow source contract
         run: scripts/test-release-ref-contract.sh
+      - name: Docker PR registry boundary contract
+        run: scripts/test-docker-pr-boundaries.sh
       - name: Relay image eligibility contract
         run: scripts/test-relay-image-eligibility-workflow.sh
       - name: Desktop release candidate contract

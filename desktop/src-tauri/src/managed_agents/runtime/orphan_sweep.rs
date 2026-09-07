@@ -126,6 +126,9 @@ pub(super) const PROC_PIDTBSDINFO: libc::c_int = 3;
 /// while leaving another live Buzz instance's agents untouched.
 #[cfg(target_os = "macos")]
 pub(crate) fn sweep_system_agent_processes(instance_id: &str, skip_pids: &[u32]) {
+    if !crate::private_native::legacy_enabled() {
+        return;
+    }
     let my_uid = unsafe { libc::getuid() };
     let pids = sweep::collect_all_pids();
     if pids.is_empty() {
@@ -183,6 +186,9 @@ pub(crate) fn sweep_system_agent_processes(instance_id: &str, skip_pids: &[u32])
 
 #[cfg(all(unix, not(target_os = "macos")))]
 pub(crate) fn sweep_system_agent_processes(instance_id: &str, skip_pids: &[u32]) {
+    if !crate::private_native::legacy_enabled() {
+        return;
+    }
     let my_uid = unsafe { libc::getuid() };
     let mut orphans: Vec<i32> = Vec::new();
     let my_pid = std::process::id() as i32;
@@ -248,6 +254,9 @@ pub(crate) fn sweep_system_agent_processes_with_grace(
     skip_pids: &[u32],
     prev_orphans: &std::collections::HashSet<u32>,
 ) -> std::collections::HashSet<u32> {
+    if !crate::private_native::legacy_enabled() {
+        return std::collections::HashSet::new();
+    }
     let current = collect_same_instance_orphans(instance_id, skip_pids);
     // Only reap PIDs seen orphaned on two consecutive ticks.
     let confirmed: Vec<i32> = current

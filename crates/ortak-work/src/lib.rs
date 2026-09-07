@@ -49,6 +49,7 @@ mod error;
 pub mod model;
 pub mod postgres;
 pub mod repository;
+pub mod reviewed_exports;
 pub mod service;
 
 pub use error::{Result, WorkError};
@@ -62,3 +63,27 @@ pub use repository::{
     WorkRepository,
 };
 pub use service::WorkService;
+
+pub use postgres::{
+    ApiProject, ApiProjectCreation, ApiProjectPage, ApiWorkPrincipal, AuthorizedWork, ProjectRole,
+    WorkExecutionReceipt, WorkMutation,
+};
+
+pub use postgres::{schedule_work_outputs, WorkOutputReport};
+pub use postgres::{DependencyAction, WorkDependencyPage, WorkDependencyView};
+pub use postgres::{EmployeeWorkQueueEntry, EmployeeWorkQueuePage};
+pub use postgres::{WorkChildCreation, WorkDecomposition};
+pub use postgres::{WorkExecutionView, WorkTextArtifact};
+
+// Explicitly reviewed project context and retained stop-use receipts.
+pub use postgres::{
+    ReviewedFact, ReviewedFactDraft, ReviewedFactPage, ReviewedFactRecall, ReviewedFactReceipt,
+    ReviewedFactSource,
+};
+
+// Explicit conversation review; approval remains separate from publication/use.
+pub use postgres::{
+    ConversationMemoryAudience, ReviewedConversationFact, ReviewedConversationFactDraft,
+    ReviewedConversationFactPage, ReviewedConversationFactReceipt, ReviewedConversationPreview,
+    ReviewedConversationPreviewRequest,
+};

@@ -1,4 +1,8 @@
 #![recursion_limit = "256"] // Deep Tauri command futures exceed the default layout query depth.
+#[cfg(all(ortak_private_desktop, feature = "legacy-terminal"))]
+compile_error!("Private Ortak must be built without the legacy-terminal feature.");
+#[cfg(all(ortak_private_desktop, feature = "legacy-voice"))]
+compile_error!("Private Ortak must be built without the legacy-voice feature.");
 mod app_menu;
 mod app_state;
 mod archive;
@@ -10,6 +14,7 @@ mod deep_link;
 mod egress_guard;
 mod event_sync;
 mod events;
+#[cfg(feature = "legacy-voice")]
 mod huddle;
 mod identity_storage;
 mod initial_window;
@@ -36,6 +41,10 @@ pub mod nostr_convert;
 mod observed_unread;
 mod persona_catalog;
 mod prevent_sleep;
+mod private_native;
+#[doc(hidden)]
+pub use private_native::print_private_policy_probe_if_requested;
+#[cfg(feature = "legacy-voice")]
 mod ptt_shortcut;
 mod relay;
 mod relay_admission;
@@ -44,7 +53,9 @@ mod secret_store;
 mod shutdown;
 mod team_catalog;
 mod templates;
+#[cfg(feature = "legacy-terminal")]
 mod terminal_runtime;
+#[cfg(feature = "legacy-terminal")]
 #[cfg_attr(not(test), allow(dead_code))]
 mod terminal_transport;
 #[cfg(target_os = "macos")]
@@ -65,6 +76,7 @@ use deep_link::{
     take_pending_navigation_deep_link, PendingCommunityDeepLinks, PendingEntityDeepLinks,
     PendingNavigationDeepLinks,
 };
+#[cfg(feature = "legacy-voice")]
 use huddle::{
     add_agent_to_huddle,
     audio_output::{get_audio_output_device, list_audio_output_devices, set_audio_output_device},
@@ -91,14 +103,30 @@ use shutdown::{is_restart_request, shut_down_app};
 use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};
 #[cfg(target_os = "macos")]
 use tauri::Listener;
-use tauri::{Emitter, Manager, RunEvent, WindowEvent};
+#[cfg(any(target_os = "macos", feature = "legacy-voice"))]
+use tauri::WindowEvent;
+use tauri::{Emitter, Manager, RunEvent};
 use tauri_plugin_window_state::StateFlags;
 #[cfg(target_os = "macos")]
 use tray_menu::show_main_window;
+// Compose admission around the generated handler so direct WebView IPC receives
+// the same policy even when it bypasses the shared TypeScript invoke helper.
+fn native_command_handler(
+    handler: impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static,
+) -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
+    move |invoke| {
+        let command = invoke.message.command().to_owned();
+        private_native::dispatch(&command, invoke, &handler, |invoke, reason| {
+            invoke.resolver.reject(reason);
+            true
+        })
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // mesh-llm async chains overflow tokio's default 2 MiB stacks; run on 8 MiB like upstream.
-    #[cfg(feature = "mesh-llm")]
+    #[cfg(all(feature = "mesh-llm", not(ortak_private_desktop)))]
     match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_stack_size(crate::mesh_llm::MESH_WORKER_STACK_SIZE)
@@ -152,7 +180,9 @@ pub fn run() {
                     // Linux/WebKitGTK needs media-stream settings and a
                     // permission-request handler for getUserMedia; no-op
                     // on macOS/Windows.
-                    linux_media::enable_media_capture(&webview);
+                    if private_native::legacy_enabled() {
+                        linux_media::enable_media_capture(&webview);
+                    }
 
                     // macOS applies the restored geometry asynchronously. Wait
                     // for several identical outer bounds and for React to
@@ -204,7 +234,12 @@ pub fn run() {
     // The push-to-talk global-shortcut plugin lives in `ptt_shortcut`, next to
     // the registration lifecycle it drives. Installing it is a no-op in test
     // builds; see that module for why.
-    let builder = ptt_shortcut::install(builder);
+    #[cfg(feature = "legacy-voice")]
+    let builder = if private_native::legacy_enabled() {
+        ptt_shortcut::install(builder)
+    } else {
+        builder
+    };
 
     // Register the updater only in configured release builds; omit it locally.
     #[cfg(buzz_updater_enabled)]
@@ -213,6 +248,8 @@ pub fn run() {
     } else {
         builder.plugin(tauri_plugin_updater::Builder::new().build())
     };
+    #[cfg(feature = "legacy-terminal")]
+    let builder = builder.manage(terminal_runtime::TerminalSessions::default());
     let app = app_menu::install(builder)
         .register_asynchronous_uri_scheme_protocol("buzz-media", |ctx, request, responder| {
             let app = ctx.app_handle().clone();
@@ -229,7 +266,6 @@ pub fn run() {
         .manage(BuilderlabSession::default())
         .manage(BuilderlabLogin::default())
         .manage(commands::pairing::PairingHandle::new())
-        .manage(terminal_runtime::TerminalSessions::default())
         .manage(archive::sync::ArchiveSyncState::default())
         .manage(native_relay_client::NativeRelayClient::default())
         .manage(observed_unread::ObservedUnreadStore::default())
@@ -300,28 +336,30 @@ pub fn run() {
                     .keyring_locked
                     .load(std::sync::atomic::Ordering::Acquire);
 
-            // Backfill the pinned persona snapshot for any pre-existing agent
-            // that predates the record-authoritative-spawn cutover (persona_id
-            // set but no source_version). Must run before
-            // restore_managed_agents_on_launch so no agent spawns from an empty
-            // snapshot. Synchronous and best-effort — a failure here must not
-            // block launch, but a missing persona is logged loudly inside.
-            if let Err(e) = backfill_persona_snapshots(&app_handle) {
-                eprintln!("buzz-desktop: persona-snapshot backfill failed: {e}");
-            }
+            if private_native::legacy_enabled() {
+                // Backfill the pinned persona snapshot for any pre-existing agent
+                // that predates the record-authoritative-spawn cutover (persona_id
+                // set but no source_version). Must run before
+                // restore_managed_agents_on_launch so no agent spawns from an empty
+                // snapshot. Synchronous and best-effort — a failure here must not
+                // block launch, but a missing persona is logged loudly inside.
+                if let Err(e) = backfill_persona_snapshots(&app_handle) {
+                    eprintln!("buzz-desktop: persona-snapshot backfill failed: {e}");
+                }
 
-            // Warm the loaded-harness registry BEFORE restore so cold-launch
-            // agent spawns can resolve custom/preset runtime ids without
-            // waiting for the frontend's discover_acp_providers call.  This is
-            // a pure directory scan — no PATH probing, no async work.
-            let custom_harness_dir = app_handle
-                .path()
-                .app_data_dir()
-                .ok()
-                .map(|d| d.join("custom_harnesses"));
-            managed_agents::custom_harnesses::warm_harness_registry_from_dir(
-                custom_harness_dir.as_deref(),
-            );
+                // Warm the loaded-harness registry BEFORE restore so cold-launch
+                // agent spawns can resolve custom/preset runtime ids without
+                // waiting for the frontend's discover_acp_providers call.  This is
+                // a pure directory scan — no PATH probing, no async work.
+                let custom_harness_dir = app_handle
+                    .path()
+                    .app_data_dir()
+                    .ok()
+                    .map(|d| d.join("custom_harnesses"));
+                managed_agents::custom_harnesses::warm_harness_registry_from_dir(
+                    custom_harness_dir.as_deref(),
+                );
+            }
 
             // Store the AppHandle so huddle commands can emit `huddle-state-changed`
             // events via `huddle::emit_huddle_state` without threading the handle
@@ -330,23 +368,26 @@ pub fn run() {
                 *guard = Some(app_handle.clone());
             }
 
-            let (tts_settings, tts_settings_load_error) =
-                huddle::tts_settings::load_for_app(&app_handle);
-            if let Ok(mut guard) = state.huddle_audio.tts.lock() {
-                *guard = tts_settings.clone();
-            }
-            if let Ok(mut guard) = state.huddle_audio.tts_load_error.lock() {
-                *guard = tts_settings_load_error;
-            }
-            if let Ok(mut huddle) = state.huddle_state.lock() {
-                huddle.tts_enabled = tts_settings.agent_text_to_speech;
+            #[cfg(feature = "legacy-voice")]
+            if private_native::legacy_enabled() {
+                let (tts_settings, tts_settings_load_error) =
+                    huddle::tts_settings::load_for_app(&app_handle);
+                if let Ok(mut guard) = state.huddle_audio.tts.lock() {
+                    *guard = tts_settings.clone();
+                }
+                if let Ok(mut guard) = state.huddle_audio.tts_load_error.lock() {
+                    *guard = tts_settings_load_error;
+                }
+                if let Ok(mut huddle) = state.huddle_state.lock() {
+                    huddle.tts_enabled = tts_settings.agent_text_to_speech;
+                }
             }
 
             // Bring up the runtime-owned shared-compute coordinator before
             // saved agents are restored. Its lifetime is tied to the app, not
             // a UI mount; it publishes discovery and reconciles membership for
             // MeshLLM's native admission and transport.
-            #[cfg(feature = "mesh-llm")]
+            #[cfg(all(feature = "mesh-llm", not(ortak_private_desktop)))]
             {
                 // Route mesh-llm's download progress (model weights, runtime)
                 // onto Tauri events so the UI can render real progress.
@@ -367,72 +408,77 @@ pub fn run() {
                     .store(port, std::sync::atomic::Ordering::Relaxed);
             });
 
-            // Create the Buzz nest (~/.buzz or ~/.buzz-dev for dev builds) before
-            // agents are restored, so default_agent_workdir() resolves to the
-            // nest directory. Non-fatal: agents fall back to $HOME if nest
-            // creation fails.
-            if let Err(error) = ensure_nest() {
-                eprintln!("buzz-desktop: failed to create nest: {error}");
-            }
             archive::spawn_warm_init(app_handle.clone());
+            let mut restore_agents = false;
+            if private_native::legacy_enabled() {
+                // Create the Buzz nest (~/.buzz or ~/.buzz-dev for dev builds) before
+                // agents are restored, so default_agent_workdir() resolves to the
+                // nest directory. Non-fatal: agents fall back to $HOME if nest
+                // creation fails.
+                if let Err(error) = ensure_nest() {
+                    eprintln!("buzz-desktop: failed to create nest: {error}");
+                }
 
-            // Resolve the REPOS symlink from the persisted repos_dir BEFORE
-            // agents are restored below, and decide whether restore is safe.
-            // The frontend's apply_workspace runs only after React mounts —
-            // later than the async agent restore — so without this an agent
-            // could clone into the empty real REPOS dir, and once REPOS is
-            // non-empty ensure_repos_symlink refuses forever. resolve_repos_at_boot
-            // fails closed: if a repos_dir was configured but its symlink could
-            // not be resolved (transiently unavailable external volume), it
-            // returns false so we skip restore this launch rather than let an
-            // agent clone into the wrong REPOS. See managed_agents::repos.
-            let restore_agents = match managed_agents::nest_dir() {
-                Some(nest) => managed_agents::resolve_repos_at_boot(&nest),
-                None => true,
-            };
+                // Resolve the REPOS symlink from the persisted repos_dir BEFORE
+                // agents are restored below, and decide whether restore is safe.
+                // The frontend's apply_workspace runs only after React mounts —
+                // later than the async agent restore — so without this an agent
+                // could clone into the empty real REPOS dir, and once REPOS is
+                // non-empty ensure_repos_symlink refuses forever. resolve_repos_at_boot
+                // fails closed: if a repos_dir was configured but its symlink could
+                // not be resolved (transiently unavailable external volume), it
+                // returns false so we skip restore this launch rather than let an
+                // agent clone into the wrong REPOS. See managed_agents::repos.
+                restore_agents = match managed_agents::nest_dir() {
+                    Some(nest) => managed_agents::resolve_repos_at_boot(&nest),
+                    None => true,
+                };
 
-            // Carry the agent's knowledge from the legacy nest (~/.sprout) into
-            // the live nest after it exists. Must run after ensure_nest() so the
-            // destination is present. Non-fatal.
-            // On a real migration, emit a one-time hint so the user can delete
-            // the now-inert ~/.sprout; the frontend dedupes the toast.
-            // Suppressed when a reset completed this boot: the nest was wiped and
-            // a fresh ~/.sprout-less state is exactly what we want.
-            if !crate::build_identity::is_demo_build()
-                && !reset_outcome.completed
-                && migration::migrate_legacy_nest()
-            {
-                let _ = app_handle.emit("legacy-nest-migrated", ());
-            }
+                // Carry the agent's knowledge from the legacy nest (~/.sprout) into
+                // the live nest after it exists. Must run after ensure_nest() so the
+                // destination is present. Non-fatal.
+                // On a real migration, emit a one-time hint so the user can delete
+                // the now-inert ~/.sprout; the frontend dedupes the toast.
+                // Suppressed when a reset completed this boot: the nest was wiped and
+                // a fresh ~/.sprout-less state is exactly what we want.
+                if !crate::build_identity::is_demo_build()
+                    && !reset_outcome.completed
+                    && migration::migrate_legacy_nest()
+                {
+                    let _ = app_handle.emit("legacy-nest-migrated", ());
+                }
 
-            // One-time migration for dev builds: copy accumulated knowledge
-            // from the shared ~/.buzz nest into the new dedicated ~/.buzz-dev
-            // nest so no work is lost when the nest is first namespaced.
-            // Runs only when nest_dir() resolved to ~/.buzz-dev (dev instance).
-            // Suppressed after a reset so re-importing ~/.buzz into ~/.buzz-dev
-            // doesn't re-populate what was just wiped.
-            let is_dev_nest = managed_agents::nest_dir()
-                .and_then(|p| p.file_name().map(|n| n.to_os_string()))
-                .is_some_and(|n| n == ".buzz-dev");
-            if !reset_outcome.completed && is_dev_nest {
-                migration::migrate_dev_nest();
-            }
+                // One-time migration for dev builds: copy accumulated knowledge
+                // from the shared ~/.buzz nest into the new dedicated ~/.buzz-dev
+                // nest so no work is lost when the nest is first namespaced.
+                // Runs only when nest_dir() resolved to ~/.buzz-dev (dev instance).
+                // Suppressed after a reset so re-importing ~/.buzz into ~/.buzz-dev
+                // doesn't re-populate what was just wiped.
+                let is_dev_nest = managed_agents::nest_dir()
+                    .and_then(|p| p.file_name().map(|n| n.to_os_string()))
+                    .is_some_and(|n| n == ".buzz-dev");
+                if !reset_outcome.completed && is_dev_nest {
+                    migration::migrate_dev_nest();
+                }
 
-            // Create/update the local CLI symlink pointing to the
-            // bundled CLI binary. Non-fatal: agents find CLI via PATH.
-            if let Ok(exe) = std::env::current_exe() {
-                if let Some(parent) = exe.parent() {
-                    if let Err(error) = managed_agents::ensure_cli_symlink(parent, is_dev_nest) {
-                        eprintln!("buzz-desktop: failed to create CLI symlink: {error}");
+                // Create/update the local CLI symlink pointing to the
+                // bundled CLI binary. Non-fatal: agents find CLI via PATH.
+                if let Ok(exe) = std::env::current_exe() {
+                    if let Some(parent) = exe.parent() {
+                        if let Err(error) = managed_agents::ensure_cli_symlink(parent, is_dev_nest)
+                        {
+                            eprintln!("buzz-desktop: failed to create CLI symlink: {error}");
+                        }
                     }
                 }
-            }
 
-            try_regenerate_nest(&app_handle);
+                try_regenerate_nest(&app_handle);
 
-            if let Some(mgr) = huddle::models::global_model_manager() {
-                mgr.start_stt_download(state.http_client.clone());
-                mgr.start_tts_download(state.http_client.clone());
+                #[cfg(feature = "legacy-voice")]
+                if let Some(mgr) = huddle::models::global_model_manager() {
+                    mgr.start_stt_download(state.http_client.clone());
+                    mgr.start_tts_download(state.http_client.clone());
+                }
             }
 
             // Handle deep link URLs received while the app is running (macOS)
@@ -447,50 +493,52 @@ pub fn run() {
             // has no relay override to the localhost fallback. Preserve the
             // boot-time repos and identity recovery safety gates by only marking
             // restoration pending when both allow it.
-            if restore_agents && !recovery_mode {
+            if private_native::legacy_enabled() && restore_agents && !recovery_mode {
                 state
                     .managed_agent_restore_pending
                     .store(true, Ordering::Release);
             }
 
-            // Periodic sweep: reap orphaned agents from dead instances every 60s.
-            // Catches agents that escaped both the Justfile trap and boot-time
-            // reaping (e.g. a `just staging` Ctrl+C leak that only gets collected
-            // by a different instance's periodic sweep).
-            let sweep_handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                use std::collections::HashSet;
-                use std::time::Duration;
-                use tauri::Manager;
-                let instance_id = managed_agents::current_instance_id(&sweep_handle);
-                let state = sweep_handle.state::<AppState>();
-                // Two-tick grace: only reap same-instance orphans seen on two
-                // consecutive sweeps. Prevents killing a legitimately-starting
-                // agent that spawned between the skip-list snapshot and the scan.
-                let mut prev_orphans: HashSet<u32> = HashSet::new();
-                loop {
-                    tokio::time::sleep(Duration::from_secs(60)).await;
-                    // Collect PIDs of our own live agents to avoid killing them.
-                    let skip_pids: Vec<u32> = state
-                        .managed_agent_processes
-                        .lock()
-                        .map(|runtimes| runtimes.values().map(|rt| rt.child.id()).collect())
+            if private_native::legacy_enabled() {
+                // Periodic sweep: reap orphaned agents from dead instances every 60s.
+                // Catches agents that escaped both the Justfile trap and boot-time
+                // reaping (e.g. a `just staging` Ctrl+C leak that only gets collected
+                // by a different instance's periodic sweep).
+                let sweep_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    use std::collections::HashSet;
+                    use std::time::Duration;
+                    use tauri::Manager;
+                    let instance_id = managed_agents::current_instance_id(&sweep_handle);
+                    let state = sweep_handle.state::<AppState>();
+                    // Two-tick grace: only reap same-instance orphans seen on two
+                    // consecutive sweeps. Prevents killing a legitimately-starting
+                    // agent that spawned between the skip-list snapshot and the scan.
+                    let mut prev_orphans: HashSet<u32> = HashSet::new();
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(60)).await;
+                        // Collect PIDs of our own live agents to avoid killing them.
+                        let skip_pids: Vec<u32> = state
+                            .managed_agent_processes
+                            .lock()
+                            .map(|runtimes| runtimes.values().map(|rt| rt.child.id()).collect())
+                            .unwrap_or_default();
+                        let prev = prev_orphans.clone();
+                        let inst = instance_id.clone();
+                        // Run the blocking syscall work off the async executor.
+                        let new_orphans = tauri::async_runtime::spawn_blocking(move || {
+                            let orphans = managed_agents::sweep_system_agent_processes_with_grace(
+                                &inst, &skip_pids, &prev,
+                            );
+                            managed_agents::reap_dead_instance_agents(&inst, &skip_pids);
+                            orphans
+                        })
+                        .await
                         .unwrap_or_default();
-                    let prev = prev_orphans.clone();
-                    let inst = instance_id.clone();
-                    // Run the blocking syscall work off the async executor.
-                    let new_orphans = tauri::async_runtime::spawn_blocking(move || {
-                        let orphans = managed_agents::sweep_system_agent_processes_with_grace(
-                            &inst, &skip_pids, &prev,
-                        );
-                        managed_agents::reap_dead_instance_agents(&inst, &skip_pids);
-                        orphans
-                    })
-                    .await
-                    .unwrap_or_default();
-                    prev_orphans = new_orphans;
-                }
-            });
+                        prev_orphans = new_orphans;
+                    }
+                });
+            }
 
             // Drain events the retention store flagged `pending_sync` (UI
             // create/edit, delete tombstones, launch reconcile) to the relay.
@@ -499,7 +547,7 @@ pub fn run() {
             // the next sweep.
             // Skipped in recovery mode — flushing under an ephemeral key would
             // publish events attributed to an identity the user doesn't own.
-            if !recovery_mode {
+            if private_native::legacy_enabled() && !recovery_mode {
                 let flush_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     use std::time::Duration;
@@ -520,15 +568,24 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(native_command_handler(tauri::generate_handler![
+            #[cfg(feature = "legacy-terminal")]
             terminal_runtime::terminal_attach,
+            #[cfg(feature = "legacy-terminal")]
             terminal_runtime::terminal_detach,
+            #[cfg(feature = "legacy-terminal")]
             terminal_runtime::terminal_close,
+            #[cfg(feature = "legacy-terminal")]
             terminal_runtime::terminal_input,
+            #[cfg(feature = "legacy-terminal")]
             terminal_runtime::terminal_resize,
+            #[cfg(feature = "legacy-terminal")]
             terminal_runtime::terminal_scroll,
+            #[cfg(feature = "legacy-terminal")]
             terminal_runtime::terminal_ack,
+            #[cfg(feature = "legacy-terminal")]
             terminal_runtime::terminal_viewport_ready,
+            #[cfg(feature = "legacy-terminal")]
             terminal_runtime::terminal_focus,
             take_pending_community_deep_link,
             acknowledge_pending_community_deep_link,
@@ -616,6 +673,14 @@ pub fn run() {
             create_auth_event,
             nip44_encrypt_to_self,
             nip44_decrypt_from_self,
+            encrypted_dm_begin,
+            encrypted_dm_close,
+            encrypted_dm_authority,
+            encrypted_dm_open,
+            encrypted_dm_save_draft,
+            encrypted_dm_prepare,
+            encrypted_dm_publish,
+            encrypted_dm_retire,
             get_channels,
             get_open_channel_directory,
             create_channel,
@@ -790,43 +855,80 @@ pub fn run() {
             get_note,
             get_note_reactions,
             get_liked_notes,
+            #[cfg(feature = "legacy-voice")]
             start_huddle,
+            #[cfg(feature = "legacy-voice")]
             join_huddle,
+            #[cfg(feature = "legacy-voice")]
             leave_huddle,
+            #[cfg(feature = "legacy-voice")]
             end_huddle,
+            #[cfg(feature = "legacy-voice")]
             get_huddle_state,
+            #[cfg(feature = "legacy-voice")]
             close_huddle_companion,
+            #[cfg(feature = "legacy-voice")]
             open_huddle_window,
+            #[cfg(feature = "legacy-voice")]
             push_audio_pcm,
+            #[cfg(feature = "legacy-voice")]
             reconnect_huddle_audio,
+            #[cfg(feature = "legacy-voice")]
             start_stt_pipeline,
+            #[cfg(feature = "legacy-voice")]
             set_huddle_transcription_enabled,
+            #[cfg(feature = "legacy-voice")]
             download_voice_models,
+            #[cfg(feature = "legacy-voice")]
             get_model_status,
+            #[cfg(feature = "legacy-voice")]
             set_tts_enabled,
+            #[cfg(feature = "legacy-voice")]
             huddle::tts_settings::get_tts_settings,
+            #[cfg(feature = "legacy-voice")]
             huddle::tts_settings::list_voice_registry,
+            #[cfg(feature = "legacy-voice")]
             huddle::tts_settings::set_pocket_voice,
+            #[cfg(feature = "legacy-voice")]
             huddle::tts_settings::preview_pocket_voice,
+            #[cfg(feature = "legacy-voice")]
             huddle::tts_settings::import_pocket_voice,
+            #[cfg(feature = "legacy-voice")]
             huddle::tts_settings::delete_pocket_voice,
+            #[cfg(feature = "legacy-voice")]
             huddle::agent_voice::ensure_huddle_agent_voice_settings,
+            #[cfg(feature = "legacy-voice")]
             huddle::agent_voice::set_huddle_agent_tts_enabled,
+            #[cfg(feature = "legacy-voice")]
             huddle::agent_voice::set_huddle_agent_voice,
+            #[cfg(feature = "legacy-voice")]
             speak_agent_message,
+            #[cfg(feature = "legacy-voice")]
             interrupt_huddle_speech,
+            #[cfg(feature = "legacy-voice")]
             add_agent_to_huddle,
+            #[cfg(feature = "legacy-voice")]
             remove_agent_from_huddle,
+            #[cfg(feature = "legacy-voice")]
             huddle::agents::sync_agents_to_active_huddle,
+            #[cfg(feature = "legacy-voice")]
             check_pipeline_hotstart,
+            #[cfg(feature = "legacy-voice")]
             confirm_huddle_active,
             perform_sidebar_default_haptic,
+            #[cfg(feature = "legacy-voice")]
             get_huddle_agent_pubkeys,
+            #[cfg(feature = "legacy-voice")]
             set_voice_input_mode,
+            #[cfg(feature = "legacy-voice")]
             get_voice_input_mode,
+            #[cfg(feature = "legacy-voice")]
             set_huddle_manual_mic_unmuted,
+            #[cfg(feature = "legacy-voice")]
             list_audio_output_devices,
+            #[cfg(feature = "legacy-voice")]
             set_audio_output_device,
+            #[cfg(feature = "legacy-voice")]
             get_audio_output_device,
             start_pairing,
             start_identity_recovery_pairing,
@@ -870,7 +972,7 @@ pub fn run() {
             tray_menu::take_tray_actions,
             #[cfg(target_os = "macos")]
             tray_menu::update_tray_agent_activity,
-        ])
+        ]))
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
     let shutdown_done = Arc::new(AtomicBool::new(false));
@@ -897,6 +999,7 @@ pub fn run() {
                 }
             }
         }
+        #[cfg(feature = "legacy-voice")]
         RunEvent::WindowEvent {
             label,
             event: WindowEvent::CloseRequested { .. },

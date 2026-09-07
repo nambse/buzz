@@ -6,6 +6,11 @@
 //! resource not created through the fake. Tests use their inspection methods
 //! to prove adopted resources survive compensation.
 
+mod semantic;
+
+/// Isolated semantic adapter fixture driven through the real routing service.
+pub use semantic::SemanticScoringFixture;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Mutex, MutexGuard};
 
@@ -37,9 +42,9 @@ use crate::provisioning::{
 };
 use crate::run_event::RunEventPayload;
 use crate::runtime::{
-    CancelOutcome, RunSpec, RunStartReceipt, RuntimeAdapter, RuntimeCapabilities,
-    RuntimeCapability, RuntimeCursor, RuntimeError, RuntimeEvent, RuntimeEventBatch,
-    RuntimeResourceRequest, RuntimeRunRef,
+    CancelOutcome, CancelStartReceipt, RunSpec, RunStartReceipt, RuntimeAdapter,
+    RuntimeCapabilities, RuntimeCapability, RuntimeCursor, RuntimeError, RuntimeEvent,
+    RuntimeEventBatch, RuntimeResourceRequest, RuntimeRunRef,
 };
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -73,6 +78,8 @@ struct RuntimeState {
     deleted: Vec<String>,
     runs: BTreeMap<String, FakeRun>,
     start_receipts: BTreeMap<String, RunStartReceipt>,
+    start_specs: Vec<RunSpec>,
+    cancelled_starts: BTreeSet<String>,
     next_run: u64,
 }
 
@@ -92,6 +99,8 @@ pub fn all_runtime_capabilities() -> BTreeSet<RuntimeCapability> {
         RuntimeCapability::RunStart,
         RuntimeCapability::RunEvents,
         RuntimeCapability::RunCancel,
+        RuntimeCapability::RunLookup,
+        RuntimeCapability::RunCancelStart,
     ]
     .into_iter()
     .collect()
@@ -156,6 +165,12 @@ impl FakeRuntimeAdapter {
     /// Profiles deleted through this adapter, in order.
     pub fn deleted_profiles(&self) -> Vec<String> {
         lock(&self.state).deleted.clone()
+    }
+
+    /// Specifications received by `start_run`, including retries and refusals,
+    /// captured before validation so tests can detect every runtime call.
+    pub fn start_specs(&self) -> Vec<RunSpec> {
+        lock(&self.state).start_specs.clone()
     }
 
     /// Appends an event to a started run's stream.
@@ -315,11 +330,17 @@ impl RuntimeAdapter for FakeRuntimeAdapter {
         &self,
         spec: &RunSpec,
     ) -> std::result::Result<RunStartReceipt, RuntimeError> {
-        spec.validate()?;
         let mut state = lock(&self.state);
+        state.start_specs.push(spec.clone());
+        spec.validate()?;
         Self::guard(&state)?;
         if let Some(receipt) = state.start_receipts.get(&spec.idempotency_key) {
             return Ok(receipt.clone());
+        }
+        if state.cancelled_starts.contains(&spec.idempotency_key) {
+            return Err(RuntimeError::InvalidSpec {
+                detail: Detail::new("start key was cancelled"),
+            });
         }
         let profile_ref = Self::profile_ref(&spec.binding, &spec.employee_id);
         if !state.profiles.contains_key(&profile_ref) {
@@ -348,6 +369,41 @@ impl RuntimeAdapter for FakeRuntimeAdapter {
             .start_receipts
             .insert(spec.idempotency_key.clone(), receipt.clone());
         Ok(receipt)
+    }
+
+    async fn lookup_start(
+        &self,
+        idempotency_key: &str,
+    ) -> std::result::Result<Option<RunStartReceipt>, RuntimeError> {
+        let state = lock(&self.state);
+        Self::guard(&state)?;
+        Ok(state.start_receipts.get(idempotency_key).cloned())
+    }
+
+    async fn cancel_start(
+        &self,
+        idempotency_key: &str,
+        reason: &str,
+    ) -> std::result::Result<CancelStartReceipt, RuntimeError> {
+        let receipt = {
+            let mut state = lock(&self.state);
+            Self::guard(&state)?;
+            state.cancelled_starts.insert(idempotency_key.to_owned());
+            state.start_receipts.get(idempotency_key).cloned()
+        };
+        match receipt {
+            Some(receipt) => {
+                let outcome = self.cancel_run(&receipt.runtime_run_ref, reason).await?;
+                Ok(CancelStartReceipt {
+                    runtime_run_ref: Some(receipt.runtime_run_ref),
+                    outcome,
+                })
+            }
+            None => Ok(CancelStartReceipt {
+                runtime_run_ref: None,
+                outcome: CancelOutcome::Cancelled,
+            }),
+        }
     }
 
     async fn next_events(
@@ -1229,6 +1285,35 @@ impl ProvisioningRepository for InMemoryProvisioningRepository {
         })
     }
 
+    async fn prepare_activation(
+        &self,
+        scope: &CompanyScope,
+        operation_id: Uuid,
+        running: &StepRecord,
+        lifetime: std::time::Duration,
+    ) -> Result<crate::provisioning::ActivationTarget> {
+        self.check_scope(scope)?;
+        let state = lock(&self.state);
+        let operation = state
+            .operations
+            .get(&operation_id)
+            .ok_or(ProvisioningError::UnknownOperation { operation_id })?;
+        let employee = state
+            .employees
+            .get(&(scope.company_id(), operation.employee_id.to_string()))
+            .ok_or_else(|| ControlError::InvalidData("activation employee is absent".into()))?;
+        crate::provisioning::ActivationTarget::issue(
+            scope,
+            operation,
+            running,
+            employee.status,
+            employee.active_revision_id,
+            crate::office_authority::OfficeAuthority::new(scope.company_id(), 0, None),
+            Utc::now(),
+            lifetime,
+        )
+    }
+
     async fn activate_revision(
         &self,
         scope: &CompanyScope,
@@ -1265,6 +1350,21 @@ impl ProvisioningRepository for InMemoryProvisioningRepository {
                 "activation requires a reserved employee row".to_owned(),
             ));
         }
+        let target = activation.target.as_ref().ok_or_else(|| {
+            ControlError::InvalidData("fresh activation target is required".into())
+        })?;
+        let current = state
+            .employees
+            .get(&employee_key)
+            .ok_or_else(|| ControlError::InvalidData("activation employee is absent".into()))?;
+        target.validate_current(
+            scope,
+            operation,
+            current.status,
+            current.active_revision_id,
+            Utc::now(),
+        )?;
+        target.validate_activation(activation)?;
         // Company-unique aliases (mirrors the employee_aliases primary key).
         let new_aliases = activation.employee.normalized_aliases();
         for (other_key, row) in &state.employees {
@@ -1300,6 +1400,7 @@ impl ProvisioningRepository for InMemoryProvisioningRepository {
                 .find(|record| record.step == ProvisioningStep::ActivateRevision)
             {
                 *record = activation.activation_step.clone();
+                record.result["result_revision_id"] = serde_json::json!(revision_id);
                 record.state = StepState::Succeeded;
                 record.finished_at.get_or_insert(now);
             }

@@ -1,3 +1,4 @@
+import { privateFeatureBlocked } from "@/features/ortak/privateMode";
 import { useSyncExternalStore, useCallback, useEffect } from "react";
 import { getFeature } from "./manifest";
 import { resolveEnabled } from "./resolveEnabled";
@@ -91,6 +92,7 @@ export function useFeatureSnapshot(): Record<string, boolean> {
  */
 export function useFeatureEnabled(featureId: string): boolean {
   const overrides = useFeatureSnapshot();
+  if (privateFeatureBlocked(featureId)) return false;
 
   const feature = getFeature(featureId);
   if (!feature) {

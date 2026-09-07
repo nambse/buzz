@@ -1,0 +1,24 @@
+# Only the prepared public source and explicit Dockerfile inputs enter builds.
+**
+!.dockerignore
+!Dockerfile
+!vendor/
+!vendor/**
+!ortak_honcho/
+!ortak_honcho/*.py
+!tests/
+!tests/*.py
+!run_tests.py
+!entrypoint.sh
+# Local imports/tests must not change the image's source contents.
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/
+**/.venv/
+**/.git/
+**/.env
+**/.env.local
+**/.env.*.local
+**/*.pem
+**/*.key

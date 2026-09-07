@@ -6,6 +6,9 @@
 //! redacts secret-like material, and guarantees the serialized payload fits
 //! the column check. Raw adapter output never reaches the database directly.
 
+mod final_text;
+pub use final_text::{assemble_final_text, FinalTextRefusal};
+
 use std::fmt;
 
 use chrono::{DateTime, Utc};

@@ -29,6 +29,8 @@ import { useIdentityQuery } from "@/shared/api/hooks";
 import { getEventById } from "@/shared/api/tauri";
 import type { RelayEvent } from "@/shared/api/types";
 import { ViewLoadingFallback } from "@/shared/ui/ViewLoadingFallback";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
+import { SelectedDmScreen } from "@/features/ortak/confidentialDm/SelectedDmScreen";
 
 type ChannelRouteScreenProps = {
   autoSendDraftKey: string | null;
@@ -111,7 +113,18 @@ async function fetchRouteTargetEvents(
   return [...eventsById.values()];
 }
 
-export function ChannelRouteScreen({
+export function ChannelRouteScreen(props: ChannelRouteScreenProps) {
+  const selection = import.meta.env?.VITE_ORTAK_ENCRYPTED_DM_CHANNELS_JSON;
+  return privateOrtakMode && selection !== undefined ? (
+    <SelectedDmScreen channelId={props.channelId} selection={selection}>
+      <OrdinaryChannelRouteScreen {...props} />
+    </SelectedDmScreen>
+  ) : (
+    <OrdinaryChannelRouteScreen {...props} />
+  );
+}
+
+function OrdinaryChannelRouteScreen({
   autoSendDraftKey,
   channelId,
   searchHighlight,

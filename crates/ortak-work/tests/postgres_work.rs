@@ -28,6 +28,9 @@ use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
+#[path = "../../ortak-control/tests/cohort_support.rs"]
+mod cohort_support;
+
 const DEFAULT_DATABASE_URL: &str = "postgres://ortak:ortak@127.0.0.1:55432/ortak"; // sadscan:disable np.postgres.1 -- local disposable test database
 
 fn database_url() -> String {
@@ -147,6 +150,22 @@ impl Company {
             .await
             .expect("resolve scope");
         assert_eq!(scope.company_id(), company_id);
+        let channel: Uuid = sqlx::query_scalar(
+            "INSERT INTO channels(community_id,name,created_by) VALUES ($1,$2,$3) RETURNING id",
+        )
+        .bind(community_id)
+        .bind(format!("work-cohort-{company_id}"))
+        .bind([7u8; 32].as_slice())
+        .fetch_one(pool)
+        .await
+        .expect("work cohort channel");
+        cohort_support::select_and_reconcile(
+            &control,
+            &scope,
+            &[channel],
+            &[employee("cem"), employee("zeynep")],
+        )
+        .await;
         Self {
             pool: pool.clone(),
             service: WorkService::new(control.clone()),
@@ -239,7 +258,20 @@ impl Company {
             .expect("claim")
             .expect("claimable");
         let policy = RoutingPolicy::default();
+        // This repository fixture supplies its routing proposal explicitly;
+        // it needs only the real Office fence witness, not a parsed full roster.
+        let mut witness_tx = self.pool.begin().await.expect("witness transaction");
+        let office_authority =
+            ortak_control::postgres::lock_office_authority_on(&mut witness_tx, &self.scope)
+                .await
+                .expect("Office authority witness");
+        witness_tx
+            .commit()
+            .await
+            .expect("release witness transaction");
         let proposal = RoutingProposal {
+            office_input_hash: [0; 32],
+            office_authority,
             company_id: self.scope.company_id(),
             message_id: id,
             root_message_id: id,
@@ -1634,3 +1666,6 @@ async fn concurrent_dependency_and_item_mutations_do_not_deadlock() {
         .all(|criterion| criterion.status == CriterionStatus::Satisfied));
     assert_dense_history(&sibling);
 }
+
+#[path = "postgres_work/authorized.rs"]
+mod authorized;

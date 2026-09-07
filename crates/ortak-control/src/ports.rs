@@ -12,7 +12,7 @@ use ortak_domain::{
     Employee, EmployeeCatalog, EmployeeId, MessageEnvelope, MessageOrigin, RoutingPolicy,
     RoutingReason, SemanticScore,
 };
-use ortak_router::{SemanticRoutingRequest, SemanticScoringFailure};
+use ortak_router::SemanticScoringFailure;
 use uuid::Uuid;
 
 use crate::error::Result;
@@ -20,14 +20,15 @@ use crate::ids::{ClaimGeneration, CompanyScope, MessageId};
 use crate::inbox::{InboxClaim, InboxEvent, InboxInsertOutcome, InboxReleaseOutcome, InboxRow};
 use crate::outbox::{OutboxFailOutcome, OutboxKind, OutboxLease};
 use crate::provisioning::{
-    IdentityReservation, OperationUpdate, ProvisioningOperation, ProvisioningRequest,
-    RevisionActivation, StepRecord,
+    ActivationTarget, IdentityReservation, OperationUpdate, ProvisioningOperation,
+    ProvisioningRequest, RevisionActivation, StepRecord,
 };
 use crate::routing::{
     ChainState, EmployeeRecord, RoutingCommitOutcome, RoutingProposal, ScorerMetadata,
     StoredDecision,
 };
 use crate::run_event::RunEvent;
+use crate::semantic::SemanticScoringInput;
 
 /// Server-owned company resolution.
 #[allow(async_fn_in_trait)]
@@ -111,6 +112,8 @@ pub struct RosterEmployee {
 /// Out-of-transaction read used to prepare a routing proposal.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RoutingSnapshot {
+    /// Mutation-fence witness captured before reading any proposal inputs.
+    pub office_authority: crate::office_authority::OfficeAuthority,
     /// Inbox row as read.
     pub inbox: InboxRow,
     /// Company policy as read.
@@ -211,8 +214,16 @@ pub struct ScoringOutcome {
 /// Remote semantic scorer, always called outside database transactions.
 #[allow(async_fn_in_trait)]
 pub trait SemanticScorer {
-    /// Scores the least-privilege request under the control layer's deadline.
-    async fn score(&self, request: &SemanticRoutingRequest) -> ScoringOutcome;
+    /// Returns configured provenance without I/O, preserved even when scoring times out.
+    fn metadata(&self) -> ScorerMetadata;
+
+    /// Scores sealed company/revision inputs under the control layer's deadline.
+    /// Implementations must not detach work that can outlive this future.
+    async fn score(
+        &self,
+        input: &SemanticScoringInput,
+        budget: crate::semantic::ScoringBudget,
+    ) -> ScoringOutcome;
 }
 
 /// Transport-independent message produced by the Office adapter.
@@ -279,6 +290,26 @@ pub trait MessageNormalizer {
 /// Durable provisioning saga state (Architecture v0 §6).
 #[allow(async_fn_in_trait)]
 pub trait ProvisioningRepository {
+    /// Rechecks optional delegated execution authority immediately before a
+    /// step may call an adapter. Operator-only repositories need no delegation.
+    async fn check_provisioning_authority(
+        &self,
+        _scope: &CompanyScope,
+        _operation: Uuid,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    /// Only a repository sealed to the current re-enable command can resume a
+    /// disabled identity. Ordinary operator repositories fail closed.
+    async fn allow_reenable_operation(
+        &self,
+        _scope: &CompanyScope,
+        _operation: Uuid,
+    ) -> Result<bool> {
+        Ok(false)
+    }
+
     /// Creates the operation with every step `pending`, or returns the
     /// existing operation for the idempotency key when its manifest
     /// fingerprint, mode, and dry-run flag all match; any difference is a
@@ -335,6 +366,17 @@ pub trait ProvisioningRepository {
         scope: &CompanyScope,
         employee_id: &EmployeeId,
     ) -> Result<IdentityReservation>;
+
+    /// Issues bounded activation authority before fresh external probes. The short
+    /// read transaction pins the current operation/employee and Office generation;
+    /// callers release it before network I/O and cannot manufacture its target.
+    async fn prepare_activation(
+        &self,
+        scope: &CompanyScope,
+        operation_id: Uuid,
+        running: &StepRecord,
+        lifetime: Duration,
+    ) -> Result<ActivationTarget>;
 
     /// In one transaction: inserts the immutable revision, its runtime,
     /// memory, and Office bindings with validation timestamps, replaces the

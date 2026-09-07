@@ -294,7 +294,7 @@ fn invalid_config_terminalizes_at_main_even_with_logs_disabled() {
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(all(unix, feature = "legacy-git"))]
 fn config_filesystem_failure_has_a_bounded_terminal() {
     let output = run_relay(&[
         ("RUST_LOG", "off"),

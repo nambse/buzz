@@ -4,6 +4,7 @@ import { FeatureGate } from "@/shared/features";
 import { SidebarDndContext } from "@/features/sidebar/ui/SidebarDnd";
 
 import { AddCommunityDialog } from "@/features/communities/ui/AddCommunityDialog";
+import { privateOrtakMode } from "@/features/ortak/privateMode";
 import { useIsMobile } from "@/shared/hooks/use-mobile";
 import { useDeferredLoad } from "@/shared/hooks/useDeferredStartup";
 import {
@@ -899,12 +900,14 @@ export function AppSidebar({
         onCreate={handleCreateFromDialog}
       />
 
-      <AddCommunityDialog
-        prefill={addCommunityPrefill}
-        onOpenChange={onAddCommunityOpenChange ?? (() => {})}
-        onSubmit={onAddCommunity}
-        open={isAddCommunityOpen ?? false}
-      />
+      {!privateOrtakMode ? (
+        <AddCommunityDialog
+          prefill={addCommunityPrefill}
+          onOpenChange={onAddCommunityOpenChange ?? (() => {})}
+          onSubmit={onAddCommunity}
+          open={isAddCommunityOpen ?? false}
+        />
+      ) : null}
 
       <CreateSectionDialog
         open={createSectionState.open}
