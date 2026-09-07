@@ -45,6 +45,8 @@ impl Review<'_> {
             version: row.try_get("result_version")?,
         }))
     }
+    // Keep each persisted command/provenance field explicit at this SQL seam.
+    #[allow(clippy::too_many_arguments)]
     async fn record_on(
         &self,
         connection: &mut PgConnection,

@@ -3,8 +3,7 @@ use ortak_control::ports::{MessageNormalizer, Normalization};
 use ortak_domain::EmployeeId;
 use ortak_office::PgChannelNormalizer;
 
-#[path = "../../../ortak-control/tests/cohort_support.rs"]
-mod cohort_support;
+use crate::cohort_support;
 
 #[tokio::test]
 #[ignore = "requires explicit disposable ORTAK_TEST_DATABASE_URL"]

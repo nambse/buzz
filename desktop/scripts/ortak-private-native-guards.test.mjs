@@ -153,7 +153,10 @@ test("workspace apply, shutdown and central spawn cannot bypass the native bound
     /^\s*crate::private_native::require_workspace_apply\(&relay_url, nsec\.as_deref\(\)\)\?;/,
   );
   const relay = body("src/relay.rs", "relay_ws_url");
-  assert(relay.indexOf("private_native::selected_company_relay()") < relay.indexOf("configured_env_var("));
+  assert(
+    relay.indexOf("private_native::selected_company_relay()") <
+      relay.indexOf("configured_env_var("),
+  );
   const gate = workspace.indexOf("if !crate::private_native::legacy_enabled()");
   assert(gate > workspace.indexOf("*override_guard = Some(relay_url)"));
   assert(

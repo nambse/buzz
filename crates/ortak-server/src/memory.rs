@@ -96,7 +96,7 @@ fn recalled(
     let work: Option<Uuid> = row.try_get("work_item_id")?;
     let origin_valid = if let Some(item) = work {
         let pinned = snapshot.work_origin.as_ref();
-        matches!(snapshot.version, 2 | 3 | 4 | 5)
+        matches!(snapshot.version, 2..=5)
             && snapshot.routing_decision_id.is_none()
             && snapshot.message_id.is_none()
             && snapshot.root_message_id.is_none()

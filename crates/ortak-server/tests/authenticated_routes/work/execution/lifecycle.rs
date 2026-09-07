@@ -1,10 +1,9 @@
 //! Real Work admission/materialization across sealed employee lifecycle cycles.
 use super::*;
+use crate::lifecycle_support;
 use ortak_runtime::{
     DispatchAuthorization, DispatchRefusal, PrepareOutcome, RunDispatchRepository,
 };
-#[path = "../../../../../ortak-control/tests/lifecycle_support.rs"]
-mod lifecycle_support;
 
 #[tokio::test]
 #[ignore = "requires explicit disposable port55432 Postgres with lifecycle schema"]

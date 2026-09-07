@@ -24,7 +24,7 @@ pub(super) async fn advertise(x: &ExportFixture) {
         exports::advertise_targets_with_conversations(
             &x.f.control,
             &x.scope,
-            &[x.target.clone()],
+            std::slice::from_ref(&x.target),
             &[ReviewedConversationTarget {
                 project_id: x.project,
                 employee_id: x.employee.id.clone(),

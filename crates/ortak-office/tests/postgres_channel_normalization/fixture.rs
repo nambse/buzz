@@ -21,8 +21,7 @@ use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-#[path = "../../../ortak-control/tests/cohort_support.rs"]
-mod cohort_support;
+use crate::cohort_support;
 
 pub const KIND_STREAM_MESSAGE: i32 = 9;
 pub const KIND_STREAM_MESSAGE_V2: i32 = 40002;

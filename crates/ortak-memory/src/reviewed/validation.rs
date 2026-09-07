@@ -118,6 +118,8 @@ pub(super) fn record(
     Ok(())
 }
 
+// Validate each expected identity/provenance field against the remote receipt.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn receipt(
     mut response: Value,
     body: &Value,

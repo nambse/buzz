@@ -123,7 +123,7 @@ pub(super) fn nonnil(value: Uuid) -> Result<()> {
 pub(super) fn timestamp(value: DateTime<Utc>) -> Result<String> {
     if !(1970..=9999).contains(&value.year())
         || value.timestamp_subsec_nanos() >= 1_000_000_000
-        || value.timestamp_subsec_nanos() % 1000 != 0
+        || !value.timestamp_subsec_nanos().is_multiple_of(1000)
     {
         return Err(ApiError::invalid());
     }

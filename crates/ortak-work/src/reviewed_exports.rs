@@ -44,6 +44,8 @@ pub(crate) fn expiry(value: DateTime<Utc>) -> String {
 pub(crate) fn operation_key(fact: Uuid, action: ReviewedExportAction) -> String {
     format!("reviewed:{}:{fact}", action.as_str())
 }
+// These are the canonical wire fingerprint fields shared by enqueue and replay.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn request_hash(
     company: Uuid,
     project: Uuid,

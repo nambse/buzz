@@ -118,8 +118,7 @@ impl ApiConfig {
             if key.to_hex() != grant.public_key
                 || !principals.insert(grant.public_key.clone())
                 || (grant.can_manage_employees && grant.role != Role::Operator)
-                || (grant.can_execute_provisioning
-                    && (!grant.can_manage_employees || grant.role != Role::Operator))
+                || (grant.can_execute_provisioning && !grant.can_manage_employees)
                 || grant.channel_ids.is_empty()
                 || grant.channel_ids.len() > 64
                 || grant.channel_ids.iter().any(Uuid::is_nil)

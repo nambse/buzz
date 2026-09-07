@@ -2,8 +2,7 @@ use super::*;
 use futures_util::StreamExt;
 use std::time::Duration;
 
-#[path = "../../../ortak-control/tests/direct_channel_support.rs"]
-mod support;
+use crate::direct_channel_support as support;
 
 async fn selected(f: &Fixture) -> (Uuid, Router) {
     let key = Keys::generate().public_key().to_bytes();

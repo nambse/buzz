@@ -41,7 +41,7 @@ pub(super) async fn subscribe(
 ) -> Result<Sse<impl Stream<Item = std::result::Result<Event, Infallible>>>> {
     if query
         .after_sequence
-        .is_some_and(|cursor| cursor < 0 || cursor > 9_007_199_254_740_991)
+        .is_some_and(|cursor| !(0..=9_007_199_254_740_991).contains(&cursor))
     {
         return Err(ApiError::invalid());
     }

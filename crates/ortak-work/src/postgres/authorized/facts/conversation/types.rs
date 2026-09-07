@@ -176,7 +176,7 @@ pub(super) fn source_id(value: &str) -> Result<MessageId> {
 fn valid_time(value: DateTime<Utc>) -> Result<()> {
     if !(1970..=9999).contains(&value.year())
         || value.timestamp_subsec_nanos() >= 1_000_000_000
-        || value.timestamp_subsec_nanos() % 1000 != 0
+        || !value.timestamp_subsec_nanos().is_multiple_of(1000)
     {
         return Err(WorkError::InvalidQuery("invalid conversation timestamp"));
     }

@@ -1,7 +1,6 @@
 //! Private DM routing uses the same canonical pair and current Office fence.
 use super::*;
-#[path = "../../../../ortak-control/tests/direct_channel_support.rs"]
-mod support;
+use crate::direct_channel_support as support;
 
 async fn selected(f: &Fixture) -> (Uuid, ApiConfig, Router) {
     let key = Keys::generate().public_key().to_bytes();

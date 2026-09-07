@@ -1,6 +1,5 @@
 use super::*;
-#[path = "../../../../../ortak-control/tests/lifecycle_support.rs"]
-mod lifecycle_support;
+use crate::lifecycle_support;
 
 #[tokio::test]
 #[ignore = "requires explicit disposable port55432 Postgres with proposal69"]

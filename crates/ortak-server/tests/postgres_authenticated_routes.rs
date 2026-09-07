@@ -1,4 +1,8 @@
 //! Real signed HTTP requests through the production router, backed by disposable PG.
+#[path = "../../ortak-control/tests/direct_channel_support.rs"]
+mod direct_channel_support;
+#[path = "../../ortak-control/tests/lifecycle_support.rs"]
+mod lifecycle_support;
 use std::{
     collections::HashSet,
     future::Future,

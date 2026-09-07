@@ -1,5 +1,11 @@
 # Yerel Ortak kullanım notları
 
+> **7 Eylül yeniden başlatma sonrası:** Aşağıdaki `/private/tmp` tarifleri artık
+> çalıştırılmamalı; bu geçici dosyalar temizlendi. Kod ve Docker volume'ları duruyor.
+> Kullanıcı eski test kimliklerini/OAuth/verilerini yeniden oluşturmayı onayladı.
+> Kalıcı kullanıcı dizininde temiz kurulum ve yeniden başlatma kabulü hazırlanıyor.
+> Aşağıdaki bölümler önceki kurulumun tarihsel kaydıdır.
+
 Bu kurulum bu Mac'teki **Ortak Private** uygulamasıdır. Office adresi
 `ws://localhost:3038`, ürün API'si `http://127.0.0.1:8787` ve şirket
 `a4013353-a84d-49a1-8d2b-10a1caf896fe` olarak sabittir. Ada, Bora ve Deniz bu

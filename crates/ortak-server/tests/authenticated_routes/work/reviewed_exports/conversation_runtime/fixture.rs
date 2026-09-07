@@ -81,7 +81,7 @@ impl ConversationFixture {
         exports::advertise_targets_with_conversations(
             &self.x.f.control,
             &self.x.scope,
-            &[self.x.target.clone()],
+            std::slice::from_ref(&self.x.target),
             &[],
         )
         .await

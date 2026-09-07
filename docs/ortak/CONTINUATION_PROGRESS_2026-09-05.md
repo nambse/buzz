@@ -17,7 +17,31 @@ new task is the sole implementation owner and continues under an active goal,
 without a deadline or token budget. The old account/login notes below are
 historical; the new shared Hermes OAuth enrollment is already ready.
 
-## Current source checkpoint — 2026-09-07, Employee Office identity
+## Current checkpoint — 2026-09-07, reboot and authorized fresh test setup
+
+The user restarted the Mac; `/private/tmp/ortak-private-20260905`, the Hermes
+runtime directory and temporary evidence/backups are absent afterward. Source,
+uncommitted CI cleanup, native build outputs and Docker volumes remain. GitHub
+was independently verified at DCO checkpoint `3ba639b`. All former host PID and
+temporary launcher records are historical, not current launch/stop authority.
+
+The user explicitly permits replacing the test OAuth, keys, conversations and
+Work records. Recovery of that old test state is no longer a completion gate;
+the updated goal records this. Build a clean stack in persistent user storage,
+with repeatable lifecycle and restart acceptance. Keep the unrelated old stacks
+out of scope. No old volumes have been removed. Five stopped source volumes
+were captured read-only into bounded cold tar archives at
+`/Users/nambse/Library/Application Support/Ortak Private Recovery/20260907-reboot`;
+these archives were parsed and hashed, but not restore-verified. Container
+configuration there is private. Do not commit it.
+
+Before reboot, workspace/Tauri formatting passed after71-file rustfmt cleanup.
+Desktop and web checks passed. Full `just ci` repeatedly advanced through
+Clippy; inherited lint and duplicated fixture-module issues were corrected.
+The latest run was interrupted by reboot; no full CI pass is claimed. Its
+temporary logs were lost. The current CI fixes remain source-only until rebuilt.
+
+## Previous source checkpoint — 2026-09-07, Employee Office identity
 
 The signed Employee API now projects bounded verified Office public keys,
 including retired keys for historical identity. The desktop resolves Employee

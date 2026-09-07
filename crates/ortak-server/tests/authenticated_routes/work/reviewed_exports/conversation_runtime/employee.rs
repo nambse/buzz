@@ -128,8 +128,8 @@ async fn employee_runtime_v5_mixed_work_materializes_and_legacy_fallback_has_no_
     .await;
     assert_eq!(status, StatusCode::CREATED, "{manual}");
     let manual = &manual["work_item"];
-    let (status, assigned) = post(&c.x.app, &c.x.f.operator, &format!("/api/v1/work-items/{}/assignments", id(&manual)),
-        &json!({"operation_id":Uuid::new_v4(),"expected_version":version(&manual),"employee_id":"cem","role":"owner"})).await;
+    let (status, assigned) = post(&c.x.app, &c.x.f.operator, &format!("/api/v1/work-items/{}/assignments", id(manual)),
+        &json!({"operation_id":Uuid::new_v4(),"expected_version":version(manual),"employee_id":"cem","role":"owner"})).await;
     assert_eq!(status, StatusCode::OK, "{assigned}");
     let manual = transition(&c.x.f, &c.x.app, assigned["work_item"].clone(), "ready").await;
     let (manual_run, _) = crate::work::execution::fixture::queue(&c.x.f, &c.x.app, &manual).await;

@@ -82,6 +82,8 @@ impl AuthorizedWork {
         }
         Ok(false)
     }
+    // Keep each persisted command/provenance field explicit at this SQL seam.
+    #[allow(clippy::too_many_arguments)]
     async fn export_command_on(
         &self,
         c: &mut PgConnection,

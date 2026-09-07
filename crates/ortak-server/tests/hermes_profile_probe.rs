@@ -173,13 +173,14 @@ async fn explicit_probe_uses_exact_persisted_identity_and_terminal_still_needs_c
         Some(ProfileProbeStatus::Completed)
     );
     runtime.stop_profile_probe(f.id).await.unwrap();
-    let calls = f.calls.lock().unwrap();
-    assert_eq!(calls[0].1, calls[1].1);
-    assert_eq!(
-        calls.iter().map(|(p, _)| p.as_str()).collect::<Vec<_>>(),
-        vec!["probe", "probe", "lookup", "cancel"]
-    );
-    drop(calls);
+    {
+        let calls = f.calls.lock().unwrap();
+        assert_eq!(calls[0].1, calls[1].1);
+        assert_eq!(
+            calls.iter().map(|(p, _)| p.as_str()).collect::<Vec<_>>(),
+            vec!["probe", "probe", "lookup", "cancel"]
+        );
+    }
     server.abort();
     let _ = server.await;
 }

@@ -1,5 +1,19 @@
 # Ortak — doğal ekip konuşması ve tamamlanmış özel v0
 
+## Kullanıcının 7 Eylül yeniden başlatma sonrası güncellemesi
+
+Mac yeniden başlatıldığında `/private/tmp` altındaki kurulum ve yedek dosyaları
+temizlendi. Kaynak kodu, Git commit'leri, çalışma dizinindeki son düzenlemeler ve
+Docker veri volume'ları duruyor. Kullanıcı OAuth, kimlik anahtarları, konuşmalar
+ve Work kayıtlarının yalnızca test verisi olduğunu ve yeniden oluşturulabileceğini
+açıkça belirtti. Bu kurulumun eski test durumunu kurtarmak artık teslim koşulu
+değildir. Kod korunarak temiz bir özel test stack'i, yeni test kimlikleri ve
+OAuth bağlantısı oluşturulabilir. Eski Cem/Zeynep ve ilgisiz stack'ler kapsam
+dışında kalır. Yeni yapılandırma, anahtar, OAuth ve yedekler kalıcı kullanıcı
+dizininde tutulmalı; yeniden başlatma kabulü tamamlanmalıdır.
+
+## İlk talep
+
 Bu belge, kullanıcının 7 Eylül 2026 tarihli yeni çalışma talebidir. Önceki uzun
 oturumun yerine temiz bir görevde **aktif goal olarak başlatılmalı ve uygulanmalıdır**.
 Yalnızca plan/rapor üretme. Bir teslim tarihi, çalışma süresi veya toplam token

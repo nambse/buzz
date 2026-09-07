@@ -5,8 +5,7 @@ use ortak_control::{office_identity::OfficePublicKey, CompanyScope};
 use ortak_domain::{CredentialRef, EmployeeManifest, EmployeeStatus, PermissionPolicy};
 use ortak_office::encrypted::jobs::{ConfiguredDmPair, PgDecryptJobs};
 
-#[path = "../../../ortak-control/tests/direct_channel_support.rs"]
-mod direct_support;
+use crate::direct_channel_support as direct_support;
 
 struct EncryptedFixture {
     f: Fixture,

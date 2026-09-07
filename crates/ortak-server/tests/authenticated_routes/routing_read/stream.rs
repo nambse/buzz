@@ -4,8 +4,7 @@ use super::*;
 use futures_util::StreamExt;
 use std::time::Duration;
 
-#[path = "../../../../ortak-control/tests/direct_channel_support.rs"]
-mod direct_support;
+use crate::direct_channel_support as direct_support;
 
 fn stream_path(channel: Uuid, message: EventId) -> String {
     format!("{}/stream", path(channel, message))

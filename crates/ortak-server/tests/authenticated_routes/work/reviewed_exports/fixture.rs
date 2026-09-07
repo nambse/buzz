@@ -95,9 +95,13 @@ impl ExportFixture {
     }
     pub async fn advertise(&self) {
         assert_eq!(
-            exports::advertise_targets(&self.f.control, &self.scope, &[self.target.clone()])
-                .await
-                .unwrap(),
+            exports::advertise_targets(
+                &self.f.control,
+                &self.scope,
+                std::slice::from_ref(&self.target)
+            )
+            .await
+            .unwrap(),
             1
         );
     }
