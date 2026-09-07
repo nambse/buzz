@@ -17,7 +17,56 @@ new task is the sole implementation owner and continues under an active goal,
 without a deadline or token budget. The old account/login notes below are
 historical; the new shared Hermes OAuth enrollment is already ready.
 
-## Current checkpoint — 2026-09-07, Files80 accepted and ordinary Office restored
+## Current checkpoint — 2026-09-07, final package and populated recovery
+
+Native330991b built and is installed under permanent desktop tree
+b6373d98b1b99168f97317ee2fa7af1ccd4fc6176c109bda456b9585df10e7f8.
+The same operator opened it through the frozen launcher. The encrypted view
+shows Deniz's verified directory name and previous encrypted reply. During a
+controlled stop of only the owned API, Employees showed the refresh failure and
+the private DM row became `DDeniz`, without inherited Offline/owner labels.
+Restarting the same API and clicking Refresh restored all three authorized
+Employee records and the Deniz Employee badge. Recorded status remains separate
+from runtime health. Evidence: `native-330991b-identity-reconnect.json`.
+
+The frozen launcher now includes the retained workspace inputs and sealed run
+copy. Current backup31955fa962264f859d4e10e9ba6ffdec was captured with the new
+native app closed, all seven owned containers stopped and all four jobs unloaded.
+Offline verification436ff7a175494c64bb65888ee6efdfef restored five new volume
+copies and verified main156/Honcho26 table content, catalog and sequences,
+volume trees and image loads. Private/native archives include Files80, mixed
+memory revocations, encrypted DM and scorer selection. Journal integrity/FK
+checks passed:28 runs including9 probes, plus the protected tables and actual
+workspace call. Restored targets remain inert; the source was not replaced.
+
+The original seven containers/four services restarted with verified identities
+and zero pending obligations. Reopening the permanent native app showed all
+three completed Work items. Files80 remained completed at version9 with the same
+227-byte read/hash, saved marker/summary and satisfied human criteria/review.
+Evidence: `final-330991b-{backup,restore}.log`,
+`final-330991b-status-after-restore.json`, `final-330991b-native-after-backup.json`.
+The Mac boot time was captured in `mac-reboot-baseline80.json`; an actual Mac
+reboot is still pending and cannot be inferred from this service restart.
+
+Final330991b `just ci` passed (exit0): desktop6655 with zero failures/skips,
+mobile2072, workspace/Tauri checks and tests, and desktop/web builds. Evidence:
+`evidence/final-330991b-ci.{json,log}`. Mandatory `just test` also passed against
+only disposable55432/56381. The separately selected production signed API suite
+passed147/147 with encrypted DM enabled, serial execution, zero failures/ignored
+and six nonignored cases filtered by `--ignored` (the ordinary lane is covered
+separately). This replaces the earlier partial145-case evidence. Evidence:
+`evidence/final-330991b-{integration,authenticated-api}.{json,log}`.
+
+Next: signed operating-note checkpoint and draft review PR, then user-controlled
+Mac reboot acceptance. All source changes after330991b in this checkpoint are
+documentation only. Active cloned-runtime activation is not established by the
+offline restore and is not silently claimed. The actual reboot acceptance needs
+a new boot time, the permanent launcher after Docker Desktop starts, preserved
+identity/Work/artifacts/encrypted history and no duplicate delivery. Do not
+restart the user's Mac unattended; the baseline and backup are ready for that
+coordinated final check.
+
+## Previous checkpoint — 2026-09-07, Files and mixed-memory acceptance
 
 Native Work417f1636-99c6-439f-96c9-47148c29bb30 completed at version9 after
 operator review of its saved text artifact and both pending criteria. Run
@@ -41,7 +90,7 @@ permissions, workspace `none`, and Office routing enabled. Fresh cohort
 7ed58f50-c09e-4deb-999e-b59cf8a7a0ad reconciled Office23/0 scanned/inserted
 and the encrypted DM0/0 before enable. The selected workspace roots, binding,
 immutable input and sealed run copy remain retained for recovery. The current
-backup source includes `workspaces`; its frozen launcher upgrade is still pending.
+backup source includes `workspaces`; the final checkpoint above records its frozen launcher upgrade.
 
 Two source UI corrections address the observed restart behavior: private DM
 rows no longer substitute gateway presence when Employee metadata is unavailable,
@@ -49,7 +98,7 @@ and the encrypted view resolves its displayed name by the native pair's exact
 Employee key through the authorized directory. A production component test
 exercises initial absence, forbidden refresh and recovery without retaining
 unauthorized names. Focused identity/composer tests and TypeScript pass; these
-changes are not yet in the installed688997b bundle.
+changes are installed in330991b as recorded above.
 
 Fresh mixed-memory acceptance now passes as well. The existing operator has
 explicit employee-memory review access. Ada's original owned Honcho namespace

@@ -496,3 +496,19 @@ SDK/HTTPX and central reader boundary. The custom tool does not enable upstream
 filesystem discovery, gateway tools, generic tool-result names or session-reset
 behavior. Fresh live Work/file acceptance is separate from those installed tests.
 Metadata receipt: `evidence/upstream-files80-checkpoint.json` in the private root.
+
+### Final private package checkpoint, 2026-09-07
+
+Official main endpoints were checked after native330991b was built. Buzz remains
+3c7f288c60d67df78577b237e27c3dfc8831aaa1; Honcho remains
+be54355545b64ddb10203829d323861f52423685. Hermes advanced one commit from
+693641aa8b4359c602283bdbbc14041e03bc47bc to 922c0d670cf46952248dc22c27e4d01531a4a051.
+Both changed files were reviewed: the stale-call estimator now prices image
+content using learned image-token cost instead of base64 length, with focused
+multimodal tests. **Defer** this delta: the accepted Ortak worker receives bounded
+text contexts and selected UTF-8 file text; it does not accept image parts or
+native screenshots. Revisit before adding multimodal input. This review does not
+advance the deployed Hermes29112bef source lock or either tested image.
+[Reviewed delta](https://github.com/NousResearch/hermes-agent/compare/693641aa8b4359c602283bdbbc14041e03bc47bc...922c0d670cf46952248dc22c27e4d01531a4a051).
+Private metadata/diff receipts: `evidence/upstream-final-330991b.json` and
+`evidence/upstream-final-hermes-delta.json` under the permanent installation.

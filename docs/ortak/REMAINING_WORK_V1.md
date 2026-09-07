@@ -10,17 +10,19 @@ useful for dependency order; it is not the current deployment inventory.
 Inherited work is preserved in three pushed DCO checkpoints (ebc11ca, e4d02b2,
 ecd9c1b). Context79 is pushed in993dc9d, deployed with verified installed artifacts, and
 actual native Ada→Bora translation passed without a re-paste. Disposable schema
-parity passed; live services now use79.
+parity passed; the current deployed schema is80, including Work references.
 
-Current remaining gates: install the final native identity corrections; complete
-final source CI and required integration checks; capture/verify the current
-populated stack including Files, mixed memory and encrypted DM; provide the
-GitHub draft review link and updated Turkish operating notes. Actual context79,
-Work80 revision, semantic zero/one/two, Files80, project and mixed-memory
-publication/use/Stop, encrypted80, Activity cancellation and persistent lifecycle
-acceptance are recorded in the current ledger. Full Mac reboot and activation
-of a restored runtime are distinct unproven boundaries; previous offline-store
-restore and service restart do not establish them.
+Current remaining gates: provide the signed GitHub draft review link and complete
+a user-controlled Mac reboot acceptance. Final330991b `just ci`, `just test` and
+the147-case encrypted-feature signed API suite passed. Native330991b
+identity/reconnect corrections are installed.
+The current populated stack, including Files, mixed memory, encrypted DM and the
+semantic service, has a newly captured and actually verified offline backup;
+the original seven containers/four services reopened with zero pending work.
+Context79, Work80 revision, semantic zero/one/two, Files80, project and mixed-memory
+publication/use/Stop, encrypted80 and Activity cancellation are recorded in the
+current ledger. Active restored-runtime activation remains a distinct unproven
+boundary; offline-store restore and service restart do not establish it.
 
 This is the dependency-ordered working plan. It supersedes stale per-milestone
 implementation notes, not [Architecture v0](ARCHITECTURE_V0.md) or its acceptance

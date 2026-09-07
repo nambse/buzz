@@ -16,7 +16,7 @@ OAuth bağlantısı, container, image veya volume oluşturmaz.
 başlatır. Repo veya geçici dizine ihtiyaç duymaz. Uygulama zaten bu araçla
 açılmışsa ikinci süreç oluşturmaz; PID, başlangıç zamanı ve paket yolu eşleşir.
 Başka konumdan açık eski özel paketi önce **Quit** ile kapatın. Güncel paket
-kalıcı `desktop/02362e325da0cc6c3e85d80029db1a8c96285d6d72ac6b657a2770275f73de67/Ortak Private.app`
+kalıcı `desktop/b6373d98b1b99168f97317ee2fa7af1ccd4fc6176c109bda456b9585df10e7f8/Ortak Private.app`
 altındadır. Kimlik ve OAuth değerleri komut satırına veya açılış günlüğüne yazılmaz.
 
 Docker Desktop açık olmalıdır. `start` mevcut yedi container'ı ve dört kullanıcı
@@ -44,8 +44,11 @@ yüklemez ve gerçek model çağrısı yapmaz.
 Native uygulama servislerden ayrı kalır. Kısa kesintide son başarılı Work
 görünümünü koruyup yazmayı durdurur. Bağlantı geldikten sonra Employees **Refresh**,
 Work **Refresh work**, Activity **Reload timeline** ile yeniden bağlanılabilir.
-Güncel `688997b` paketi **Refresh work** eylemini Work bağlantıları ve bağımlılık
-panellerine de bağlar. Aynı paket Deniz'in yeni şifreli görüşmesini içerir.
+Güncel `330991b` paketi **Refresh work** eylemini Work bağlantıları ve bağımlılık
+panellerine de bağlar. Aynı paket Deniz'in şifreli görüşmesini doğrulanmış
+çalışan adıyla gösterir.
+Employee dizini kesintisinde eski gateway `Offline`/`owner unavailable` etiketine
+dönmez. Gerçek API kesintisi ve Refresh ile yeniden bağlantı bu pakette doğrulandı.
 
 Kurulu launcher kendi Python dosyalarını kalıcı `lifecycle/code-…` dizininden
 okur; çalışması repo dosyalarının yerinde olmasına bağlı değildir. Servis başına
@@ -97,25 +100,26 @@ yeniden bağlayıp devreye alma, doğrulanmış ayrı bir operatör adımı gere
 Yedek özel kimlik/OAuth verilerini de içerir; tamamı yerel0700/0600 dosyalardadır.
 Arşivleri veya içeriklerini Git'e eklemeyin.
 
-Gerçek schema80 yedeği `backups/8bfe40a32533441bad311de811fd24e9` altında alındı.
-`recovery-verifications/12b55f9d120c4d25b95ea5ca0ec1dd35/receipt.json` gerçek
-geri yükleme sonucudur. Ana DB156 tablo, Honcho26 tablo için bütün mantıksal
-satır hash'leri, katalog ve sequence değerleri eşleşti. Beş soğuk volume'un dosya
-hash/mod/uid/gid/nanosaniye zamanları ve MinIO metadata'sı eşleşti. Image gzip
-footer/hash denetimi ve gerçek Docker image load geçti. Özel yapılandırma/app
-verisi ve native paketler ayrı, etkinleştirilmemiş dizinlere açılıp doğrulandı.
-Hermes journal integrity/foreign-key kontrolleri geçti: 17 kayıtlı run içinde
-yedi profile probe bulunuyor; kullanıcı/Work tarafındaki gerçek run sayısı10.
-SQLite WAL/SHM incelemesi, kaynak volume'a yazmadan sınırlı geçici kopyada yapılır.
+Güncel schema80 yedeği `backups/31955fa962264f859d4e10e9ba6ffdec` altında alındı.
+`recovery-verifications/436ff7a175494c64bb65888ee6efdfef/receipt.json` gerçek
+ayrı hedef geri yükleme sonucudur (`verified_offline_stores`). Ana DB 156 ve
+Honcho 26 tablonun bütün mantıksal satır hash'leri, katalog ve sequence değerleri
+eşleşti. Beş soğuk volume'un dosya hash/mod/uid/gid/nanosaniye zamanları ve MinIO
+metadata'sı eşleşti. Image arşiv denetimi ve gerçek Docker image load geçti.
 
-Gerçek kabul: altı container ve dört native servis bu komutla kapanıp aynı
-kimliklerle tekrar açıldı. On run, iki artifact ve tamamlanmış Work korundu;
-iki Work bağlamının hash'leri değişmedi. Native Work/Activity yeniden bağlandı.
-Kanıtlar kalıcı `evidence/lifecycle-{restart-02.log,status-after-restart.json,
-native-restart-acceptance.json}` dosyalarındadır. Süreç ağacı, günlük sınırı,
-sahiplik ve bekleyen iş testleri12/12 geçti. Arşiv, kapsam ve WAL denetimleriyle
-genişletilen toplam22 test geçti. Bu sonuçlar tam Mac reboot veya farklı makine
-kurtarması değildir; bu sınırlar ayrıca doğrulanmalıdır.
+Bu yedek Files girdisini ve mühürlü çalışma kopyasını, proje/konuşma/çalışan
+belleği Stop kayıtlarını, şifreli DM'yi, anlamsal servis seçimini ve 330991b native
+paketini içerir. Hermes journal integrity/foreign-key kontrolleri geçti:
+28 kayıtlı run, bunların içinde 9 profile probe; ayrıca 2 şifreli run kaydı ve
+1 workspace tool call korunuyor. Özel yapılandırma ve native dosyalar ayrı,
+etkinleştirilmemiş dizinlere açılıp doğrulandı. SQLite WAL/SHM incelemesi kaynak
+volume'a yazmadan sınırlı geçici kopyada yapılır. Doğrulama kaynak kurulumu
+değiştirmedi; kaynak yedi container ve dört servisiyle yeniden açıldı.
+
+Önceki yedek ve doğrulamalar da korunur. Yeni sonuç önceki altı-container
+restart kabulünden ayrıdır; güncel yedi-container kapanış/açılışı yeni yedekte
+uygulandı. Bu, tam Mac reboot veya klonlanmış runtime'ın etkinleştirilmesi
+kanıtı değildir.
 
 Kapatma ayrıca onaylı bellek yayın/geri çekme işlerini, çalışma alanı okuyucularını
 ve şifreli mesaj işlemlerini denetler. Henüz denenmemiş gelecekteki süre sonu
@@ -124,6 +128,6 @@ kapatılmaz. Bu ayrım gerçek PostgreSQL üzerinde iki üretim sorgusu testiyle
 
 Yeni gerçek kabulde `open` kalıcı paketi başlattı; ikinci çağrı aynı PID'yi döndürdü.
 Native arayüz aynı operatör, önceki Office konuşmaları ve Deniz'in şifreli yanıtını
-yeniden gösterdi.27 yerel işletim testi geçti; iki ayrı PostgreSQL drain testi
+yeniden gösterdi. 29 yerel işletim testi geçti; iki ayrı PostgreSQL drain testi
 disposable ortam seçilmediğinde bilinçli atlanır. Bu uygulama açılışı tam Mac
 reboot kanıtının yerine geçmez.
