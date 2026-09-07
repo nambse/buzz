@@ -356,8 +356,13 @@ async fn reviewed_runtime_frozen_start_retry_reuses_exact_bytes_and_stale_recall
             let FreezeSnapshotOutcome::Ready(winner) = frozen else {
                 panic!("freeze")
             };
-            assert_eq!(winner.encode().unwrap(), candidate.encode().unwrap());
-            let mut changed: Value = serde_json::from_slice(&candidate.encode().unwrap()).unwrap();
+            assert!(winner.reviewed() == candidate.reviewed());
+            assert!(winner.spec().context.work_context.is_some());
+            assert_eq!(
+                winner.spec().context.memory_context,
+                candidate.spec().context.memory_context
+            );
+            let mut changed: Value = serde_json::from_slice(&winner.encode().unwrap()).unwrap();
             changed["reviewed"]["truncated"] = json!(true);
             let changed =
                 FrozenRunSnapshot::decode(&serde_json::to_vec(&changed).unwrap(), &authority, run)

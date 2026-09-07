@@ -14,6 +14,8 @@ pub(super) mod fixture;
 use fixture::*;
 #[path = "execution/assignments.rs"]
 mod assignments;
+#[path = "execution/context.rs"]
+mod context;
 #[path = "execution/dependencies.rs"]
 mod dependencies;
 
@@ -140,6 +142,13 @@ async fn shared_work_runtime_saves_one_verified_artifact_and_review_and_streams_
     assert_eq!(spec.context.work_item_id, Some(id(&current)));
     assert!(spec.context.conversation_ref.is_none() && spec.context.reply_to_message_id.is_none());
     assert!(spec.input.contains("Produce the actual deliverable"));
+    let context = spec.context.work_context.as_ref().unwrap();
+    assert_eq!(context.work_item_id, id(&current));
+    assert_eq!(context.project_id, project);
+    assert_eq!(context.execution_version, version(&current) + 1);
+    assert!(context.prior_artifact.is_none());
+    assert_eq!(context.messages.len(), 1);
+    assert_eq!(context.messages[0].content, "Canonical source fixture");
     let (_, replay) = post(
         &app,
         &f.operator,

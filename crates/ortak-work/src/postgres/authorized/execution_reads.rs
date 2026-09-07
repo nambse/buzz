@@ -19,6 +19,23 @@ pub struct WorkExecutionView {
     pub output_code: Option<String>,
     /// True after the terminal output job releases this item’s execution slot.
     pub reconciled: bool,
+    /// Currently readable frozen sources, or a pending/revoked selection state.
+    pub reference_context: Option<WorkExecutionContext>,
+}
+
+/// Source metadata only; transcript and artifact text retain separate read gates.
+#[derive(Clone, Debug, Serialize)]
+pub struct WorkExecutionContext {
+    /// `pending`, `ready`, or `unavailable` under current source authority.
+    pub status: String,
+    /// Exact prior deliverable, only when its author is in this reader's audience.
+    pub artifact_id: Option<Uuid>,
+    /// Work version of that prior deliverable's producing execution.
+    pub artifact_execution_version: Option<i64>,
+    /// Canonical selected message ids; unavailable sources disclose none.
+    pub message_ids: Vec<String>,
+    /// True when any selected message text or older history was omitted.
+    pub history_limited: bool,
 }
 
 /// Verified bounded text artifact; content is never interpreted as HTML or a path.
@@ -43,9 +60,18 @@ impl AuthorizedWork {
                 .collect();
             let rows = sqlx::query(
                 "SELECT x.run_id,x.employee_id,x.execution_version,r.status,j.artifact_id,x.reconciled_at IS NOT NULL AS reconciled,
-                coalesce(x.result_code,j.last_error_code) AS output_code FROM work_executions x
+                coalesce(x.result_code,j.last_error_code) AS output_code,x.context_version,
+                a.id AS reference_id,prior.execution_version AS reference_version,
+                x.reference_artifact_id IS NOT NULL AND a.id IS NULL AS reference_hidden,
+                s.run_id IS NOT NULL AS frozen,ortak_run_work_context_current(x.company_id,x.run_id) AS context_current,
+                CASE WHEN s.run_id IS NOT NULL AND ortak_run_work_context_current(x.company_id,x.run_id)
+                  THEN ortak_snapshot_scratch_jsonb(convert_from(s.spec_bytes,'UTF8')::json)#>'{spec,context,work_context}' END AS context
+                FROM work_executions x
                 JOIN runs r ON r.company_id=x.company_id AND r.id=x.run_id
                 LEFT JOIN runtime_work_outputs j ON j.company_id=x.company_id AND j.run_id=x.run_id
+                LEFT JOIN artifacts a ON a.company_id=x.company_id AND a.id=x.reference_artifact_id AND a.employee_id=ANY($3)
+                LEFT JOIN work_executions prior ON prior.company_id=a.company_id AND prior.run_id=a.run_id
+                LEFT JOIN run_context_snapshots s ON s.company_id=x.company_id AND s.run_id=x.run_id
                 WHERE x.company_id=$1 AND x.work_item_id=$2 AND x.employee_id=ANY($3)
                 ORDER BY x.requested_at DESC,x.run_id DESC LIMIT 20",
             )
@@ -65,6 +91,7 @@ impl AuthorizedWork {
                         artifact_id: row.try_get("artifact_id")?,
                         output_code: row.try_get("output_code")?,
                         reconciled: row.try_get("reconciled")?,
+                        reference_context: reference_context(&row)?,
                     })
                 })
                 .collect::<Result<Vec<_>>>()?;
@@ -98,4 +125,61 @@ impl AuthorizedWork {
             Ok(result)
         }).await
     }
+}
+
+fn reference_context(row: &sqlx::postgres::PgRow) -> Result<Option<WorkExecutionContext>> {
+    if row.try_get::<i16, _>("context_version")? == 0 {
+        return Ok(None);
+    }
+    let current = row.try_get::<bool, _>("context_current")?
+        && !row.try_get::<bool, _>("reference_hidden")?;
+    let frozen = row.try_get::<bool, _>("frozen")?;
+    let context: Option<serde_json::Value> = row.try_get("context")?;
+    let messages = context
+        .as_ref()
+        .and_then(|v| v.get("messages"))
+        .and_then(|v| v.as_array());
+    Ok(Some(WorkExecutionContext {
+        status: if !current {
+            "unavailable"
+        } else if frozen {
+            "ready"
+        } else {
+            "pending"
+        }
+        .into(),
+        artifact_id: if current {
+            row.try_get("reference_id")?
+        } else {
+            None
+        },
+        artifact_execution_version: if current {
+            row.try_get("reference_version")?
+        } else {
+            None
+        },
+        message_ids: if current {
+            messages
+                .into_iter()
+                .flatten()
+                .filter_map(|m| {
+                    m.get("message_id")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_owned)
+                })
+                .collect()
+        } else {
+            vec![]
+        },
+        history_limited: current
+            && (context
+                .as_ref()
+                .and_then(|c| c.get("omitted_history"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+                || messages
+                    .into_iter()
+                    .flatten()
+                    .any(|m| m.get("truncated").and_then(|v| v.as_bool()) == Some(true))),
+    }))
 }

@@ -6350,7 +6350,7 @@ BEGIN
     SELECT EXISTS(SELECT 1 FROM run_reviewed_memory_uses u WHERE u.company_id=NEW.company_id
         AND u.run_id=selected_run AND u.conversation_audience_hash IS NOT NULL) OR EXISTS(SELECT 1 FROM run_employee_reviewed_memory_uses u
         WHERE u.company_id=NEW.company_id AND u.run_id=selected_run) OR EXISTS(SELECT 1 FROM run_context_snapshots s WHERE s.company_id=NEW.company_id AND s.run_id=selected_run
-            AND (ortak_snapshot_scratch_jsonb(convert_from(s.spec_bytes,'UTF8')::json)#>'{spec,context}') ? 'conversation_context') INTO conversation;
+            AND ((ortak_snapshot_scratch_jsonb(convert_from(s.spec_bytes,'UTF8')::json)#>'{spec,context}') ? 'conversation_context' OR (ortak_snapshot_scratch_jsonb(convert_from(s.spec_bytes,'UTF8')::json)#>'{spec,context}') ? 'work_context')) INTO conversation;
     IF TG_TABLE_NAME='runs' THEN
         IF NOT conversation THEN
             -- Preserve the reviewed-project admission trigger's legacy effect.
@@ -10239,3 +10239,49 @@ CREATE TRIGGER trg_routing_authority_notify AFTER INSERT OR UPDATE ON office_aut
 
 CREATE CONSTRAINT TRIGGER ortak_conversation_snapshot_admission79 AFTER INSERT ON run_context_snapshots
     DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION ortak_conversation_snapshot_admission79();
+
+-- Work reference selection80; reconciliation installs the authority body.
+ALTER TABLE work_executions
+    ADD COLUMN context_version SMALLINT NOT NULL DEFAULT 0 CHECK(context_version IN(0,1)),
+    ADD COLUMN reference_artifact_id UUID,
+    ADD CONSTRAINT work_execution_reference_artifact_fk FOREIGN KEY(company_id,work_item_id,reference_artifact_id)
+        REFERENCES artifacts(company_id,work_item_id,id),
+    ADD CONSTRAINT work_execution_reference_shape CHECK(context_version=1 OR reference_artifact_id IS NULL);
+
+
+CREATE FUNCTION ortak_work_context_request80() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.reference_artifact_id IS NOT NULL AND NOT EXISTS(
+        SELECT 1 FROM artifacts a JOIN work_attachments attachment
+            ON attachment.company_id=a.company_id AND attachment.work_item_id=a.work_item_id AND attachment.artifact_id=a.id
+        WHERE a.company_id=NEW.company_id AND a.id=NEW.reference_artifact_id
+          AND a.work_item_id=NEW.work_item_id AND a.project_id=NEW.project_id
+          AND a.run_id<>NEW.run_id AND a.created_at<=NEW.requested_at
+    ) THEN
+        RAISE EXCEPTION 'ortak: Work reference must be an already attached same-item artifact'
+            USING ERRCODE='check_violation';
+    END IF;
+    RETURN NEW;
+END $$;
+
+CREATE FUNCTION ortak_run_work_context_current(company UUID, run UUID)
+RETURNS BOOLEAN LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RAISE EXCEPTION 'ortak: schema80 bootstrap requires reconciliation' USING ERRCODE='object_not_in_prerequisite_state';
+END
+$$;
+
+CREATE FUNCTION ortak_work_snapshot_admission80() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    PERFORM ortak_lock_office_authority(NEW.company_id);
+    IF NOT ortak_run_work_context_current(NEW.company_id,NEW.run_id) THEN
+        RAISE EXCEPTION 'ortak: Work reference context no longer permitted' USING ERRCODE='check_violation';
+    END IF;
+    RETURN NEW;
+END $$;
+
+CREATE CONSTRAINT TRIGGER work_context_request80 AFTER INSERT ON work_executions
+    DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION ortak_work_context_request80();
+
+CREATE CONSTRAINT TRIGGER work_snapshot_admission80 AFTER INSERT ON run_context_snapshots
+    DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION ortak_work_snapshot_admission80();

@@ -152,6 +152,16 @@ impl FrozenRunSnapshot {
         Self::decode(&bytes, authority, self.wire.spec.run_id)
     }
 
+    pub(crate) fn with_work_context(
+        mut self,
+        authority: &DispatchAuthority,
+        context: ortak_control::work_context::WorkContext,
+    ) -> Result<Self> {
+        self.wire.spec.context.work_context = Some(context);
+        let bytes = serde_json::to_vec(&self.wire).map_err(|_| rejected())?;
+        Self::decode(&bytes, authority, self.wire.spec.run_id)
+    }
+
     /// Returns an unchanged copy of the original persisted bytes.
     pub fn encode(&self) -> Result<Vec<u8>> {
         Ok(self.bytes.clone())
@@ -332,6 +342,16 @@ impl FrozenRunSnapshot {
         // authority witness. PostgreSQL revalidates its sources on admission
         // and delivery; retries preserve the exact chosen bytes.
         expected.context.conversation_context = wire.spec.context.conversation_context.clone();
+        if let Some(context) = &wire.spec.context.work_context {
+            let work = authority.work_origin().ok_or_else(rejected)?;
+            if context.project_id != work.project_id
+                || context.work_item_id != work.work_item_id
+                || context.execution_version != work.execution_version
+            {
+                return Err(rejected());
+            }
+        }
+        expected.context.work_context = wire.spec.context.work_context.clone();
         if expected != wire.spec || wire.spec.validate().is_err() {
             return Err(rejected());
         }

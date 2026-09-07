@@ -39,7 +39,7 @@ pub struct ContextEmployee {
 }
 
 impl ContextEmployee {
-    fn valid(&self) -> bool {
+    pub(crate) fn valid(&self) -> bool {
         !self.revision_id.is_nil()
             && text(&self.name, 200, false)
             && text(&self.title, 200, false)
@@ -177,7 +177,7 @@ impl ConversationContext {
     }
 }
 
-fn text(value: &str, limit: usize, empty: bool) -> bool {
+pub(crate) fn text(value: &str, limit: usize, empty: bool) -> bool {
     (empty || !value.trim().is_empty())
         && value.len() <= limit
         && !value
@@ -185,14 +185,14 @@ fn text(value: &str, limit: usize, empty: bool) -> bool {
             .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
 }
 
-fn event_id(value: &str) -> bool {
+pub(crate) fn event_id(value: &str) -> bool {
     value.len() == 64
         && value
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-fn optional_event_id(value: &Option<String>) -> bool {
+pub(crate) fn optional_event_id(value: &Option<String>) -> bool {
     value.as_deref().is_none_or(event_id)
 }
 

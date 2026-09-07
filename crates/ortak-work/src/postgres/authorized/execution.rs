@@ -124,6 +124,21 @@ impl AuthorizedWork {
             .ok_or_else(|| WorkError::EmployeeNotAssignable { employee_id: employee.clone() })?;
         let revision_id: Uuid = revision.try_get("active_revision_id")?;
         let adapter: String = revision.try_get("adapter")?;
+        let authors: Vec<_> = self
+            .principal
+            .employee_ids
+            .iter()
+            .map(EmployeeId::as_str)
+            .collect();
+        // This exact reference is committed with the human request. A retry or
+        // model change cannot silently replace it with a newer deliverable.
+        let reference_artifact: Option<Uuid> = sqlx::query_scalar(
+            "SELECT a.id FROM artifacts a JOIN work_attachments attachment
+                ON attachment.company_id=a.company_id AND attachment.work_item_id=a.work_item_id AND attachment.artifact_id=a.id
+             WHERE a.company_id=$1 AND a.work_item_id=$2 AND a.project_id=$3 AND a.employee_id=ANY($4)
+             ORDER BY a.created_at DESC,a.id DESC LIMIT 1",
+        ).bind(self.scope.company_id()).bind(id).bind(project.record.project.id).bind(authors)
+            .fetch_optional(&mut *tx).await?;
         let mut item = aggregate.item;
         let definition = item.execution_input()?;
         let definition_hash = Sha256::digest(&definition).to_vec();
@@ -139,11 +154,11 @@ impl AuthorizedWork {
             .bind(adapter).bind(witness.generation()).bind(witness.valid_before()).bind(Uuid::new_v4())
             .execute(&mut *tx).await?;
         sqlx::query("INSERT INTO work_executions(company_id,run_id,project_id,work_item_id,employee_id,employee_revision_id,
-            requested_by,operation_id,requested_version,execution_version,definition_bytes,definition_hash)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)")
+            requested_by,operation_id,requested_version,execution_version,definition_bytes,definition_hash,context_version,reference_artifact_id,requested_at)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,1,$13,clock_timestamp())")
             .bind(self.scope.company_id()).bind(run_id).bind(item.project_id).bind(id).bind(employee.as_str())
             .bind(revision_id).bind(&self.principal.public_key).bind(op).bind(version).bind(item.version)
-            .bind(definition).bind(definition_hash).execute(&mut *tx).await?;
+            .bind(definition).bind(definition_hash).bind(reference_artifact).execute(&mut *tx).await?;
         sqlx::query(
             "INSERT INTO run_events(company_id,run_id,sequence,event_type,occurred_at,payload)
             VALUES($1,$2,0,'run.queued',clock_timestamp(),$3)",

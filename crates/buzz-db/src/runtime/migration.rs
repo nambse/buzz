@@ -746,7 +746,7 @@ mod postgres_tests {
                 .iter()
                 .map(|migration| migration.version)
                 .collect::<Vec<_>>(),
-            (1..=79).collect::<Vec<_>>()
+            (1..=80).collect::<Vec<_>>()
         );
         assert_eq!(migrations[0].version, 1);
         assert_eq!(&*migrations[0].description, "initial schema");

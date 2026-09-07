@@ -467,3 +467,19 @@ not establish new artifact installation or real-provider acceptance. Private
 observation/compare evidence lives under `conversation-upstream*-20260907.json`
 in `/private/tmp/ortak-v0-evidence` (compare SHA256
 `2195013446ac0f680ae72fa307aaa8dbe4a3d342c4fe13439c2bdb14a7fd6d66`).
+
+### Work reference context checkpoint, 2026-09-07 02:34 UTC
+
+Official Hermes metadata was checked before the Work context image build.
+Observed main is [`693641aa8b4359c602283bdbbc14041e03bc47bc`](https://github.com/NousResearch/hermes-agent/commit/693641aa8b4359c602283bdbbc14041e03bc47bc);
+the latest published release remains[v2026.8.31](https://github.com/NousResearch/hermes-agent/releases/tag/v2026.8.31).
+The head's metadata describes removal of an invalid tool-result name field for
+strict Chat Completions providers. This was a metadata/release checkpoint, not a
+review of the entire intervening delta. Defer that delta for this tool-less
+Codex integration and retain reviewed revision29112bef099274229cadff79cdff7bf7b99c4b77.
+No upstream revision was imported or deployed. Its archive was retrieved again
+from the exact official codeload revision and all23 locally pinned file hashes
+verified; archive SHA-256 is76b99a8be9b77d66833c3cfe2b35c6d6f6a58e4ff9637ef8effcfc1f420ab35a.
+Persistent metadata receipt: `evidence/upstream-work-context80.json` in the fresh
+private state directory. Work80 worker/controller build and deployment receipts
+are separate; an observed head does not select it for the runtime.

@@ -56,6 +56,7 @@ pub mod runtime;
 pub mod scorer;
 pub mod semantic;
 pub mod service;
+pub mod work_context;
 pub mod workspace;
 
 pub use error::{ControlError, Result};

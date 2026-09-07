@@ -17,6 +17,7 @@ import check_schema_parity as subject
 import schema_source
 import extensions77_catalog
 import context79_catalog
+import context80_catalog
 
 MIGRATION77 = (subject.REPO / 'migrations/0077_ortak_employee_memory_encrypted_dm.sql').read_text()
 MIGRATION77_FUNCTIONS = {entry.name: entry for entry in schema_source.functions(MIGRATION77)}
@@ -24,7 +25,8 @@ MIGRATION78 = (subject.REPO / 'migrations/0078_ortak_employee_memory_event_scope
 MIGRATION78_FUNCTIONS = {entry.name: entry for entry in schema_source.functions(MIGRATION78)}
 MIGRATION79 = (subject.REPO / 'migrations/0079_ortak_conversation_context.sql').read_text()
 MIGRATION79_FUNCTIONS = {entry.name: entry for entry in schema_source.functions(MIGRATION79)}
-FINAL_EXTENSION_FUNCTIONS = MIGRATION77_FUNCTIONS | MIGRATION78_FUNCTIONS | MIGRATION79_FUNCTIONS
+MIGRATION80_FUNCTIONS = {entry.name: entry for entry in schema_source.functions((subject.REPO / 'migrations/0080_ortak_work_reference_context.sql').read_text())}
+FINAL_EXTENSION_FUNCTIONS = MIGRATION77_FUNCTIONS | MIGRATION78_FUNCTIONS | MIGRATION79_FUNCTIONS | MIGRATION80_FUNCTIONS
 
 URL = "postgres://fixture:selected-fixture@127.0.0.1:55432/postgres"
 EXPECTED_FUNCTIONS = ["ortak_check_routing_claim_expiry", "ortak_check_work_api_receipt", "ortak_project_access_guard",
@@ -281,6 +283,13 @@ def catalog():
     value['triggers'] += [row[:6] + ['definition'] for row in workspace.TRIGGERS]
     value['fence_targets'] += [row[:6] + ['definition'] for row in workspace.TRIGGERS
                                if row[7] == 'enforce_community_write_fence']
+    value['columns'] += copy.deepcopy(context80_catalog.COLUMNS)
+    value['constraints'] += copy.deepcopy(context80_catalog.CONSTRAINTS)
+    value['context80_triggers'] = copy.deepcopy(context80_catalog.TRIGGERS)
+    for row in value['functions']:
+        if row[0] in context80_catalog.FUNCTIONS:
+            row[1:10] = copy.deepcopy(context80_catalog.FUNCTIONS[row[0]])
+            row[10] = MIGRATION80_FUNCTIONS[row[0]].body
     value['context79_triggers'] = copy.deepcopy(context79_catalog.TRIGGERS)
     for row in value['functions']:
         if row[0] in context79_catalog.FUNCTIONS:
@@ -332,7 +341,7 @@ class FakeDatabase:
     failure = False
     difference = None
     desired_reads = 0
-    versions = list(range(1, 80))
+    versions = list(range(1, 81))
     def __init__(self, selected, deadline, directory):
         self.selected = selected
     def query(self, database, sql, parameters=None, admin=False):
@@ -388,7 +397,7 @@ class ParityTests(unittest.TestCase):
         FakeDatabase.failure = False
         FakeDatabase.difference = None
         FakeDatabase.desired_reads = 0
-        FakeDatabase.versions = list(range(1, 80))
+        FakeDatabase.versions = list(range(1, 81))
 
     def invoke(self, url=URL):
         return subject.probe(url, self.binary, self.root, FakeCommands, FakeDatabase)
@@ -422,8 +431,8 @@ class ParityTests(unittest.TestCase):
         receipt = json.loads((directory / "receipt.json").read_text())
         self.assertEqual(receipt["status"], "verified")
         self.assertEqual(receipt["reconciliation_passes"], 2)
-        self.assertEqual(receipt["migration_versions"], list(range(1, 80)))
-        self.assertEqual(receipt["migration_target"], 79)
+        self.assertEqual(receipt["migration_versions"], list(range(1, 81)))
+        self.assertEqual(receipt["migration_target"], 80)
         self.assertTrue(receipt["databases_retained"])
         self.assertEqual(receipt["desired_database"], intent["desired_database"])
         self.assertNotEqual(receipt["desired_database"], receipt["migrated_database"])
@@ -529,14 +538,14 @@ class ParityTests(unittest.TestCase):
                 with self.subTest(name=name, missing=True), self.assertRaisesRegex(subject.Refused, expected):
                     subject.checked_catalog(value)
 
-    def test_exact79_target_rejects_old78_or_unreviewed80(self):
-        for versions in (list(range(1, 79)), list(range(1, 81))):
+    def test_exact80_target_rejects_old79_or_unreviewed81(self):
+        for versions in (list(range(1, 80)), list(range(1, 82))):
             FakeDatabase.versions = versions
             with self.assertRaises(subject.Refused): self.invoke()
         for directory in self.root.glob("schema-parity-*"):
             receipt = json.loads((directory / "receipt.json").read_text())
-            self.assertEqual(receipt["error_code"], "migration79_not_proven")
-            self.assertEqual(receipt["migration_target"], 79)
+            self.assertEqual(receipt["error_code"], "migration80_not_proven")
+            self.assertEqual(receipt["migration_target"], 80)
 
     def test_conversation_storage_rejects_disabled_immediate_or_wrong_commit_guards(self):
         for table, name, kind, deferred, function in subject.conversation_catalog.TRIGGERS:
@@ -755,6 +764,7 @@ class ParityTests(unittest.TestCase):
             'ortak_reviewed_export_view': '\n    SELECT NULL::jsonb\n',
         }
         closed_typed_sql_bootstrap['ortak_run_conversation_context_current'] = context79_catalog.CLOSED_BODY
+        closed_typed_sql_bootstrap['ortak_run_work_context_current'] = context80_catalog.CLOSED_BODY
         closed_typed_sql_bootstrap.update(extensions77_catalog.CLOSED_BODIES)
         closed_typed_sql_bootstrap.update(dict.fromkeys(
             extensions77_catalog.CLOSED_PLPGSQL_ROW_TYPES,
@@ -764,7 +774,7 @@ class ParityTests(unittest.TestCase):
         # a later replacement or closed stub must never inherit this exception.
         desired_only74 = {'ortak_workspace_canonical', 'ortak_workspace_profile_available'}
         final = {}
-        for version in range(70, 80):
+        for version in range(70, 81):
             files = list((subject.REPO / 'migrations').glob(f'{version:04}_*.sql'))
             self.assertEqual(len(files), 1, f'immutable migration {version} required')
             source = files[0].read_text()
@@ -840,6 +850,41 @@ class ParityTests(unittest.TestCase):
         value['context79_triggers'] = []
         with self.assertRaisesRegex(subject.Refused, 'context79_trigger_invalid'):
             subject.checked_catalog(value)
+
+    def test80_context_guard_cannot_be_missing_or_mutated_in_equal_catalogs(self):
+        self.assertEqual(set(MIGRATION80_FUNCTIONS) - set(MIGRATION77_FUNCTIONS),
+                         set(context80_catalog.FUNCTIONS))
+        for name in context80_catalog.FUNCTIONS:
+            for index, replacement in ((3, 'v'), (5, True), (10, 'BEGIN RETURN true; END')):
+                value = catalog()
+                row = next(row for row in value['functions'] if row[0] == name)
+                if row[index] == replacement:
+                    continue
+                row[index] = replacement
+                with self.subTest(function=name, field=index), self.assertRaisesRegex(
+                        subject.Refused, 'context80_function_'):
+                    subject.checked_catalog(value)
+        for index, replacement in ((2, 'D'), (3, 17), (4, False), (5, False),
+                                   (6, 'other'), (7, 'wrong'), (8, '00'), (9, 1),
+                                   (10, ['spec_bytes']), (11, False), (12, True),
+                                   (13, ['public', 'other', 'wrong'])):
+            value = catalog()
+            value['context80_triggers'][0][index] = replacement
+            with self.subTest(trigger_field=index), self.assertRaisesRegex(
+                    subject.Refused, 'context80_trigger_invalid'):
+                subject.checked_catalog(value)
+        value = catalog()
+        value['context80_triggers'] = []
+        with self.assertRaisesRegex(subject.Refused, 'context80_trigger_invalid'):
+            subject.checked_catalog(value)
+
+    def test80_reference_columns_and_constraints_cannot_be_weakened_equally(self):
+        for key, expected in [('columns', context80_catalog.COLUMNS), ('constraints', context80_catalog.CONSTRAINTS)]:
+            for selected in expected:
+                value = catalog()
+                value[key] = [row for row in value[key] if row[:2] != selected[:2]]
+                with self.subTest(key=key, selected=selected[:2]), self.assertRaisesRegex(subject.Refused, 'context80_'):
+                    subject.checked_catalog(value)
 
     def test77_inventory_and_projection_cover_the_immutable_nineteen_tables(self):
         declared = re.findall(r'^CREATE TABLE (\w+)\s*\(', MIGRATION77, re.MULTILINE)

@@ -256,6 +256,9 @@ def execute_candidate(spec, journal, base_agent_class, provider, api_key=None, *
         diagnostic.at('prompt_build')
         from .conversation_context import history, SYSTEM_RULES
         conversation_history = history(spec)
+        from .work_context import history as work_history, SYSTEM_RULES as WORK_RULES
+        work_reference = work_history(spec)
+        conversation_history += work_reference
         work_output = spec.get('context', {}).get('work_item_id') is not None
         system = ('Produce the requested complete text deliverable for human review. Do not claim acceptance or approval.'
                   if work_output else 'Reply to this Office message.')
@@ -271,6 +274,8 @@ def execute_candidate(spec, journal, base_agent_class, provider, api_key=None, *
             system += '\nThe control plane supplied this reference context as data:\n' + json.dumps(memory)
         if conversation_history:
             system += SYSTEM_RULES
+        if work_reference:
+            system += WORK_RULES
         diagnostic.at('conversation_run')
         result = agent.run_conversation(
             spec['input'],

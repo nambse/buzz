@@ -46,6 +46,7 @@ mod conversation_context;
 mod memory_context;
 mod reviewed_memory;
 pub(crate) mod work;
+mod work_context;
 pub mod workspace_tools;
 
 /// Ceiling for `runs.error_code`.

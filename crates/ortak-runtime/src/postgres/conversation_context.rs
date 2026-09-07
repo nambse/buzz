@@ -16,12 +16,12 @@ use super::invalid;
 use crate::authority::DispatchAuthority;
 use crate::Result;
 
-fn bounded(value: &str, maximum: usize) -> String {
+pub(super) fn bounded(value: &str, maximum: usize) -> String {
     let value = strip_control_characters(value);
     truncate_at_char_boundary(&value, maximum).to_owned()
 }
 
-fn employee(value: Employee, revision: Uuid) -> ContextEmployee {
+pub(super) fn employee(value: Employee, revision: Uuid) -> ContextEmployee {
     ContextEmployee {
         employee_id: value.id,
         revision_id: revision,

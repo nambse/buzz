@@ -67,7 +67,34 @@ fn render_scratch(wire: &mut Value) {
 #[ignore = "requires explicit disposable port55432 Postgres with migration72"]
 async fn reviewed_runtime_json_scratch_keeps_exact_bytes_budget_and_reviewed_guards() {
     let (x, item) = prepared(Duration::from_secs(86400)).await;
+    // Model an execution queued before80: its additive selection column is0.
+    // Keep the real signed API, request guard and memory/snapshot guards. In
+    // particular, a missing new Work envelope must not mask a memory forgery.
+    let legacy = format!("legacy_context_{}", Uuid::new_v4().simple());
+    let company = x.f.company;
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+        "CREATE FUNCTION {legacy}() RETURNS TRIGGER LANGUAGE plpgsql AS $$ BEGIN
+            IF NEW.reference_artifact_id IS NOT NULL THEN RAISE EXCEPTION 'legacy fixture cannot select an artifact'; END IF;
+            NEW.context_version=0; RETURN NEW; END $$;
+         CREATE TRIGGER {legacy} BEFORE INSERT ON work_executions FOR EACH ROW
+            WHEN(NEW.company_id='{company}'::uuid) EXECUTE FUNCTION {legacy}();"
+    ))).execute(&x.f.pool).await.unwrap();
     let (run, _) = queue(&x.f, &x.app, &item).await;
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+        "DROP TRIGGER {legacy} ON work_executions; DROP FUNCTION {legacy}();"
+    )))
+    .execute(&x.f.pool)
+    .await
+    .unwrap();
+    let mode: i16 = sqlx::query_scalar(
+        "SELECT context_version FROM work_executions WHERE company_id=$1 AND run_id=$2",
+    )
+    .bind(company)
+    .bind(run)
+    .fetch_one(&x.f.pool)
+    .await
+    .unwrap();
+    assert_eq!(mode, 0);
     let lease =
         x.f.control
             .claim_runtime_dispatches(

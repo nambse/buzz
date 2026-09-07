@@ -261,4 +261,11 @@ export interface WorkExecution {
   artifact_id: string | null;
   output_code: string | null;
   reconciled: boolean;
+  reference_context?: {
+    status: "pending" | "ready" | "unavailable";
+    artifact_id: string | null;
+    artifact_execution_version: number | null;
+    message_ids: string[];
+    history_limited: boolean;
+  } | null;
 }

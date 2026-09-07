@@ -100,6 +100,57 @@ and acceptance criteria remain separate operations. Casual chat does not
 implicitly create Work or approve a task. Implement and test this integration
 after ordinary history selection; do not call the first history patch full v0.
 
+## Work execution context implementation boundary
+
+A new Work run keeps its saved definition as the current request and receives a
+separate typed `work_context` reference field. It must not masquerade as a new
+Office message or route historical mentions. Ordinary Office context and Work
+context are mutually exclusive; confidential DM receives neither.
+
+At the authenticated execution request, while holding the existing Office →
+project → item fence, the server selects the newest materialized, attached
+artifact of this exact Work item that the requesting human may read. The exact
+artifact id is persisted with the execution and its immutable definition in the
+same transaction. If none exists, the first execution has no prior deliverable.
+Retries return that same selection; they do not switch to a newer output.
+The UI explains this selection before starting and shows its exact version in
+execution provenance. It never silently substitutes an inaccessible artifact.
+
+At first snapshot admission the server supplies the pinned receiver identity,
+currently eligible team, current authorized project/Work identifiers and the
+selected artifact's complete bounded text, id, producing run and SHA-256.
+An explicit linked source message selects only its canonical thread, including
+that source and replies received before the saved execution request time.
+A source that is itself a root still selects that thread, not unrelated recent
+channel messages. A Work item with no linked source receives no Office history.
+Source ids, authors, hashes, thread metadata, cutoff and truncation remain
+visible provenance. The requester's current channel/project contribution and
+receiver's current membership are checked before reading any text.
+
+The new reference field has a finite encoded budget. Prior artifacts are at
+most32KiB and are never silently truncated; Office references use smaller
+per-message and aggregate budgets with explicit omission flags. Employee/team
+facts reuse the ordinary public projection. An oversized mandatory source
+fails admission rather than pretending the full context was provided.
+
+A new append-only migration (after79) pins the artifact reference and extends
+fresh-authority/deferred-commit checks. Existing snapshot bytes stay valid.
+Current membership/project access, source deletion/hash, exact item/artifact
+ownership and pinned execution identity must still pass before late start and
+artifact materialization. The current shared mutation fences remain authority;
+frozen text alone is never sufficient. The bridge validates the closed wire and
+supplies all reference material in a labeled user-history envelope, with the
+saved Work definition as the final request. Runtime completion still enters
+REVIEW; acceptance and completion are human operations.
+
+Required regressions bind the real request → queue → supervisor → snapshot →
+artifact path: same-item prior output, competing threads, no-source Work,
+immutable retry after a newer source, hidden artifact/other project exclusion,
+source deletion and project/employee revocation before start and delivery,
+size/hash rejection, historical snapshot compatibility and untrusted-reference
+handling in the actual Hermes candidate seam. Native acceptance then performs
+conversation promotion, deliverable, revision and human completion.
+
 ## Validation and rollout
 
 Contract tests must reject mixed channel/trigger identity, duplicate message ids,

@@ -25,10 +25,13 @@ team roles, Bora's translation without repasting, and a shorter English revision
 A separate coffee-slogan thread was translated independently. After restarting
 the Hermes controller and central worker, Bora was updated through Employees to
 Luna/high. Returning to the first thread correctly retained and relabeled the
-three short bullets. All six accepted requests have one completed run and one
-delivered Office publication, each with one attempt. Frozen context evidence is
-in persistent `evidence/native-model-restart-and-threads.json`; no credentials
-belong in this ledger.
+three short bullets. A subsequent ambiguous revision prompted a short question
+using two actual previous wordings. Quitting and reopening the same native
+artifact retained identity/history, and the next reply changed only the selected
+bullet. All eight accepted requests have one completed run and one delivered
+Office publication, each with one attempt. Frozen context evidence is in
+persistent `evidence/native-ambiguity-and-app-reopen.json`; no credentials belong
+in this ledger.
 
 Four selected user LaunchAgents now restart native services after login; this is
 bootstrap operation, not yet the final lifecycle interface or a completed Mac
@@ -36,15 +39,70 @@ reboot acceptance. Current Hermes registry uses `config-v2.json` and
 `launch-argv-v2.json`; the stopped `-registry-v1` container is retained. See
 [the fresh setup receipt](FRESH_PRIVATE_SETUP_2026-09-07.md) for deployment limits.
 
-Full CI attempt04 passed workspace checks/unit tests, all6,652 desktop tests,
-desktop build and Tauri check, then found three ciphertext-store failures from
-macOS's symlinked temporary parent and the new native admission file missing
-from the identity-command inventory. Resolving only the app-data parent keeps
-protected child path checks; all four store regressions and the inventory check
-now pass. Earlier stale migration-version, community-fence parser and reconnect
-constant assertions were corrected against production paths. Full CI remains
-pending. Next: complete the required validation checkpoint, then implement
-server-selected Work source/artifact context and its revocation/retry gates.
+Full `just ci` passed on code checkpoint `e248e0e`: desktop6,652 tests,
+Tauri unit tests/build/checks, web build and mobile2,072 tests. The receipt is
+`evidence/ci-e248e0e.json`; later Work context changes are not covered by it.
+The separate signed API suite passed all141 ignored Postgres cases on the
+isolated `ortak_api79` database with `--test-threads=1`. The initial parallel run
+failed20 cases because each fixture's migrator takes the global schema fence;
+this was not repaired by weakening production authority. The serial rerun
+passed without API source changes. Run this destructive/migration fixture suite
+serially, in its own disposable database.
+
+`just test` also passes after `a0846b6` added typed SubscriptionHistory acquisition
+to the inherited batched huddle link query. The existing source regression and
+new exact-seam assertions pass. The named integration containers `buzz-postgres`
+(port55432) and `buzz-redis` (port56381) carry this task's disposable-integration
+label. Ignored `.env` selects only these stores; it contains a disposable test
+password, never live credentials. Separate database names isolate API fixtures
+from migration/destruction gates. Logs are under persistent `evidence`.
+
+Work reference context80 is now implemented in the production request,
+snapshot and output gates. The authenticated request atomically pins the newest
+readable attached same-item artifact and its receipt cutoff. The supervisor adds
+the pinned employee/team and exact linked thread; a recall adapter cannot supply
+its own replacement. New late-start/materialization checks cover every selected
+message and current requester/project/receiver authority. Historical mode0 bytes
+remain compatible. API/UI projection shows exact prior execution version, source
+ids/count and omission, withholding source metadata after access loss.
+
+All13 Work execution PostgreSQL tests pass; the later source-override/retry
+regression also passes. These include two competing threads, late-event exclusion,
+same-item revision entering REVIEW, no-source/other-item exclusion, identical
+frozen retry and source/project/employee revocation before start or delivery.
+Four Rust contract and seven bridge context tests pass. Desktop TypeScript and
+12 focused Work/provenance tests pass. Schema80 desired-state versus immutable
+migration parity passed on two new real PostgreSQL databases, including two
+idempotent reconciliation passes; the final receipt is
+`evidence/schema-parity-18b3b37accc44c01aa219a381a999f46/receipt.json`.
+All33 parity source/catalog mutation tests pass. None of these checks used the
+live55433 database, which remains79.
+
+The full145-case signed API run on schema80 passed143 cases; two pre80
+expectations were updated to distinguish newly enriched snapshots from historical
+mode0 records. The nine-case reviewed-memory/JSON compatibility rerun then
+passed, retaining the original byte-level scratch and forged-use checks. No
+production guard was loosened. Scoped Clippy and the full file-size gate pass.
+
+The pinned Hermes archive was fetched again into persistent `sources`, and all23
+locked source files verified. Both clean images are built: worker runtime digest
+`sha256:7d77af258ff982f7e03b11106cb089c4f5c75f05242d1e0fe5af16512b7af63d`,
+controller runtime digest
+`sha256:617cb771c8ad1184d0c699a761a18e2a13e01d9aee525a71a8becb89ec9f5c11`.
+The real installed Codex and ordinary Hermes loop checks pass without network,
+including the complete Work artifact/hash/attribution envelope and forbidden-tool
+and provider-failure boundaries. These are fixed provider-I/O fixtures, not live
+Work model acceptance. All36 bridge source files in each image match the checkout.
+`evidence/work-context80-artifact-receipt.json` records hashes, image/config
+identity distinctions, OCI export and exact installed-check logs. The original
+Docker credential helper stalled; an isolated anonymous build config resolved
+public images without changing the user's global Docker config.
+
+No new Work behavior is deployed; live schema remains79. Next: build the native
+artifacts and finish the real conversation→Work→artifact→revision→human completion
+flow, then persistent lifecycle/recovery and final artifact/source validation.
+Older recovery scripts remain restricted to their historical schema selections;
+do not label them an80 restore path or overwrite their old-stack receipts.
 
 ## Previous checkpoint — 2026-09-07, reboot and authorized fresh test setup
 

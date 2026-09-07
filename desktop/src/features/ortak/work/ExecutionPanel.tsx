@@ -5,6 +5,7 @@ import { OrtakApiError, type OrtakClient } from "../client";
 import { RunPanel } from "../RunPanel";
 import type { Employee, WorkExecution, WorkItem, WorkProject } from "../types";
 import { Field, Select, type SubmitWork } from "./fields";
+import { ExecutionContext } from "./ExecutionContext";
 
 export function ExecutionPanel({
   client,
@@ -90,6 +91,11 @@ export function ExecutionPanel({
         this item to review; acceptance criteria and approval gates still
         require a human decision.
       </p>
+      <p className="text-sm text-muted-foreground">
+        Each execution uses the saved definition and the latest deliverable of
+        this work that you can read. Linked conversation references come only
+        from its source thread, up to the time you start the execution.
+      </p>
       {canStart ? (
         <form
           aria-label="Start employee execution"
@@ -169,6 +175,7 @@ export function ExecutionPanel({
               </Select>
             )}
           </Field>
+          {execution ? <ExecutionContext execution={execution} /> : null}
           <p className="text-xs text-muted-foreground">
             The most recent 20 visible executions are shown. Work text output
             does not publish an Office reply or request a post-artifact memory

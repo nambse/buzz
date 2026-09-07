@@ -132,6 +132,10 @@ pub struct RunContext {
     /// Missing on historical snapshots; never populated by encrypted DM input.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation_context: Option<crate::conversation_context::ConversationContext>,
+    /// Same-item deliverable and explicitly linked thread, selected by Work authority.
+    /// Historical snapshots omit it; ordinary Office and confidential DM never use it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_context: Option<crate::work_context::WorkContext>,
 }
 
 /// Everything a runtime needs to start one run.
@@ -200,6 +204,23 @@ impl RunSpec {
             {
                 return Err(RuntimeError::InvalidSpec {
                     detail: Detail::new("conversation context is invalid"),
+                });
+            }
+        }
+        if let Some(context) = &self.context.work_context {
+            if self.context.work_item_id != Some(context.work_item_id)
+                || self.context.conversation_context.is_some()
+                || self.context.conversation_ref.is_some()
+                || self.context.reply_to_message_id.is_some()
+                || !context.valid_for(
+                    self.run_id,
+                    &self.employee_id,
+                    self.revision_id,
+                    context.work_item_id,
+                )
+            {
+                return Err(RuntimeError::InvalidSpec {
+                    detail: Detail::new("work context is invalid"),
                 });
             }
         }

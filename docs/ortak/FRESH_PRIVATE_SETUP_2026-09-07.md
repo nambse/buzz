@@ -39,9 +39,13 @@ Current verified facts:
   ownership and the one shared refresh lock remain unchanged.
 - Real native Office passed Ada→Bora translation without repasting, a shorter
   revision, a separate slogan thread, and a return to the first thread after
-  controller/worker restart and model change. Six runs completed; six dispatch
-  and six Office publication rows were delivered once each. Frozen input and
-  outbox evidence is `evidence/native-model-restart-and-threads.json`.
+  controller/worker restart and model change. A genuinely ambiguous revision
+  elicited a short question with two actual prior wordings. After quitting and
+  reopening the same native artifact, selecting one wording changed only the
+  requested bullet. Eight runs completed; eight dispatch and eight Office
+  publication rows were delivered once each. Frozen input and outbox evidence
+  is `evidence/native-ambiguity-and-app-reopen.json` (earlier six-run checkpoint:
+  `evidence/native-model-restart-and-threads.json`).
 
 Operational selections are under `hermes/controller`, `honcho`, and `memory`.
 Initial model receipts are `evidence/hermes-initial-probes.jsonl`. The temporary
@@ -57,8 +61,11 @@ selected Compose container name. Repository formatting, Clippy, desktop/web and
 mobile checks passed in the first fresh CI attempt. Its file-size gate required
 an explicit base because this fork has `origin/ortak/main`, not `origin/main`.
 The gate passed with `CHECK_FILE_SIZES_BASE` set to that branch's merge base.
-Attempt04 passed the desktop's6,652 tests and build, then failed three protected
-store tests and the native identity-command inventory. The macOS parent-path
-fix, retained child link rejection and inventory update pass focused tests.
-Earlier migration/reconnect assertion fixes also pass. Full CI remains pending;
-logs are in the persistent `evidence` directory.
+Full CI passed on `e248e0e` (desktop6,652 and mobile2,072 tests plus native,
+workspace and build gates). Signed API141/141 passed on a separate disposable
+DB with serial execution; concurrent fixture migrations intentionally conflict
+with schema admission. `just test` passed after the huddle query acquisition
+instrumentation fix in `a0846b6`. Later Work context source changes still need
+their own pipeline, deployment and final validation. Persistent evidence includes
+`ci-fresh-05.log`, `api-authenticated-fresh79-serial.log` and
+`just-test-fresh79-02.log`.

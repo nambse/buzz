@@ -75,6 +75,7 @@ async fn load(
             || s.conversation().is_some()
             || s.employee().is_some()
             || s.spec().context.conversation_context.is_some()
+            || s.spec().context.work_context.is_some()
     }) {
         let current: bool = sqlx::query_scalar("SELECT ortak_run_reviewed_memory_current($1,$2)")
             .bind(scope.company_id())
@@ -145,6 +146,23 @@ async fn freeze(
             super::conversation_context::select(&mut tx, scope, &fresh, run_id).await?
         {
             selected = selected.with_conversation_context(&fresh, context)?;
+        }
+    }
+    if !existing {
+        let expected = super::work_context::select(&mut tx, scope, &fresh, run_id).await?;
+        if selected
+            .spec()
+            .context
+            .work_context
+            .as_ref()
+            .is_some_and(|supplied| expected.as_ref() != Some(supplied))
+        {
+            return Ok(FreezeSnapshotOutcome::Refused(
+                DispatchRefusal::MemoryContextRejected,
+            ));
+        }
+        if let Some(context) = expected {
+            selected = selected.with_work_context(&fresh, context)?;
         }
     }
     let candidate = &selected;

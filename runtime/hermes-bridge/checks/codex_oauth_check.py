@@ -2,7 +2,7 @@
 
 This is not a live OAuth/model/provider smoke. Model metadata is an explicit fixture. It keeps real constructor, prompt building,
 Responses normalization, run_conversation, tool dispatch and bridge persistence.
-Four cases replace the two provider request methods. The fifth uses the real SDK
+Five cases replace the two provider request methods. The last uses the real SDK
 with a socket transport fixture and fixed Linux OS-header metadata. Network and
 subprocess attempts fail under the strict constructor-smoke audit guard.
 """
@@ -66,12 +66,20 @@ def main():
             if not callable(getattr(AIAgent, boundary, None)):
                 raise RuntimeError('pinned provider request boundary changed')
         journal = Journal(Path(temporary) / 'journal.sqlite')
-        for tool, long, failure in ((False, False, False), (False, True, False), (True, False, False), (False, False, True)):
+        for tool, long, failure, work in ((False, False, False, False), (False, True, False, False), (True, False, False, False), (False, False, True, False), (False, False, False, True)):
             run, company = str(uuid4()), str(uuid4())
             key = f'ortak-run:{company}:{run}'
             spec = {'run_id': run, 'employee_id': 'fixture', 'revision_id': str(uuid4()),
                     'binding': {'model': 'gpt-6-astra', 'options': {'reasoning_effort': 'max'}}, 'permissions': EMPTY_POLICY,
                     'input': 'Reply with the fixed fixture answer.', 'context': {}, 'idempotency_key': key}
+            if work:
+                context = json.loads(Path(__file__).with_name('work-context-v1.json').read_text())
+                context['snapshot_id'] = run
+                spec['employee_id'] = context['employee']['employee_id']
+                spec['revision_id'] = context['employee']['revision_id']
+                spec['input'] = 'Shorten the previous deliverable and keep the employee roles unchanged.'
+                spec['context'] = {'conversation_ref': None, 'reply_to_message_id': None,
+                                   'work_item_id': context['work_item_id'], 'memory_context': [], 'work_context': context}
             calls = []
             def fixture_request(self, *args, **kwargs):
                 if journal.lookup(key)['status'] != 'running' or calls:
@@ -83,6 +91,27 @@ def main():
                 for retry_bit in (False, True):
                     if self._recover_with_credential_pool(status_code=401, has_retried_429=retry_bit) != (False, retry_bit):
                         raise RuntimeError('worker changed the pinned credential recovery return contract')
+                if work:
+                    request = args[0]
+                    messages = request.get('messages', request.get('input'))
+                    if not isinstance(messages, list):
+                        raise RuntimeError('Work provider input is not an attributed message list')
+                    marker = 'ORTAK WORK REFERENCE CONTEXT'
+                    references = [m for m in messages if m.get('role') == 'user' and marker in str(m.get('content', ''))]
+                    if len(references) != 1:
+                        raise RuntimeError('expected one Work reference envelope')
+                    body = references[0]['content']
+                    if isinstance(body, list):
+                        body = ''.join(part.get('text', '') for part in body)
+                    payload = body.split('\n', 1)[1]
+                    actual_context, end = json.JSONDecoder().raw_decode(payload)
+                    if not payload[end:].lstrip().startswith('END ORTAK WORK REFERENCE CONTEXT.'):
+                        raise RuntimeError('Work reference envelope lost its closing boundary')
+                    if (actual_context != context
+                            or not any(spec['input'] in str(m.get('content', '')) for m in messages)):
+                        raise RuntimeError('complete prior output or attributed Work source was lost at the provider seam')
+                    if any(marker in str(m.get('content', '')) for m in messages if m.get('role') in ('assistant', 'system')):
+                        raise RuntimeError('Work reference data acquired an instruction or assistant role')
                 calls.append(True)
                 if failure:
                     import httpx
@@ -139,7 +168,7 @@ def main():
     print(json.dumps({**sdk_evidence, 'source_revision': HERMES_REVISION, 'verified_source_files': len(lock['source_files']),
                       'real_codex_constructor_and_loop': 'passed', 'wire_model': 'gpt-6-astra', 'wire_effort': 'max', 'metadata_source': 'explicit fixture', 'real_loop_tool_denial': 'passed',
                       'fixture_responses': sum(counts), 'provider_requests': 0,
-                      'long_final_answer_fixture': 'passed', 'provider_failure_recovery_fixture': 'passed',
+                      'work_reference_provider_boundary': 'passed', 'long_final_answer_fixture': 'passed', 'provider_failure_recovery_fixture': 'passed',
                       'network_calls': 0, 'scope': 'real Codex Hermes loop with model metadata and provider I/O fixtures; not OAuth health'}, sort_keys=True))
 
 if __name__ == '__main__':
